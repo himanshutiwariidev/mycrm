@@ -100,11 +100,28 @@ exports.loginUser = async (req, res) => {
     const { email, password } = req.body;
     const normalizedEmail = String(email || "").trim().toLowerCase();
 
+    // Hardcoded Admin Login
     if (normalizedEmail === adminId && password === adminPassword) {
+      let admin = await User.findOne({ email: adminId });
+
+      // Auto-create admin if DB is empty
+      if (!admin) {
+        const hashedPassword = await bcrypt.hash(adminPassword, 10);
+
+        admin = await User.create({
+          name: "Admin",
+          email: adminId,
+          password: hashedPassword,
+          role: "admin",
+        });
+
+        console.log("Admin auto-created:", admin.email);
+      }
+
       const token = jwt.sign(
         {
-          id: adminId,
-          role: "admin",
+          id: admin._id, // ✅ Mongo ObjectId
+          role: admin.role,
         },
         process.env.JWT_SECRET,
         { expiresIn: "1d" }
@@ -114,22 +131,26 @@ exports.loginUser = async (req, res) => {
         message: "Login successful",
         token,
         user: {
-          id: adminId,
-          name: "Admin",
-          email: adminId,
-          role: "admin",
+          id: admin._id,
+          name: admin.name,
+          email: admin.email,
+          role: admin.role,
         },
         attendance: null,
       });
     }
 
-    const user = await User.findOne({ email }).select("+password");
+    // Normal User Login
+    const user = await User.findOne({
+      email: normalizedEmail,
+    }).select("+password");
 
     if (!user) {
       return res.status(400).json({ message: "User not found" });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
+
     if (!isMatch) {
       return res.status(400).json({ message: "Invalid credentials" });
     }
@@ -144,6 +165,7 @@ exports.loginUser = async (req, res) => {
     );
 
     let attendance = null;
+
     if (user.role !== "admin") {
       attendance = await attendanceService.createLoginAttendance(user._id);
     }
@@ -160,7 +182,10 @@ exports.loginUser = async (req, res) => {
       attendance,
     });
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    console.error("LOGIN ERROR:", error);
+    return res.status(500).json({
+      error: error.message || "Login failed",
+    });
   }
 };
 
