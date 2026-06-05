@@ -357,7 +357,7 @@ export default function AdminDashboard() {
     const io = typeof window !== "undefined" ? window.io : null;
     let socket = null;
     if (io) {
-      socket = io("http://localhost:4050", { transports: ["websocket"] });
+      socket = io("https://crm.technicaltiwariji.com", { transports: ["websocket"] });
       socket.on("attendance:updated", fetchAttendance);
     }
     return () => {
