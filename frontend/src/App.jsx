@@ -4,7 +4,10 @@ import Login from "./pages/Login";
 import AdminDashboard from "./pages/AdminDashboard";
 import UserDashboard from "./pages/UserDashboard";
 import ClientsPage from "./pages/ClientsPage";
+import HrDashboard from "./pages/HrDashboard";
+import SalesDashboard from "./pages/SalesDashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
+
 
 function App() {
   return (
@@ -39,6 +42,25 @@ function App() {
             </ProtectedRoute>
           }
         />
+
+        <Route
+          path="/hr"
+          element={
+            <ProtectedRoute role="hr">
+              <HrDashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/sales"
+          element={
+            <ProtectedRoute role="sales">
+              <SalesDashboard />
+            </ProtectedRoute>
+          }
+        />
+
 
       </Routes>
     </BrowserRouter>

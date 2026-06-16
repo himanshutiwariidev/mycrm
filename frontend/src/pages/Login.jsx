@@ -24,7 +24,10 @@ export default function Login() {
       localStorage.setItem("userId", data.user.id);
       localStorage.setItem("userName", data.user.name);
       localStorage.setItem("userEmail", data.user.email);
-      if (data.user.role === "admin") navigate("/admin");
+      const role = data.user.role;
+      if (role === "admin") navigate("/admin");
+      else if (role === "hr") navigate("/hr");
+      else if (role === "sales") navigate("/sales");
       else navigate("/dashboard");
     } catch {
       setError("Invalid credentials. Please try again.");
@@ -337,7 +340,7 @@ export default function Login() {
               </svg>
             </div>
             <div>
-              <div className="brand-name">Brands Light Digital</div>
+              <div className="brand-name">Bharat Bizmart</div>
               <div className="brand-sub">Performance Marketing Agency</div>
             </div>
           </div>
@@ -400,7 +403,7 @@ export default function Login() {
                   <input
                     className="field-input"
                     type="email"
-                    placeholder="you@brandslightdigital.com"
+                    placeholder="you@bharatbizmart.com"
                     value={email}
                     onChange={e => setEmail(e.target.value)}
                     required
@@ -449,12 +452,12 @@ export default function Login() {
                 <div className="dot-green" />
                 All systems operational
               </div>
-              <div className="footer-copy">© 2025 BLD</div>
+              <div className="footer-copy">© 2025 BB</div>
             </div>
           </div>
         </div>
 
-        <div className="bottom-left">brandslightdigital.com · CRM v1.0</div>
+        <div className="bottom-left">bharatbizmart.com · CRM v1.0</div>
       </div>
     </>
   );

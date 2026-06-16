@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const API = axios.create({
-  baseURL: "https://crm.technicaltiwariji.com/api",
+  baseURL: "https://crm.cybertricksmedia.in/api",
 });
 
 // Attach token automatically

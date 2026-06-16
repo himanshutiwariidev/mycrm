@@ -8,6 +8,7 @@ const salaryRoutes = require("./routes/salaryRoutes");
 const taskRoutes = require("./routes/taskRoutes");
 const attendanceRoutes = require("./routes/attendanceRoutes");
 const clientRoutes = require("./routes/clientRoutes");
+const projectRoutes = require("./routes/projectRoutes");
 const authMiddleware = require("./middleware/authMiddleware");
 const { loginUser, logoutUser } = require("./controllers/userController");
 const { setSocketIO } = require("./utils/socket");
@@ -46,13 +47,14 @@ app.use("/api/salary", salaryRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/clients", clientRoutes);
+app.use("/api/projects", projectRoutes);
 
 // Alias endpoints requested for attendance workflow.
 app.post("/api/login", loginUser);
 app.post("/api/logout", authMiddleware, logoutUser);
 
 app.get("/", (req, res) => {
-  res.send("Brandslight CRM API Running");
+  res.send("Bharat Bizmart CRM API Running");
 });
 
 const PORT = process.env.PORT || 4050;

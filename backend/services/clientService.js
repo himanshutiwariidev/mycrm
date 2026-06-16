@@ -158,7 +158,7 @@ const generateProposalPdf = async ({ client, proposal }) => {
       if (logoPath) {
         doc.image(logoPath, 54, 34, { fit: [150, 72], align: "left", valign: "center" });
       } else {
-        doc.font("Helvetica-Bold").fontSize(22).fillColor(colors.white).text("Brandslight", 54, 54);
+        doc.font("Helvetica-Bold").fontSize(22).fillColor(colors.white).text("Bharat Bizmart", 54, 54);
       }
 
       doc
@@ -530,7 +530,7 @@ const sendProposalEmail = async ({ client, proposal }) => {
 const sendPaymentReminderEmail = async ({ client, reminder }) => {
   try {
     const transporter = createTransporter();
-    const fromName = process.env.SMTP_FROM_NAME || "Brandslight CRM";
+    const fromName = process.env.SMTP_FROM_NAME || "Bharat Bizmart CRM";
     const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
 
     const result = await transporter.sendMail({

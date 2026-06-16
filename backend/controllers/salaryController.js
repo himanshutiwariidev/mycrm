@@ -331,7 +331,7 @@ const generateSalarySlipPdf = ({ user, slip }) =>
         .fillColor("#64748b")
         .font("Helvetica")
         .fontSize(10)
-        .text("This is a system generated salary slip from Brandslight CRM.", 44, footerY, {
+        .text("This is a system generated salary slip from Bharat Bizmart CRM.", 44, footerY, {
           width: 507,
           align: "center",
         });
@@ -395,7 +395,7 @@ exports.paySalary = async (req, res) => {
       paidAt: new Date(),
       emailedAt: new Date(),
     };
-    const fromName = process.env.SMTP_FROM_NAME || "Brandslight CRM";
+    const fromName = process.env.SMTP_FROM_NAME || "Bharat Bizmart CRM";
     const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
     const pdfBuffer = await generateSalarySlipPdf({ user, slip: slipData });
     const safeMonth = salaryMonth.replace(/[^a-z0-9-_]/gi, "-");
