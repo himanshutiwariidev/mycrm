@@ -28,6 +28,7 @@ export default function Login() {
       if (role === "admin") navigate("/admin");
       else if (role === "hr") navigate("/hr");
       else if (role === "sales") navigate("/sales");
+      else if (role === "client") navigate("/client/dashboard");
       else navigate("/dashboard");
     } catch {
       setError("Invalid credentials. Please try again.");

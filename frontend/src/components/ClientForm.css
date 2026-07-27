@@ -60,8 +60,8 @@
 .form-group textarea:focus,
 .form-group select:focus {
   outline: none;
-  border-color: #4f46e5;
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+  border-color: #f7931e;
+  box-shadow: 0 0 0 3px rgba(247, 147, 30, 0.1);
 }
 
 .form-actions {
@@ -82,12 +82,12 @@
 }
 
 .btn-submit {
-  background-color: #4f46e5;
+  background-color: #f7931e;
   color: white;
 }
 
 .btn-submit:hover:not(:disabled) {
-  background-color: #4338ca;
+  background-color: #c2410c;
 }
 
 .btn-submit:disabled {

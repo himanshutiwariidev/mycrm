@@ -23,6 +23,15 @@ exports.getTodayAttendance = async (req, res) => {
   }
 };
 
+exports.getAttendanceDashboard = async (req, res) => {
+  try {
+    const result = await attendanceService.getAttendanceDashboard(req.query);
+    return res.json(result);
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
 exports.getAttendanceByUser = async (req, res) => {
   try {
     const requestedUserId = req.params.userId;

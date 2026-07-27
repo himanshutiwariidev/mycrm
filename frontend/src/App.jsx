@@ -1,20 +1,52 @@
 import React from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { Toaster } from "sonner";
 import Login from "./pages/Login";
 import AdminDashboard from "./pages/AdminDashboard";
 import UserDashboard from "./pages/UserDashboard";
 import ClientsPage from "./pages/ClientsPage";
+import ClientDetailPage from "./pages/ClientDetailPage";
 import HrDashboard from "./pages/HrDashboard";
 import SalesDashboard from "./pages/SalesDashboard";
+import ClientDashboard from "./pages/ClientDashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
+import ContractBuilderPage from "./features/contract-builder/pages/ContractBuilderPage";
 
 
 function App() {
   return (
     <BrowserRouter>
+      <Toaster position="top-right" richColors />
       <Routes>
 
         <Route path="/" element={<Login />} />
+
+        <Route
+          path="/clients/:clientId/contracts/new"
+          element={
+            <ProtectedRoute roles={["admin", "sales", "user"]}>
+              <ContractBuilderPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/clients/:clientId/contracts/:contractId/edit"
+          element={
+            <ProtectedRoute roles={["admin", "sales", "user"]}>
+              <ContractBuilderPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/client/dashboard"
+          element={
+            <ProtectedRoute role="client">
+              <ClientDashboard />
+            </ProtectedRoute>
+          }
+        />
 
         <Route
           path="/admin"
@@ -28,8 +60,17 @@ function App() {
         <Route
           path="/clients"
           element={
-            <ProtectedRoute role="admin">
+            <ProtectedRoute roles={["admin", "sales", "user"]}>
               <ClientsPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/clients/:clientId"
+          element={
+            <ProtectedRoute roles={["admin", "sales", "user"]}>
+              <ClientDetailPage />
             </ProtectedRoute>
           }
         />

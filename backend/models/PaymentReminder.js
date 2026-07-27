@@ -13,9 +13,9 @@ const PaymentReminderSchema = new mongoose.Schema(
       ref: "Client",
       required: true,
     },
-    proposalId: {
+    contractId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Proposal",
+      ref: "Contract",
     },
     invoiceNumber: {
       type: String,

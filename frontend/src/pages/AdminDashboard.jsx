@@ -1,7 +1,7 @@
 import React from "react";
-import { CheckCircle2, AlertCircle, LayoutDashboard, LogOut, Shield, X } from "lucide-react";
+import { CheckCircle2, AlertCircle, LogOut, Shield, X } from "lucide-react";
+import logo from "../assets/logo.png";
 import DashboardSection from "./sections/DashboardSection";
-import AttendanceSection from "./sections/AttendanceSection";
 import TasksSection from "./sections/TasksSection";
 import ClientsSection from "./sections/ClientsSection";
 import ProjectsSection from "./sections/ProjectsSection";
@@ -13,28 +13,30 @@ import CreateUserSection from "./sections/CreateUserSection";
 import DashboardModals from "./sections/DashboardModals";
 import useAdminDashboard from "./sections/useAdminDashboard";
 import { T } from "./sections/shared";
+import AttendanceSection from "./sections/AttendanceSection";
 
 export default function AdminDashboard() {
   const {
-    users, tasks, clients, projects, proposals, reminders,
+    users, tasks, clients, projects, contracts, reminders, dashboardStats, fetchDashboardStats,
     tab, setTab, toast, setToast, showPw, setShowPw,
     userForm, setUserForm, taskForm, setTaskForm, projectForm, setProjectForm, projectFormTab, setProjectFormTab, projectListTab, setProjectListTab,
     editTask, setEditTask, editTaskForm, setEditTaskForm,
     editUser, setEditUser, editUserForm, setEditUserForm, editProject, showEditPw, setShowEditPw,
     deleteTask, setDeleteTask, deleteUser, setDeleteUser, deleteProject, setDeleteProject,
     payUser, setPayUser, payingSalary, salaryForm, setSalaryForm, salaryPreview,
-    attFilters, setAttFilters, attUsers, attError, attLoading, attRows,
-    attPagination, attPage, setAttPage, selectedDayTotal, attSummary, attActiveNow,
-    setAttFilter, computeRunning, handleExport,
     handleCreateUser, handleCreateTask, handleCreateProject, handleDownloadProjectsCsv,
     openCreateProject, openEditProject, cancelProjectForm,
     openEditTask, handleUpdateTask, handleDeleteTask,
     openEditUser, handleUpdateUser, handleDeleteUser,
     openPaySalary, handlePaySalary, handleDeleteProject, handleLogout,
     done, inProg, pend, completionRate, activeProjects, ongoingProjects,
-    projectDueStats, projectAssignChartData, projectPlatformChartData, projectDueChartData,
-    statusPieData, priorityBarData, activeUsersData, activeUserIds,
-    tasksByUser, admins, regularUsers, TABS, currentLabel,
+    projectAssignChartData, projectPlatformChartData, projectDueChartData,
+    statusPieData, priorityBarData,
+    tasksByUser, admins, regularUsers, totalTaskCount, TABS, currentLabel,
+    attFilters, setAttFilter, setAttFilters, attUsers, handleExport, attError, attLoading,
+    attRows, computeRunning, attPagination, attPage, setAttPage, selectedDayTotal, attSummary, attActiveNow,
+    leaves, leaveActionId, handleLeaveDecision,
+    attDashboard, attDashboardLoading, attDashboardError, attDashboardDate, setAttDashboardDate,
   } = useAdminDashboard();
 
   const renderSection = () => {
@@ -44,6 +46,7 @@ export default function AdminDashboard() {
           <DashboardSection
             users={users}
             tasks={tasks}
+            totalTaskCount={totalTaskCount}
             projects={projects}
             activeProjects={activeProjects}
             done={done}
@@ -52,14 +55,12 @@ export default function AdminDashboard() {
             completionRate={completionRate}
             statusPieData={statusPieData}
             priorityBarData={priorityBarData}
-            activeUsersData={activeUsersData}
-            activeUserIds={activeUserIds}
             tasksByUser={tasksByUser}
             admins={admins}
             regularUsers={regularUsers}
           />
         );
-      case "attendance":
+        case "attendance":
         return (
           <AttendanceSection
             attFilters={attFilters}
@@ -77,12 +78,20 @@ export default function AdminDashboard() {
             selectedDayTotal={selectedDayTotal}
             attSummary={attSummary}
             attActiveNow={attActiveNow}
+            leaves={leaves}
+            leaveActionId={leaveActionId}
+            handleLeaveDecision={handleLeaveDecision}
+            attDashboard={attDashboard}
+            attDashboardLoading={attDashboardLoading}
+            attDashboardError={attDashboardError}
+            attDashboardDate={attDashboardDate}
+            setAttDashboardDate={setAttDashboardDate}
           />
         );
       case "tasks":
-        return <TasksSection tasks={tasks} setTab={setTab} openEditTask={openEditTask} setDeleteTask={setDeleteTask} />;
+        return <TasksSection tasks={tasks} clients={clients} setTab={setTab} openEditTask={openEditTask} setDeleteTask={setDeleteTask} />;
       case "clients":
-        return <ClientsSection clients={clients} proposals={proposals} reminders={reminders} />;
+        return <ClientsSection clients={clients} contracts={contracts} reminders={reminders} dashboardStats={dashboardStats} fetchDashboardStats={fetchDashboardStats} />;
       case "projects":
         return (
           <ProjectsSection
@@ -143,25 +152,19 @@ export default function AdminDashboard() {
         input[type=date]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .5; }
 
         .card { transition: border-color .2s, box-shadow .2s, transform .2s; }
-        .card:hover { border-color: ${T.brandMid} !important; box-shadow: 0 4px 24px rgba(79,70,229,.08) !important; transform: translateY(-1px); }
+        .card:hover { border-color: ${T.brandMid} !important; box-shadow: 0 4px 24px rgba(247, 147, 30,.08) !important; transform: translateY(-1px); }
 
         .inp { transition: border-color .18s, box-shadow .18s; }
-        .inp:focus { border-color: ${T.brand} !important; box-shadow: 0 0 0 3px rgba(79,70,229,.1) !important; outline: none; background: #fff !important; }
+        .inp:focus { border-color: ${T.brand} !important; box-shadow: 0 0 0 3px rgba(247, 147, 30,.1) !important; outline: none; background: #fff !important; }
 
-        .att-inp:focus { border-color: ${T.brand} !important; box-shadow: 0 0 0 3px rgba(79,70,229,.1) !important; outline: none; background: #fff !important; }
-        .att-row { transition: background .15s; }
-        .att-row:hover { background: ${T.brandLight} !important; }
-        .att-exp-btn { transition: filter .18s, transform .15s; cursor: pointer; border: none; font-family: inherit; }
-        .att-exp-btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
-        .att-page-btn { transition: background .15s, border-color .15s; cursor: pointer; font-family: inherit; }
-        .att-page-btn:hover:not(:disabled) { background: ${T.brandLight} !important; border-color: ${T.brandMid} !important; color: ${T.brand} !important; }
-        .att-page-btn:disabled { opacity: .4; cursor: default; }
+        .data-row { transition: background .15s; }
+        .data-row:hover { background: ${T.brandLight} !important; }
 
         .nav-btn { border: none; cursor: pointer; font-family: inherit; background: transparent; transition: all .16s; }
         .nav-btn:hover:not(.nav-active) { background: ${T.brandLight} !important; color: ${T.brand} !important; }
 
         .pri-btn { transition: filter .18s, transform .15s, box-shadow .18s; cursor: pointer; border: none; font-family: inherit; }
-        .pri-btn:hover { filter: brightness(1.07); transform: translateY(-1px); box-shadow: 0 6px 20px rgba(79,70,229,.3); }
+        .pri-btn:hover { filter: brightness(1.07); transform: translateY(-1px); box-shadow: 0 6px 20px rgba(247, 147, 30,.3); }
         .pri-btn:active { transform: translateY(0); filter: brightness(.97); }
 
         .logout-btn { transition: background .16s, color .16s; cursor: pointer; border: none; font-family: inherit; }
@@ -180,22 +183,20 @@ export default function AdminDashboard() {
         select.inp { appearance: none; }
         .recharts-cartesian-axis-tick text { font-family: 'Inter', sans-serif; font-size: 12px; fill: ${T.textMuted}; }
         .recharts-legend-item-text { font-family: 'Inter', sans-serif !important; font-size: 12px !important; color: ${T.textSecondary} !important; }
+        .recharts-wrapper:focus,
+        .recharts-wrapper *:focus,
+        .recharts-surface:focus {
+          outline: none !important;
+        }
       `}</style>
 
       <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Inter', sans-serif", color: T.textSecondary }}>
 
         {/* ── SIDEBAR ─────────────────────────────────────────────────────── */}
         <aside style={{ position: "fixed", left: 0, top: 0, bottom: 0, width: 238, background: T.sidebar, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", zIndex: 100, boxShadow: "1px 0 0 0 #e8eaf0" }}>
-          <div style={{ padding: "26px 22px 22px", borderBottom: `1px solid ${T.borderLight}` }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-              <div style={{ width: 38, height: 38, borderRadius: 11, flexShrink: 0, background: "linear-gradient(135deg, #4f46e5, #7c3aed)", display: "grid", placeItems: "center", boxShadow: "0 4px 14px rgba(79,70,229,.35)" }}>
-                <LayoutDashboard size={18} color="#fff" strokeWidth={2} />
-              </div>
-              <div>
-                <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 16, color: T.textPrimary, lineHeight: 1 }}>AdminPanel</div>
-                <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: ".1em", marginTop: 4, textTransform: "uppercase", fontWeight: 600 }}>Control Center</div>
-              </div>
-            </div>
+          <div style={{ padding: "24px 22px 22px", borderBottom: `1px solid ${T.borderLight}` }}>
+            <img src={logo} alt="Bharat Bizmart" style={{ height: 34, width: "auto", display: "block" }} />
+            <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: ".1em", marginTop: 9, textTransform: "uppercase", fontWeight: 600 }}>Control Center</div>
           </div>
           <nav style={{ flex: 1, padding: "18px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
             {["overview", "manage"].map(section => (
@@ -229,7 +230,7 @@ export default function AdminDashboard() {
               <p style={{ fontSize: 11.5, color: T.textMuted, marginTop: 3 }}>{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg, #4f46e5, #7c3aed)", display: "grid", placeItems: "center", boxShadow: "0 2px 10px rgba(79,70,229,.3)" }}>
+              <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg, #f7931e, #e8590c)", display: "grid", placeItems: "center", boxShadow: "0 2px 10px rgba(247, 147, 30,.3)" }}>
                 <Shield size={15} color="#fff" strokeWidth={2} />
               </div>
               <div>

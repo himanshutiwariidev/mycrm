@@ -5,7 +5,7 @@ import "./PaymentReminderForm.css";
 const PaymentReminderForm = ({ clientId, reminder, onSuccess, onCancel }) => {
   const [formData, setFormData] = useState({
     clientId: clientId || "",
-    proposalId: "",
+    contractId: "",
     invoiceNumber: "",
     amountDue: "",
     currency: "INR",

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { createClient, updateClient } from "../services/clientApi";
+import { createClient, updateClient, getUsersByRole } from "../services/clientApi";
+import SearchableSelect from "./SearchableSelect";
 import "./ClientForm.css";
 
 const ClientForm = ({ client, onSuccess, onCancel }) => {
@@ -8,6 +9,12 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     email: "",
     phone: "",
     companyName: "",
+    gstNo: "",
+    tanNo: "",
+    salesPerson: "",
+    leadSource: "",
+    clientType: "",
+    projectType: "service",
     address: "",
     city: "",
     state: "",
@@ -15,17 +22,42 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     zipCode: "",
     contactPerson: "",
     designation: "",
+    status: "open",
     notes: "",
+    password: "",
   });
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [salesUsers, setSalesUsers] = useState([]);
+  const [salesUsersLoading, setSalesUsersLoading] = useState(true);
 
   useEffect(() => {
     if (client) {
-      setFormData(client);
+      setFormData({
+        ...client,
+        salesPerson: client.salesPerson?._id || client.salesPerson || "",
+        password: "",
+      });
     }
   }, [client]);
+
+  useEffect(() => {
+    let isMounted = true;
+    getUsersByRole("sales")
+      .then((res) => {
+        if (isMounted) setSalesUsers(res.data || []);
+      })
+      .catch(() => {
+        if (isMounted) setSalesUsers([]);
+      })
+      .finally(() => {
+        if (isMounted) setSalesUsersLoading(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -40,11 +72,34 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     setLoading(true);
     setError("");
 
+    // leadSource/clientType are optional enum fields on the backend — an empty
+    // string isn't a valid enum value, so omit them entirely when left blank.
+    const payload = { ...formData };
+    if (!payload.leadSource) delete payload.leadSource;
+    if (!payload.clientType) delete payload.clientType;
+    if (!payload.salesPerson) delete payload.salesPerson;
+    // These are populated/relational/computed fields carried on `client` for display —
+    // never echo them back on submit, or a populated object (e.g. assignedUser:{_id,name})
+    // would get cast into its own ObjectId field and fail.
+    delete payload._id;
+    delete payload.__v;
+    delete payload.createdAt;
+    delete payload.updatedAt;
+    delete payload.hasLoginAccess;
+    delete payload.assignedUser;
+    delete payload.assignedBy;
+    delete payload.assignedDate;
+    delete payload.remarks;
+    delete payload.workProgress;
+    delete payload.totalProjects;
+    delete payload.totalAmount;
+    delete payload.onboardedAt;
+
     try {
       if (client?._id) {
-        await updateClient(client._id, formData);
+        await updateClient(client._id, payload);
       } else {
-        await createClient(formData);
+        await createClient(payload);
       }
       alert(client?._id ? "Client updated successfully" : "Client onboarded successfully");
       onSuccess();
@@ -107,6 +162,68 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
               value={formData.companyName}
               onChange={handleChange}
               placeholder="Enter company name"
+            />
+          </div>
+        </div>
+
+        <div className="form-row">
+          <div className="form-group">
+            <label>Sales Person *</label>
+            <SearchableSelect
+              options={salesUsers.map((u) => ({ value: u._id, label: u.name }))}
+              value={formData.salesPerson}
+              onChange={(value) => setFormData((prev) => ({ ...prev, salesPerson: value }))}
+              placeholder={salesUsersLoading ? "Loading sales users..." : "Select sales person"}
+              emptyLabel="No Sales User Found"
+              disabled={salesUsersLoading}
+            />
+          </div>
+          <div className="form-group">
+            <label>Lead Source</label>
+            <select name="leadSource" value={formData.leadSource} onChange={handleChange}>
+              <option value="">Select lead source</option>
+              <option value="cold call">Cold Call</option>
+              <option value="visit">Visit</option>
+              <option value="self">Self</option>
+              <option value="telecaller">Telecaller</option>
+              <option value="client reference">Client Reference</option>
+              <option value="company reference">Company Reference</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="form-row">
+          <div className="form-group">
+            <label>Client Type</label>
+            <select name="clientType" value={formData.clientType} onChange={handleChange}>
+              <option value="">Select client type</option>
+              <option value="pvt ltd">Pvt Ltd</option>
+              <option value="ltd">Ltd</option>
+              <option value="llp">LLP</option>
+              <option value="hup">HUF</option>
+              <option value="proprietor">Proprietor</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Deals In *</label>
+            <select name="projectType" value={formData.projectType} onChange={handleChange} required>
+              <option value="service">Service</option>
+              <option value="product">Product</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="form-row">
+          <div className="form-group">
+            <label>TAN No.</label>
+            <input
+              type="text"
+              name="tanNo"
+              value={formData.tanNo}
+              onChange={handleChange}
+              placeholder="Enter TAN No."
             />
           </div>
         </div>
@@ -188,6 +305,16 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
               placeholder="Enter zip code"
             />
           </div>
+          <div className="form-group">
+            <label>GST No.</label>
+            <input
+              type="text"
+              name="gstNo"
+              value={formData.gstNo}
+              onChange={handleChange}
+              placeholder="Enter Gst No."
+            />
+          </div>
         </div>
 
         <div className="form-group">
@@ -199,6 +326,23 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
             placeholder="Add any additional notes"
             rows="4"
           />
+        </div>
+
+        <div className="form-group">
+          <label>Client Login Password {client?.hasLoginAccess && "(leave blank to keep unchanged)"}</label>
+          <input
+            type="text"
+            name="password"
+            value={formData.password}
+            onChange={handleChange}
+            minLength={6}
+            placeholder={client?.hasLoginAccess ? "Set a new password to reset" : "Set a password so this client can log in and view their project"}
+          />
+          <small style={{ color: "#6b7280", fontSize: 12 }}>
+            Must be at least 6 characters. Setting a password creates a login account for this client
+            (role: client) so they can sign in on the main login page and see only their own project,
+            deliverables, and payments.
+          </small>
         </div>
 
         <div className="form-actions">

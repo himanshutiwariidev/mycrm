@@ -4,26 +4,56 @@ const router = express.Router();
 const {
   createUser,
   getAllUsers,
+  getUsersByRole,
   deleteUser,
   updateUser,
-  loginUser,
   logoutUser,
 } = require("../controllers/userController");
 
 const authMiddleware = require("../middleware/authMiddleware");
 const adminOnly = require("../middleware/adminOnly");
 const { requireRole } = require("../middleware/roleAccess");
+const { loginValidator, createUserValidator, updateUserValidator } = require("../middleware/validator");
 
-// 🔓 Public Route
-router.post("/login", loginUser);
+// ── Public: Login ─────────────────────────────────────────────────────────
+// Input-validated before the handler runs.
+// NOTE: the main login endpoint lives at POST /api/login in Server.js;
+// this duplicate at /api/users/login is kept for backward compatibility.
+const { loginUser } = require("../controllers/userController");
+router.post("/login", loginValidator, loginUser);
+
+// ── Auth: Logout ──────────────────────────────────────────────────────────
 router.post("/logout", authMiddleware, logoutUser);
 
-router.post("/register-admin", createUser);
-// 🔐 Admin Routes
-router.post("/", authMiddleware, requireRole("admin", "hr"), createUser);
-router.get("/", authMiddleware, requireRole("admin", "hr"), getAllUsers);
-router.delete("/:id", authMiddleware, requireRole("admin", "hr"), deleteUser);
-router.put("/:id", authMiddleware, requireRole("admin", "hr"), updateUser);
+// ── Admin-bootstrap route ─────────────────────────────────────────────────
+// This route previously had no authentication and allowed anyone to create
+// an account — a critical security hole.  It is now protected so only an
+// existing admin can call it.  The admin auto-creation on first login
+// (inside loginUser) removes any legitimate need for an unauthenticated
+// bootstrap path.
+router.post("/register-admin", authMiddleware, requireRole("admin"), createUser);
 
+// ── Admin / HR routes ─────────────────────────────────────────────────────
+router.post(
+  "/",
+  authMiddleware,
+  requireRole("admin", "hr"),
+  createUserValidator,
+  createUser
+);
+
+router.get("/", authMiddleware, requireRole("admin", "hr"), getAllUsers);
+
+router.get("/by-role/:role", authMiddleware, requireRole("admin"), getUsersByRole);
+
+router.delete("/:id", authMiddleware, requireRole("admin", "hr"), deleteUser);
+
+router.put(
+  "/:id",
+  authMiddleware,
+  requireRole("admin", "hr"),
+  updateUserValidator,
+  updateUser
+);
 
 module.exports = router;

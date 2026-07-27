@@ -5,7 +5,12 @@ import {
   LayoutDashboard, ClipboardList, LogOut, CheckCircle2,
   Clock, TrendingUp, Calendar, User, Shield, X,
   AlertCircle, CheckCheck, ListTodo, ChevronDown,
+  CalendarDays, XCircle, Hourglass, FileText, Send,
+  Briefcase,
 } from "lucide-react";
+import logo from "../assets/logo.png";
+import { getAllClients, getWorkProgress } from "../services/clientApi";
+import ClientTaskDetail from "../components/ClientTaskDetail";
 import {
   PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -22,9 +27,9 @@ const T = {
   textPrimary:   "#0f172a",
   textSecondary: "#64748b",
   textMuted:     "#94a3b8",
-  brand:         "#4f46e5",
-  brandLight:    "#eef2ff",
-  brandMid:      "#c7d2fe",
+  brand:         "#f7931e",
+  brandLight:    "#fff4e6",
+  brandMid:      "#fed7aa",
   inputBg:       "#f8f9fc",
   inputBorder:   "#e2e6ef",
   green:  "#16a34a",  greenBg:  "#f0fdf4",  greenBorder: "#bbf7d0",
@@ -44,6 +49,21 @@ const STATUS = {
   pending:       { label: "Pending",     color: T.slate,  bg: T.slateBg,  border: T.slateBorder,  Icon: Clock        },
 };
 
+// Maps a Client's latest Work Progress status onto the same 3-bucket model used by
+// plain Tasks (pending/in-progress/completed), so assigned client work counts toward
+// the same Total/Done/Active/Pending stats shown across the dashboard.
+const mapProgressToTaskStatus = (progressStatus) => {
+  if (progressStatus === "Completed") return "completed";
+  if (progressStatus === "In Progress") return "in-progress";
+  return "pending"; // covers Pending / On Hold / Waiting for Client / no progress yet
+};
+
+const LEAVE_STATUS = {
+  pending:  { label: "Pending",  color: T.yellow, bg: T.yellowBg, border: T.yellowBorder, Icon: Hourglass    },
+  approved: { label: "Approved", color: T.green,  bg: T.greenBg,  border: T.greenBorder,  Icon: CheckCircle2 },
+  rejected: { label: "Rejected", color: T.red,    bg: T.redBg,    border: T.redBorder,    Icon: XCircle      },
+};
+
 const PIE_COLORS = ["#16a34a", "#d97706", "#64748b"];
 const fmtCurrency = (value) =>
   new Intl.NumberFormat("en-IN", {
@@ -56,21 +76,16 @@ const fmtCurrency = (value) =>
 function KpiCard({ Icon, label, value, color, bgColor, sub }) {
   return (
     <div style={{
-      flex: "1 1 150px", borderRadius: 16, padding: "20px 22px",
-      background: T.card, border: `1px solid ${T.border}`,
-      display: "flex", alignItems: "center", gap: 16,
-      position: "relative", overflow: "hidden",
-      boxShadow: "0 1px 3px rgba(0,0,0,.04)",
+      minWidth: 0, borderRadius: 18, padding: "18px 18px 20px",
+      background: bgColor, border: "none",
+      boxShadow: "0 1px 2px rgba(0,0,0,.02)",
     }}>
-      <div style={{ position: "absolute", top: -20, right: -20, width: 80, height: 80, borderRadius: "50%", background: bgColor, pointerEvents: "none" }} />
-      <div style={{ width: 46, height: 46, borderRadius: 13, flexShrink: 0, background: bgColor, border: `1.5px solid ${color}30`, display: "grid", placeItems: "center" }}>
-        <Icon size={20} color={color} strokeWidth={1.8} />
+      <div style={{ width: 44, height: 44, borderRadius: 13, flexShrink: 0, background: `${color}26`, display: "grid", placeItems: "center", marginBottom: 14 }}>
+        <Icon size={19} color={color} strokeWidth={2} />
       </div>
-      <div>
-        <div style={{ fontSize: 28, fontWeight: 700, color: T.textPrimary, lineHeight: 1, fontFamily: "'Syne', sans-serif" }}>{value}</div>
-        <div style={{ fontSize: 11, color: T.textMuted, marginTop: 5, letterSpacing: ".09em", textTransform: "uppercase", fontWeight: 600 }}>{label}</div>
-        {sub && <div style={{ fontSize: 11, color, marginTop: 3, fontWeight: 600 }}>{sub}</div>}
-      </div>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color, marginBottom: 5, whiteSpace: "nowrap" }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, color: T.textPrimary, lineHeight: 1.1, fontFamily: "'Inter', sans-serif", whiteSpace: "nowrap" }}>{value}</div>
+      {sub && <div style={{ fontSize: 10.5, color, marginTop: 5, fontWeight: 600 }}>{sub}</div>}
     </div>
   );
 }
@@ -140,6 +155,11 @@ export default function UserDashboard() {
   const [tab, setTab]       = useState("dashboard");
   const [toast, setToast]   = useState(null);
   const [updating, setUpdating] = useState(null); // taskId being updated
+  const [leaves, setLeaves] = useState([]);
+  const [leaveForm, setLeaveForm] = useState({ fromDate: "", toDate: "", reason: "" });
+  const [submittingLeave, setSubmittingLeave] = useState(false);
+  const [assignedClients, setAssignedClients] = useState([]);
+  const [openClientTaskId, setOpenClientTaskId] = useState(null);
 
   // pull name from localStorage (set at login)
   const userName = localStorage.getItem("userName") || "User";
@@ -157,7 +177,50 @@ export default function UserDashboard() {
     catch { showToast("Failed to fetch salary slips", false); }
   };
 
-  useEffect(() => { fetchTasks(); fetchSalarySlips(); }, []);
+  const fetchLeaves = async () => {
+    try { const { data } = await API.get("/leaves/my"); setLeaves(Array.isArray(data) ? data : []); }
+    catch { showToast("Failed to fetch leave requests", false); }
+  };
+
+  // Clients assigned to this user via the admin's "Assign Task" action on the Client
+  // Detail page — the backend already scopes /clients to assignedUser === me for role "user".
+  const fetchAssignedClients = async () => {
+    try {
+      const { data } = await getAllClients();
+      const clients = data.clients || [];
+      const withStatus = await Promise.all(
+        clients.map(async (c) => {
+          try {
+            const progRes = await getWorkProgress(c._id);
+            const latest = progRes.data?.workProgress?.[0];
+            return { ...c, _taskStatus: mapProgressToTaskStatus(latest?.status) };
+          } catch {
+            return { ...c, _taskStatus: "pending" };
+          }
+        })
+      );
+      setAssignedClients(withStatus);
+    } catch {
+      setAssignedClients([]);
+    }
+  };
+
+  useEffect(() => { fetchTasks(); fetchSalarySlips(); fetchLeaves(); fetchAssignedClients(); }, []);
+
+  const handleApplyLeave = async (e) => {
+    e.preventDefault();
+    setSubmittingLeave(true);
+    try {
+      await API.post("/leaves", leaveForm);
+      showToast("Leave request submitted");
+      setLeaveForm({ fromDate: "", toDate: "", reason: "" });
+      fetchLeaves();
+    } catch (error) {
+      showToast(error?.response?.data?.message || "Failed to submit leave request", false);
+    } finally {
+      setSubmittingLeave(false);
+    }
+  };
 
   const handleStatusChange = async (taskId, newStatus) => {
     setUpdating(taskId);
@@ -188,10 +251,16 @@ await API.patch(
   };
 
   // ── derived stats ──────────────────────────────────────────────────────────
-  const total  = tasks.length;
-  const done   = tasks.filter(t => t.status === "completed").length;
-  const inProg = tasks.filter(t => t.status === "in-progress").length;
-  const pend   = tasks.filter(t => !t.status || t.status === "pending").length;
+  // "Total" spans both plain admin-created Tasks and clients assigned via the
+  // Client Detail page's "Assign Task" action — both are real work assigned to
+  // this user, so both must count toward Total/Done/Active/Pending everywhere.
+  const total  = tasks.length + assignedClients.length;
+  const done   = tasks.filter(t => t.status === "completed").length
+    + assignedClients.filter(c => c._taskStatus === "completed").length;
+  const inProg = tasks.filter(t => t.status === "in-progress").length
+    + assignedClients.filter(c => c._taskStatus === "in-progress").length;
+  const pend   = tasks.filter(t => !t.status || t.status === "pending").length
+    + assignedClients.filter(c => c._taskStatus === "pending").length;
   const completionRate = total ? Math.round((done / total) * 100) : 0;
 
   const overdue = tasks.filter(t => {
@@ -213,9 +282,10 @@ await API.patch(
   ];
 
   const TABS = [
-    { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
-    { id: "tasks",     label: "My Tasks",  Icon: ClipboardList   },
-    { id: "salary",    label: "Salary",    Icon: Shield          },
+    { id: "dashboard", label: "Dashboard",   Icon: LayoutDashboard },
+    { id: "tasks",     label: "My Tasks",    Icon: ClipboardList   },
+    { id: "leave",     label: "Apply Leave", Icon: CalendarDays    },
+    { id: "salary",    label: "Salary",      Icon: Shield          },
   ];
 
   const currentLabel = TABS.find(t => t.id === tab)?.label || "Dashboard";
@@ -231,7 +301,7 @@ await API.patch(
         .task-card { transition: border-color .2s, box-shadow .2s, transform .2s; }
         .task-card:hover {
           border-color: ${T.brandMid} !important;
-          box-shadow: 0 4px 24px rgba(79,70,229,.08) !important;
+          box-shadow: 0 4px 24px rgba(247, 147, 30,.08) !important;
           transform: translateY(-1px);
         }
 
@@ -241,7 +311,7 @@ await API.patch(
         .logout-btn { transition: background .16s, color .16s; cursor: pointer; border: none; font-family: inherit; }
         .logout-btn:hover { background: ${T.redBg} !important; color: ${T.red} !important; }
 
-        .status-select:focus { border-color: ${T.brand}; box-shadow: 0 0 0 3px rgba(79,70,229,.1); outline: none; }
+        .status-select:focus { border-color: ${T.brand}; box-shadow: 0 0 0 3px rgba(247, 147, 30,.1); outline: none; }
 
         @keyframes fadeUp  { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes cardIn  { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
@@ -264,16 +334,9 @@ await API.patch(
           boxShadow: "1px 0 0 0 #e8eaf0",
         }}>
           {/* brand */}
-          <div style={{ padding: "26px 22px 22px", borderBottom: `1px solid ${T.borderLight}` }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-              <div style={{ width: 38, height: 38, borderRadius: 11, flexShrink: 0, background: "linear-gradient(135deg, #4f46e5, #7c3aed)", display: "grid", placeItems: "center", boxShadow: "0 4px 14px rgba(79,70,229,.35)" }}>
-                <LayoutDashboard size={18} color="#fff" strokeWidth={2} />
-              </div>
-              <div>
-                <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 16, color: T.textPrimary, lineHeight: 1 }}>My Workspace</div>
-                <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: ".1em", marginTop: 4, textTransform: "uppercase", fontWeight: 600 }}>Task Portal</div>
-              </div>
-            </div>
+          <div style={{ padding: "24px 22px 22px", borderBottom: `1px solid ${T.borderLight}` }}>
+            <img src={logo} alt="Bharat Bizmart" style={{ height: 34, width: "auto", display: "block" }} />
+            <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: ".1em", marginTop: 9, textTransform: "uppercase", fontWeight: 600 }}>Task Portal</div>
           </div>
 
           {/* nav */}
@@ -320,7 +383,7 @@ await API.patch(
                   <span style={{ fontWeight: 700, color: T.green }}>{completionRate}%</span>
                 </div>
                 <div style={{ height: 6, background: T.borderLight, borderRadius: 99, overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${completionRate}%`, borderRadius: 99, background: "linear-gradient(90deg, #4f46e5, #16a34a)", transition: "width .6s cubic-bezier(.22,1,.36,1)" }} />
+                  <div style={{ height: "100%", width: `${completionRate}%`, borderRadius: 99, background: "linear-gradient(90deg, #f7931e, #16a34a)", transition: "width .6s cubic-bezier(.22,1,.36,1)" }} />
                 </div>
               </div>
             </div>
@@ -348,7 +411,7 @@ await API.patch(
 
             {/* user avatar */}
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg, #0891b2, #4f46e5)", display: "grid", placeItems: "center", boxShadow: "0 2px 10px rgba(8,145,178,.3)", fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 13, color: "#fff" }}>
+              <div style={{ width: 36, height: 36, borderRadius: "50%", background: "linear-gradient(135deg, #f7931e, #e8590c)", display: "grid", placeItems: "center", boxShadow: "0 2px 10px rgba(245,158,11,.3)", fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 13, color: "#fff" }}>
                 {userInitials}
               </div>
               <div>
@@ -365,8 +428,8 @@ await API.patch(
               <div className="fade-up">
 
                 {/* KPI row */}
-                <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 26 }}>
-                  <KpiCard Icon={ListTodo}   label="Total Tasks"  value={total}  color="#4f46e5" bgColor="#eef2ff" />
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14, marginBottom: 26 }}>
+                  <KpiCard Icon={ListTodo}   label="Total Tasks"  value={total}  color="#f7931e" bgColor="#fff4e6" />
                   <KpiCard Icon={CheckCheck} label="Completed"    value={done}   color={T.green}  bgColor={T.greenBg}  sub={`${completionRate}% rate`} />
                   <KpiCard Icon={TrendingUp} label="In Progress"  value={inProg} color={T.yellow} bgColor={T.yellowBg} />
                   <KpiCard Icon={Clock}      label="Pending"      value={pend}   color={T.slate}  bgColor={T.slateBg}  />
@@ -404,7 +467,7 @@ await API.patch(
                         <CartesianGrid strokeDasharray="3 3" stroke={T.borderLight} vertical={false} />
                         <XAxis dataKey="name" axisLine={false} tickLine={false} />
                         <YAxis allowDecimals={false} axisLine={false} tickLine={false} />
-                        <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(79,70,229,.05)" }} />
+                        <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(247, 147, 30,.05)" }} />
                         <Bar dataKey="count" name="Tasks" radius={[8, 8, 0, 0]}>
                           {priorityBarData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
                         </Bar>
@@ -474,13 +537,13 @@ await API.patch(
                   </div>
                 </div>
 
-                {tasks.length === 0 ? (
+                {tasks.length === 0 && assignedClients.length === 0 ? (
                   <div style={{ textAlign: "center", padding: "80px 0" }}>
                     <ClipboardList size={48} strokeWidth={1} color={T.textMuted} style={{ margin: "0 auto 16px", display: "block" }} />
                     <p style={{ fontFamily: "'Syne', sans-serif", fontSize: 17, color: T.textSecondary }}>No tasks assigned</p>
                     <p style={{ fontSize: 13, color: T.textMuted, marginTop: 6 }}>Check back later or contact your admin</p>
                   </div>
-                ) : (
+                ) : tasks.length === 0 ? null : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                     {tasks.map((task, i) => {
                       const sm = STATUS[task.status] || STATUS.pending;
@@ -568,6 +631,105 @@ await API.patch(
                     })}
                   </div>
                 )}
+
+                {assignedClients.length > 0 && (
+                  <div style={{ marginTop: 36 }}>
+                    <div style={{ marginBottom: 16 }}>
+                      <h2 style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 19, color: T.textPrimary }}>Assigned Client Work</h2>
+                      <p style={{ fontSize: 12.5, color: T.textMuted, marginTop: 3 }}>Clients assigned to you — view scope of work, add remarks, and update progress.</p>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                      {assignedClients.map((client) => (
+                        <div
+                          key={client._id}
+                          className="task-card card-in"
+                          onClick={() => setOpenClientTaskId(client._id)}
+                          style={{
+                            background: T.card, border: `1.5px solid ${T.border}`,
+                            borderRadius: 16, padding: "18px 22px",
+                            boxShadow: "0 1px 3px rgba(0,0,0,.04)", cursor: "pointer",
+                            display: "flex", alignItems: "center", gap: 14,
+                          }}
+                        >
+                          <Briefcase size={18} color={T.brand} strokeWidth={2} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <h3 style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14.5, color: T.textPrimary }}>{client.clientName}</h3>
+                            <p style={{ fontSize: 12, color: T.textMuted, marginTop: 2 }}>
+                              {client.companyName || client.projectName || "Client project"}
+                            </p>
+                          </div>
+                          <span style={{ fontSize: 11.5, fontWeight: 600, color: T.brand }}>View details →</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ══ APPLY LEAVE ════════════════════════════════════════════════ */}
+            {tab === "leave" && (
+              <div className="fade-up">
+                <div style={{ marginBottom: 20 }}>
+                  <h2 style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 19, color: T.textPrimary }}>Apply Leave</h2>
+                  <p style={{ fontSize: 12.5, color: T.textMuted, marginTop: 3 }}>Submit a leave request for your admin to review.</p>
+                </div>
+
+                <form onSubmit={handleApplyLeave} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: "22px", boxShadow: "0 1px 3px rgba(0,0,0,.04)", marginBottom: 26 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <label style={{ fontSize: 11.5, fontWeight: 600, color: T.textSecondary, letterSpacing: ".06em", textTransform: "uppercase" }}>From Date</label>
+                      <input type="date" required value={leaveForm.fromDate} onChange={e => setLeaveForm(p => ({ ...p, fromDate: e.target.value }))} style={{ width: "100%", boxSizing: "border-box", background: T.inputBg, border: `1.5px solid ${T.inputBorder}`, borderRadius: 10, padding: "10px 14px", color: T.textPrimary, fontSize: 13.5, outline: "none", fontFamily: "inherit" }} />
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <label style={{ fontSize: 11.5, fontWeight: 600, color: T.textSecondary, letterSpacing: ".06em", textTransform: "uppercase" }}>To Date</label>
+                      <input type="date" required value={leaveForm.toDate} onChange={e => setLeaveForm(p => ({ ...p, toDate: e.target.value }))} style={{ width: "100%", boxSizing: "border-box", background: T.inputBg, border: `1.5px solid ${T.inputBorder}`, borderRadius: 10, padding: "10px 14px", color: T.textPrimary, fontSize: 13.5, outline: "none", fontFamily: "inherit" }} />
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 18 }}>
+                    <label style={{ fontSize: 11.5, fontWeight: 600, color: T.textSecondary, letterSpacing: ".06em", textTransform: "uppercase" }}>Reason</label>
+                    <textarea required rows={3} value={leaveForm.reason} onChange={e => setLeaveForm(p => ({ ...p, reason: e.target.value }))} placeholder="Briefly explain the reason for leave" style={{ width: "100%", boxSizing: "border-box", resize: "vertical", background: T.inputBg, border: `1.5px solid ${T.inputBorder}`, borderRadius: 10, padding: "10px 14px", color: T.textPrimary, fontSize: 13.5, outline: "none", fontFamily: "inherit" }} />
+                  </div>
+                  <button type="submit" disabled={submittingLeave} style={{ display: "flex", alignItems: "center", gap: 8, background: "linear-gradient(135deg, #f7931e, #e8590c)", color: "#fff", border: "none", borderRadius: 10, padding: "11px 20px", fontSize: 13.5, fontWeight: 700, fontFamily: "'Syne', sans-serif", cursor: submittingLeave ? "not-allowed" : "pointer", opacity: submittingLeave ? .7 : 1 }}>
+                    <Send size={14} strokeWidth={2.2} /> {submittingLeave ? "Submitting…" : "Submit Request"}
+                  </button>
+                </form>
+
+                <h3 style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 15, color: T.textPrimary, marginBottom: 14 }}>Your Requests</h3>
+
+                {leaves.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "60px 0" }}>
+                    <FileText size={40} strokeWidth={1} color={T.textMuted} style={{ margin: "0 auto 14px", display: "block" }} />
+                    <p style={{ fontFamily: "'Syne', sans-serif", fontSize: 15, color: T.textSecondary }}>No leave requests yet</p>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {leaves.map((leave) => {
+                      const lm = LEAVE_STATUS[leave.status] || LEAVE_STATUS.pending;
+                      return (
+                        <div key={leave._id} className="task-card card-in" style={{ background: T.card, border: `1.5px solid ${T.border}`, borderRadius: 14, padding: "16px 20px", boxShadow: "0 1px 3px rgba(0,0,0,.04)" }}>
+                          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13.5, fontWeight: 600, color: T.textPrimary }}>
+                                <Calendar size={13} strokeWidth={1.8} color={T.textMuted} />
+                                {new Date(leave.fromDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                                {" — "}
+                                {new Date(leave.toDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                              </div>
+                              <p style={{ fontSize: 12.5, color: T.textMuted, marginTop: 6 }}>{leave.reason}</p>
+                              {leave.adminComment && (
+                                <p style={{ fontSize: 12, color: T.textSecondary, marginTop: 6, fontStyle: "italic" }}>Admin: {leave.adminComment}</p>
+                              )}
+                            </div>
+                            <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, padding: "5px 10px", borderRadius: 7, color: lm.color, background: lm.bg, border: `1px solid ${lm.border}`, flexShrink: 0 }}>
+                              <lm.Icon size={11} strokeWidth={2} />{lm.label}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
 
@@ -649,8 +811,24 @@ await API.patch(
               </div>
             )}
 
+            {/* ══ MY CLIENTS ═════════════════════════════════════════════════ */}
+            {tab === "clients" && (
+              <div className="fade-up" style={{ margin: "-30px -36px -64px" }}>
+                <ClientsPage />
+              </div>
+            )}
+
           </main>
         </div>
+
+        {/* ── ASSIGNED CLIENT TASK DETAIL ──────────────────────────────────────── */}
+        {openClientTaskId && (
+          <div className="modal-overlay" onClick={() => setOpenClientTaskId(null)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+              <ClientTaskDetail clientId={openClientTaskId} onClose={() => setOpenClientTaskId(null)} />
+            </div>
+          </div>
+        )}
 
         {/* ── TOAST ─────────────────────────────────────────────────────────── */}
         {toast && (

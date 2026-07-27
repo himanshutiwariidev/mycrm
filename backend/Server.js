@@ -1,64 +1,167 @@
 const express = require("express");
-const http = require("http");
 const cors = require("cors");
+const http = require("http");
+const path = require("path");
 const dotenv = require("dotenv");
-const connectedDB = require("./config/db");
+
+dotenv.config({ path: __dirname + "/.env" });
+
+// ── Security middleware ─────────────────────────────────────────────────────
+const helmet = require("helmet");
+const compression = require("compression");
+const cookieParser = require("cookie-parser");
+const mongoSanitize = require("express-mongo-sanitize");
+const xss = require("xss-clean");
+const hpp = require("hpp");
+const morgan = require("morgan");
+
+// ── Internal config / middleware ────────────────────────────────────────────
+const helmetConfig = require("./config/helmetConfig");
+const corsConfig = require("./config/corsConfig");
+const { loginValidator } = require("./middleware/validator");
+const errorHandler = require("./middleware/errorHandler");
+const authMiddleware = require("./middleware/authMiddleware");
+
+// ── Routes ──────────────────────────────────────────────────────────────────
 const userRoutes = require("./routes/userRoutes");
 const salaryRoutes = require("./routes/salaryRoutes");
 const taskRoutes = require("./routes/taskRoutes");
 const attendanceRoutes = require("./routes/attendanceRoutes");
 const clientRoutes = require("./routes/clientRoutes");
 const projectRoutes = require("./routes/projectRoutes");
-const authMiddleware = require("./middleware/authMiddleware");
+const leaveRoutes = require("./routes/leaveRoutes");
+
+// ── Controllers used directly on Server-level routes ───────────────────────
 const { loginUser, logoutUser } = require("./controllers/userController");
+
+// ── DB ──────────────────────────────────────────────────────────────────────
+const connectedDB = require("./config/db");
 const { setSocketIO } = require("./utils/socket");
-dotenv.config({ path: __dirname + '/.env' });
 
 connectedDB();
 
+// ── App & HTTP server ────────────────────────────────────────────────────────
 const app = express();
 const server = http.createServer(app);
+
+// ── Optional: socket.io (not currently installed; graceful degradation) ─────
 let SocketIOServer = null;
 try {
   SocketIOServer = require("socket.io").Server;
 } catch {
-  console.warn("socket.io is not installed. Real-time attendance events are disabled.");
+  console.warn("socket.io not installed — real-time features disabled.");
 }
 
 if (SocketIOServer) {
   const io = new SocketIOServer(server, {
-    cors: {
-      origin: "*",
-      methods: ["GET", "POST"],
-    },
+    cors: { origin: "*", methods: ["GET", "POST"] },
   });
-
   setSocketIO(io);
-
-  io.on("connection", (socket) => {
-    socket.emit("socket:connected", { id: socket.id });
-  });
+  io.on("connection", (socket) => socket.emit("socket:connected", { id: socket.id }));
 }
 
-app.use(cors());
-app.use(express.json());
+// ════════════════════════════════════════════════════════════════════════════
+//  SECURITY MIDDLEWARE — order matters; do not rearrange.
+// ════════════════════════════════════════════════════════════════════════════
+
+// 1. Remove X-Powered-By header (belt + suspenders alongside helmet)
+app.disable("x-powered-by");
+
+// 2. Security headers (helmet replaces / supplements several browser defaults)
+app.use(helmet(helmetConfig));
+
+// 3. CORS — only whitelisted origins from env; credentials enabled
+app.use(cors(corsConfig));
+
+// 5. Gzip / Brotli response compression — reduces bandwidth; no security risk
+app.use(compression());
+
+// 6. Parse JSON and URL-encoded bodies; hard cap at 2 MB prevents DoS via
+//    large payloads
+app.use(express.json({ limit: "2mb" }));
+app.use(express.urlencoded({ extended: true, limit: "2mb" }));
+
+// 7. Cookie parser — required for reading HttpOnly auth cookies
+app.use(cookieParser());
+
+// 7b. Express 5 compatibility patch ─────────────────────────────────────────
+// In Express 5, req.query is a read-only getter backed by the URL parser.
+// express-mongo-sanitize, xss-clean, and hpp all attempt `req.query = …`
+// which throws "Cannot set property query … which has only a getter".
+// Converting it to a writable value-property once here fixes all three.
+app.use((req, _res, next) => {
+  Object.defineProperty(req, "query", {
+    value: { ...req.query },
+    writable: true,
+    configurable: true,
+    enumerable: true,
+  });
+  next();
+});
+
+// 8. NoSQL injection protection — strips keys containing $ or . from
+//    req.body, req.params, and req.query before they reach controllers
+app.use(mongoSanitize());
+
+// 9. XSS protection — encodes HTML entities in user-supplied strings so
+//    malicious scripts cannot be stored in MongoDB and later reflected
+app.use(xss());
+
+// 10. HTTP Parameter Pollution — when a query/body key is sent multiple
+//     times, Express collapses it to an array which can confuse validators.
+//     hpp picks the last value and prevents unexpected array injection.
+app.use(hpp());
+
+// 11. Request logging
+// Production → Apache "combined" format (suitable for log aggregators).
+// Development → only log errors and non-304 responses to keep the terminal quiet.
+if (process.env.NODE_ENV === "production") {
+  app.use(morgan("combined"));
+} else {
+  // Skip successful cached responses (304) — they add noise without useful info.
+  app.use(
+    morgan("dev", {
+      skip: (req, res) => res.statusCode === 304,
+    })
+  );
+}
+
+// ── Static files (uploaded PI attachments — public, UUID filenames) ─────────
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+// ════════════════════════════════════════════════════════════════════════════
+//  API ROUTES
+// ════════════════════════════════════════════════════════════════════════════
+
 app.use("/api/users", userRoutes);
 app.use("/api/salary", salaryRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/clients", clientRoutes);
 app.use("/api/projects", projectRoutes);
+app.use("/api/leaves", leaveRoutes);
 
-// Alias endpoints requested for attendance workflow.
-app.post("/api/login", loginUser);
+// ── Shared login entry-point (rate-limited + validated) ──────────────────────
+// This route is also exposed at POST /api/users/login (inside userRoutes) for
+// backward compatibility; both point to the same handler.
+app.post("/api/login", loginValidator, loginUser);
 app.post("/api/logout", authMiddleware, logoutUser);
 
-app.get("/", (req, res) => {
-  res.send("Bharat Bizmart CRM API Running");
+// ── Health check ─────────────────────────────────────────────────────────
+app.get("/", (req, res) => res.json({ status: "ok", service: "Bharat Bizmart CRM API" }));
+
+// ── 404 handler (no matching route) ─────────────────────────────────────────
+app.use((req, res) => {
+  res.status(404).json({ message: "Resource not found." });
 });
 
-const PORT = process.env.PORT || 4050;
+// ════════════════════════════════════════════════════════════════════════════
+//  CENTRALISED ERROR HANDLER — must be last
+// ════════════════════════════════════════════════════════════════════════════
+app.use(errorHandler);
 
+// ── Start ─────────────────────────────────────────────────────────────────────
+const PORT = process.env.PORT || 4050;
 server.listen(PORT, () => {
-  console.log(`server is running on port ${PORT}`);
+  console.log(`[${process.env.NODE_ENV || "development"}] Server on port ${PORT}`);
 });

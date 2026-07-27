@@ -60,7 +60,7 @@ export default function DashboardModals({
             </div>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button type="button" onClick={() => setEditTask(null)} style={{ padding: "9px 18px", borderRadius: 9, border: `1.5px solid ${T.border}`, background: "#fff", color: T.textSecondary, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
-              <button className="pri-btn" type="submit" style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 20px", background: "linear-gradient(135deg, #4f46e5, #7c3aed)", color: "#fff", borderRadius: 9, fontSize: 13, fontWeight: 700, fontFamily: "'Syne', sans-serif" }}>
+              <button className="pri-btn" type="submit" style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 20px", background: "linear-gradient(135deg, #f7931e, #e8590c)", color: "#fff", borderRadius: 9, fontSize: 13, fontWeight: 700, fontFamily: "'Syne', sans-serif" }}>
                 <Save size={14} strokeWidth={2} /> Save Changes
               </button>
             </div>
@@ -87,7 +87,7 @@ export default function DashboardModals({
             </div>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button type="button" onClick={() => setEditUser(null)} style={{ padding: "9px 18px", borderRadius: 9, border: `1.5px solid ${T.border}`, background: "#fff", color: T.textSecondary, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
-              <button className="pri-btn" type="submit" style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 20px", background: "linear-gradient(135deg, #0891b2, #4f46e5)", color: "#fff", borderRadius: 9, fontSize: 13, fontWeight: 700, fontFamily: "'Syne', sans-serif" }}>
+              <button className="pri-btn" type="submit" style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 20px", background: "linear-gradient(135deg, #f7931e, #e8590c)", color: "#fff", borderRadius: 9, fontSize: 13, fontWeight: 700, fontFamily: "'Syne', sans-serif" }}>
                 <Save size={14} strokeWidth={2} /> Save Changes
               </button>
             </div>
@@ -112,7 +112,7 @@ export default function DashboardModals({
               <FormField label="Leaves"><div style={{ position: "relative" }}><FieldIcon icon={Calendar} /><input className="inp" style={baseInp} type="number" min="0" step="1" placeholder="0" value={salaryForm.leaves} onChange={e => setSalaryForm({ ...salaryForm, leaves: e.target.value })} /></div></FormField>
               <FormField label="PF"><div style={{ position: "relative" }}><FieldIcon icon={Briefcase} /><input className="inp" style={baseInp} type="number" min="0" step="0.01" placeholder="1800" value={salaryForm.pf} onChange={e => setSalaryForm({ ...salaryForm, pf: e.target.value })} /></div></FormField>
               <FormField label="Other Deductions"><div style={{ position: "relative" }}><FieldIcon icon={Briefcase} /><input className="inp" style={baseInp} type="number" min="0" step="0.01" placeholder="500" value={salaryForm.deductions} onChange={e => setSalaryForm({ ...salaryForm, deductions: e.target.value })} /></div></FormField>
-              <FormField label="Auto Calculated In Hand" span2><div style={{ position: "relative" }}><FieldIcon icon={Briefcase} /><input className="inp" style={{ ...baseInp, background: "#eef2ff", color: T.brand, fontWeight: 700 }} type="text" value={fmtCurrency(salaryPreview.inHand)} readOnly /></div></FormField>
+              <FormField label="Auto Calculated In Hand" span2><div style={{ position: "relative" }}><FieldIcon icon={Briefcase} /><input className="inp" style={{ ...baseInp, background: "#fff4e6", color: T.brand, fontWeight: 700 }} type="text" value={fmtCurrency(salaryPreview.inHand)} readOnly /></div></FormField>
             </div>
 
             <div style={{ marginBottom: 12, display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
@@ -135,7 +135,7 @@ export default function DashboardModals({
 
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button type="button" onClick={() => setPayUser(null)} disabled={payingSalary} style={{ padding: "9px 18px", borderRadius: 9, border: `1.5px solid ${T.border}`, background: "#fff", color: T.textSecondary, fontSize: 13, fontWeight: 600, cursor: payingSalary ? "default" : "pointer", fontFamily: "inherit", opacity: payingSalary ? 0.7 : 1 }}>Cancel</button>
-              <button className="pri-btn" type="submit" disabled={payingSalary} style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 20px", background: "linear-gradient(135deg, #0f766e, #0891b2)", color: "#fff", borderRadius: 9, fontSize: 13, fontWeight: 700, fontFamily: "'Syne', sans-serif", opacity: payingSalary ? 0.8 : 1 }}>
+              <button className="pri-btn" type="submit" disabled={payingSalary} style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 20px", background: "linear-gradient(135deg, #f7931e, #e8590c)", color: "#fff", borderRadius: 9, fontSize: 13, fontWeight: 700, fontFamily: "'Syne', sans-serif", opacity: payingSalary ? 0.8 : 1 }}>
                 <Save size={14} strokeWidth={2} /> {payingSalary ? "Sending..." : "Pay & Send Slip"}
               </button>
             </div>

@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const API = axios.create({
-  baseURL: "https://crm.cybertricksmedia.in/api",
+  baseURL: import.meta.env.VITE_API_BASE_URL || "https://crm.cybertricksmedia.in/api",
 });
 
 // Attach token automatically

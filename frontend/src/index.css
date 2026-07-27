@@ -1,1 +1,102 @@
 @import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+
+  --color-border: hsl(220 13% 91%);
+  --color-input: hsl(220 13% 91%);
+  --color-ring: hsl(24 95% 53%);
+  --color-background: hsl(0 0% 100%);
+  --color-foreground: hsl(222 47% 11%);
+
+  --color-primary: hsl(24 95% 53%);
+  --color-primary-foreground: hsl(0 0% 100%);
+
+  --color-secondary: hsl(220 14% 96%);
+  --color-secondary-foreground: hsl(222 47% 11%);
+
+  --color-muted: hsl(220 14% 96%);
+  --color-muted-foreground: hsl(220 9% 46%);
+
+  --color-accent: hsl(220 14% 96%);
+  --color-accent-foreground: hsl(222 47% 11%);
+
+  --color-destructive: hsl(0 84% 60%);
+  --color-destructive-foreground: hsl(0 0% 100%);
+
+  --color-success: hsl(142 71% 45%);
+  --color-success-foreground: hsl(0 0% 100%);
+
+  --color-warning: hsl(38 92% 50%);
+  --color-warning-foreground: hsl(0 0% 100%);
+
+  --color-card: hsl(0 0% 100%);
+  --color-card-foreground: hsl(222 47% 11%);
+
+  --color-popover: hsl(0 0% 100%);
+  --color-popover-foreground: hsl(222 47% 11%);
+
+  --radius: 0.625rem;
+}
+
+.dark {
+  --color-border: hsl(217 19% 22%);
+  --color-input: hsl(217 19% 22%);
+  --color-ring: hsl(24 95% 53%);
+  --color-background: hsl(222 47% 8%);
+  --color-foreground: hsl(210 20% 96%);
+
+  --color-primary: hsl(24 95% 53%);
+  --color-primary-foreground: hsl(0 0% 100%);
+
+  --color-secondary: hsl(217 19% 15%);
+  --color-secondary-foreground: hsl(210 20% 96%);
+
+  --color-muted: hsl(217 19% 15%);
+  --color-muted-foreground: hsl(216 12% 64%);
+
+  --color-accent: hsl(217 19% 18%);
+  --color-accent-foreground: hsl(210 20% 96%);
+
+  --color-destructive: hsl(0 72% 51%);
+  --color-destructive-foreground: hsl(0 0% 100%);
+
+  --color-success: hsl(142 65% 45%);
+  --color-success-foreground: hsl(0 0% 100%);
+
+  --color-warning: hsl(38 92% 50%);
+  --color-warning-foreground: hsl(0 0% 100%);
+
+  --color-card: hsl(222 47% 10%);
+  --color-card-foreground: hsl(210 20% 96%);
+
+  --color-popover: hsl(222 47% 10%);
+  --color-popover-foreground: hsl(210 20% 96%);
+}
+
+@keyframes accordion-down {
+  from { height: 0; }
+  to { height: var(--radix-accordion-content-height); }
+}
+
+@keyframes accordion-up {
+  from { height: var(--radix-accordion-content-height); }
+  to { height: 0; }
+}
+
+/* Number inputs app-wide: hide the native up/down spinner and stop mouse-wheel
+   scroll from silently changing the value while the field happens to be
+   focused (a frequent source of accidental amount edits). Scroll behavior is
+   blocked in JS via a document-level listener in main.jsx, since wheel can't
+   be suppressed from CSS alone. */
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

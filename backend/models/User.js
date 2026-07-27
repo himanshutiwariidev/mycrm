@@ -6,7 +6,8 @@ const UserSchema= new mongoose.Schema(
         name:{type:String,required:[true, "Name is required"],trim:true},
         email:{type:String,required:true,unique:true,lowercase:true,trim:true,match:[/^\S+@\S+\.\S+$/, "Invalid email format"]},
         password:{type:String,required:true,minlength:6,select:false},
-        role:{type:String,enum:["admin","user","hr","sales"],default:"user"},
+        role:{type:String,enum:["admin","user","hr","sales","client"],default:"user"},
+        clientId:{type:mongoose.Schema.Types.ObjectId,ref:"Client"},
         isActive:{type:Boolean,default:true},
     },{timestamps:true}
 );

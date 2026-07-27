@@ -30,7 +30,7 @@ export default function SalarySection({ users, openPaySalary }) {
             return (
               <div key={user._id} className="card card-in" style={{ background: T.card, border: `1.5px solid ${T.border}`, borderRadius: 18, padding: "22px", animationDelay: `${i * 35}ms`, boxShadow: "0 1px 3px rgba(0,0,0,.04)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 13, marginBottom: 18 }}>
-                  <div style={{ width: 48, height: 48, borderRadius: "50%", flexShrink: 0, background: "linear-gradient(135deg, #0891b2, #06b6d4)", display: "grid", placeItems: "center", fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 16, color: "#fff", boxShadow: "0 4px 14px rgba(8,145,178,.28)" }}>
+                  <div style={{ width: 48, height: 48, borderRadius: "50%", flexShrink: 0, background: "linear-gradient(135deg, #fb923c, #f59e0b)", display: "grid", placeItems: "center", fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 16, color: "#fff", boxShadow: "0 4px 14px rgba(245,158,11,.28)" }}>
                     {initials}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -39,7 +39,7 @@ export default function SalarySection({ users, openPaySalary }) {
                   </div>
                 </div>
 
-                <button className="pri-btn" onClick={() => openPaySalary(user)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px 14px", borderRadius: 11, background: "linear-gradient(135deg, #0f766e, #0891b2)", color: "#fff", fontSize: 13.5, fontWeight: 700, fontFamily: "'Syne', sans-serif" }}>
+                <button className="pri-btn" onClick={() => openPaySalary(user)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "12px 14px", borderRadius: 11, background: "linear-gradient(135deg, #f7931e, #e8590c)", color: "#fff", fontSize: 13.5, fontWeight: 700, fontFamily: "'Syne', sans-serif" }}>
                   <Briefcase size={15} strokeWidth={2} /> Pay Salary
                 </button>
               </div>

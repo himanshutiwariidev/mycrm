@@ -14,24 +14,30 @@ export const T = {
   textPrimary: "#0f172a",
   textSecondary: "#64748b",
   textMuted: "#94a3b8",
-  brand: "#4f46e5",
-  brandLight: "#eef2ff",
-  brandMid: "#c7d2fe",
+  brand: "#f7931e",
+  brandLight: "#fff4e6",
+  brandMid: "#fed7aa",
   inputBg: "#f8f9fc",
   inputBorder: "#e2e6ef",
   green: "#16a34a",
-  greenBg: "#f0fdf4",
+  greenBg: "#dcffe6",
   greenBorder: "#bbf7d0",
   yellow: "#d97706",
-  yellowBg: "#fffbeb",
+  yellowBg: "#ffcaca",
   yellowBorder: "#fde68a",
   red: "#dc2626",
   redBg: "#fef2f2",
   redBorder: "#fecaca",
-  slate: "#64748b",
-  slateBg: "#f8fafc",
+  pink: "#ff0095",
+  pinkbg: "#ffc2dc",
   slateBorder: "#e2e8f0",
   teal: "#0f766e",
+};
+
+export const kpiGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+  gap: 14,
 };
 
 export const PRIORITY = {
@@ -162,7 +168,7 @@ export const PROJECT_TYPES = {
   Product: { label: "Product", color: T.slate, bg: T.slateBg, border: T.slateBorder },
 };
 
-export const PROJECT_CHART_COLORS = ["#0f766e", "#0891b2", "#4f46e5", "#d97706", "#16a34a", "#dc2626"];
+export const PROJECT_CHART_COLORS = ["#0f766e", "#0891b2", "#f7931e", "#d97706", "#16a34a", "#dc2626"];
 
 export const fmtDateTime = (v) => {
   if (!v) return "—";
@@ -215,7 +221,10 @@ export const formatCsvDate = (value) => {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 };
 
 export const escapeCsvValue = (value) => {
@@ -225,43 +234,33 @@ export const escapeCsvValue = (value) => {
 
 export function KpiCard({ Icon, label, value, color, bgColor, sub }) {
   return (
-    <div style={{
-      flex: "1 1 150px", borderRadius: 16, padding: "20px 22px",
-      background: T.card, border: `1px solid ${T.border}`,
-      display: "flex", alignItems: "center", gap: 16,
-      position: "relative", overflow: "hidden",
-      boxShadow: "0 1px 3px rgba(0,0,0,.04)",
+    <div className="card" style={{
+      minWidth: 0, borderRadius: 18, padding: "18px 18px 20px",
+      background: bgColor, border: "none",
+      boxShadow: "0 1px 2px rgba(0,0,0,.02)",
     }}>
-      <div style={{ position: "absolute", top: -20, right: -20, width: 80, height: 80, borderRadius: "50%", background: bgColor, pointerEvents: "none" }} />
-      <div style={{ width: 46, height: 46, borderRadius: 13, flexShrink: 0, background: bgColor, border: `1.5px solid ${color}30`, display: "grid", placeItems: "center" }}>
-        <Icon size={20} color={color} strokeWidth={1.8} />
+      <div style={{ width: 44, height: 44, borderRadius: 13, flexShrink: 0, background: `${color}26`, display: "grid", placeItems: "center", marginBottom: 14 }}>
+        <Icon size={19} color={color} strokeWidth={2} />
       </div>
-      <div>
-        <div style={{ fontSize: 28, fontWeight: 700, color: T.textPrimary, lineHeight: 1, fontFamily: "'Syne', sans-serif" }}>{value}</div>
-        <div style={{ fontSize: 11, color: T.textMuted, marginTop: 5, letterSpacing: ".09em", textTransform: "uppercase", fontWeight: 600 }}>{label}</div>
-        {sub && <div style={{ fontSize: 11, color, marginTop: 3, fontWeight: 600 }}>{sub}</div>}
-      </div>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color, marginBottom: 5, whiteSpace: "nowrap" }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, color: T.textPrimary, lineHeight: 1.1, fontFamily: "'Inter', sans-serif", whiteSpace: "nowrap" }}>{value}</div>
+      {sub && <div style={{ fontSize: 10.5, color, marginTop: 5, fontWeight: 600 }}>{sub}</div>}
     </div>
   );
 }
 
 export function AttStatCard({ icon: Icon, label, value, color, bg }) {
   return (
-    <div style={{
-      flex: "1 1 150px", background: T.card, border: `1px solid ${T.border}`,
-      borderRadius: 14, padding: "18px 20px",
-      display: "flex", alignItems: "center", gap: 14,
-      boxShadow: "0 1px 3px rgba(0,0,0,.04)",
-      position: "relative", overflow: "hidden",
+    <div className="card" style={{
+      minWidth: 0, background: bg, border: "none",
+      borderRadius: 16, padding: "16px 16px 18px",
+      boxShadow: "0 1px 2px rgba(0,0,0,.02)",
     }}>
-      <div style={{ position: "absolute", top: -18, right: -18, width: 70, height: 70, borderRadius: "50%", background: bg, pointerEvents: "none" }} />
-      <div style={{ width: 42, height: 42, borderRadius: 12, flexShrink: 0, background: bg, border: `1.5px solid ${color}30`, display: "grid", placeItems: "center" }}>
-        <Icon size={18} color={color} strokeWidth={1.8} />
+      <div style={{ width: 40, height: 40, borderRadius: 12, flexShrink: 0, background: `${color}26`, display: "grid", placeItems: "center", marginBottom: 12 }}>
+        <Icon size={17} color={color} strokeWidth={2} />
       </div>
-      <div>
-        <div style={{ fontSize: 24, fontWeight: 700, color: T.textPrimary, lineHeight: 1, fontFamily: "'Syne', sans-serif" }}>{value}</div>
-        <div style={{ fontSize: 10.5, color: T.textMuted, marginTop: 4, letterSpacing: ".09em", textTransform: "uppercase", fontWeight: 600 }}>{label}</div>
-      </div>
+      <div style={{ fontSize: 11.5, fontWeight: 600, color, marginBottom: 4, whiteSpace: "nowrap" }}>{label}</div>
+      <div style={{ fontSize: 18, fontWeight: 700, color: T.textPrimary, lineHeight: 1.1, fontFamily: "'Inter', sans-serif", whiteSpace: "nowrap" }}>{value}</div>
     </div>
   );
 }

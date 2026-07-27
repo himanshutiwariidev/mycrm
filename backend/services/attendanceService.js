@@ -2,11 +2,40 @@ const crypto = require("crypto");
 const mongoose = require("mongoose");
 const Attendance = require("../models/Attendance");
 const User = require("../models/User");
+const Leave = require("../models/Leave");
 const { emitAttendanceEvent } = require("../utils/socket");
+
+// Below this many minutes worked in a day, a present employee is counted as "Half Day".
+const HALF_DAY_THRESHOLD_MINUTES = 240;
+// "Employees" tracked on the attendance dashboard are regular staff (role "user") only —
+// admins, HR, sales, and clients are excluded from headcount/present/absent/leave counts.
+const EMPLOYEE_ROLES = ["user"];
 
 const ATTENDANCE_STATUS = {
   ACTIVE: "Active",
   OFFLINE: "Offline",
+};
+
+// Login tokens expire after 1 day, so a session left "Active" longer than that
+// was never properly logged out (closed tab, crashed browser, etc).
+const STALE_SESSION_MS = 24 * 60 * 60 * 1000;
+
+const closeStaleActiveSessions = async () => {
+  const staleCutoff = new Date(Date.now() - STALE_SESSION_MS);
+  const staleSessions = await Attendance.find({
+    status: ATTENDANCE_STATUS.ACTIVE,
+    loginTime: { $lte: staleCutoff },
+  });
+
+  await Promise.all(
+    staleSessions.map((session) => {
+      const logoutTime = new Date(session.loginTime.getTime() + STALE_SESSION_MS);
+      session.logoutTime = logoutTime;
+      session.status = ATTENDANCE_STATUS.OFFLINE;
+      computeSessionTotal(session, logoutTime);
+      return session.save();
+    })
+  );
 };
 
 const formatServerDate = (date = new Date()) => {
@@ -90,9 +119,15 @@ const toObjectId = (value) => {
   return null;
 };
 
-const getAdminIds = async () => {
-  const admins = await User.find({ role: "admin" }).select("_id");
-  return admins.map((item) => item._id);
+// Attendance list/export/"All Users" filter should only ever surface real staff —
+// admins are excluded (already established), and client-portal logins (role
+// "client") are excluded too, since a client signing into their project portal
+// is not an employee clocking in/out.
+const NON_EMPLOYEE_ROLES = ["admin", "client"];
+
+const getNonEmployeeIds = async () => {
+  const nonEmployees = await User.find({ role: { $in: NON_EMPLOYEE_ROLES } }).select("_id");
+  return nonEmployees.map((item) => item._id);
 };
 
 const closePreviousActiveSession = async (userId, closeTime) => {
@@ -245,17 +280,19 @@ const buildDaySplitTotals = (rows, rangeStart, rangeEnd, now = new Date()) => {
 };
 
 const getAttendanceList = async (filters = {}) => {
+  await closeStaleActiveSessions();
+
   const page = Math.max(1, Number(filters.page) || 1);
   const limit = Math.min(100, Math.max(1, Number(filters.limit) || 10));
   const now = new Date();
 
-  const adminIds = await getAdminIds();
+  const excludedRoleIds = await getNonEmployeeIds();
   const baseQuery = buildQuery({
     userId: filters.userId,
     status: filters.status,
     fromDate: filters.fromDate,
     toDate: filters.toDate,
-    excludeUserIds: adminIds,
+    excludeUserIds: excludedRoleIds,
   });
 
   let query = { ...baseQuery };
@@ -282,7 +319,7 @@ const getAttendanceList = async (filters = {}) => {
 
   let rows = rowsRaw
     .map(normalizeRow)
-    .filter((item) => item.userId && item.userId.role !== "admin");
+    .filter((item) => item.userId && !NON_EMPLOYEE_ROLES.includes(item.userId.role));
 
   if (filters.date) {
     const selectedDate = dateFromYmd(filters.date);
@@ -323,7 +360,7 @@ const getAttendanceList = async (filters = {}) => {
     ...buildQuery({
       userId: filters.userId,
       status: filters.status,
-      excludeUserIds: adminIds,
+      excludeUserIds: excludedRoleIds,
     }),
     loginTime: { $lte: monthEnd },
     $or: [{ logoutTime: { $gte: monthStart } }, { status: ATTENDANCE_STATUS.ACTIVE }],
@@ -352,7 +389,7 @@ const getAttendanceList = async (filters = {}) => {
     ...buildQuery({
       userId: filters.userId,
       status: filters.status,
-      excludeUserIds: adminIds,
+      excludeUserIds: excludedRoleIds,
     }),
     loginTime: { $lte: overallDayEnd },
     $or: [{ logoutTime: { $gte: overallDayStart } }, { status: ATTENDANCE_STATUS.ACTIVE }],
@@ -383,6 +420,194 @@ const getAttendanceList = async (filters = {}) => {
   };
 };
 
+const minutesSinceMidnight = (date) => {
+  const d = new Date(date);
+  return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
+};
+
+const formatClockTime = (totalMinutes) => {
+  if (totalMinutes == null || Number.isNaN(totalMinutes)) return "--";
+  const wrapped = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
+  const hours24 = Math.floor(wrapped / 60);
+  const minutes = wrapped % 60;
+  const period = hours24 >= 12 ? "PM" : "AM";
+  const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12;
+  return `${String(hours12).padStart(2, "0")}:${String(minutes).padStart(2, "0")} ${period}`;
+};
+
+// Present/half-day/late stats for a single day, used by the dashboard (today + trend day).
+const computeDayAttendance = async (dayStart, dayEnd, employeeIds, now) => {
+  const dayQuery = {
+    loginTime: { $lte: dayEnd },
+    $or: [{ logoutTime: { $gte: dayStart } }, { status: ATTENDANCE_STATUS.ACTIVE }],
+  };
+  const rowsRaw = await Attendance.find(dayQuery).select("userId loginTime logoutTime status isLate");
+  const rows = rowsRaw.filter((row) => employeeIds.has(String(row.userId)));
+
+  const perUserMinutes = {};
+  rows.forEach((row) => {
+    const uid = String(row.userId);
+    const mins = overlapMinutes(row.loginTime, getSessionEnd(row, now), dayStart, dayEnd);
+    perUserMinutes[uid] = (perUserMinutes[uid] || 0) + mins;
+  });
+
+  const presentUserIds = Object.keys(perUserMinutes).filter((uid) => perUserMinutes[uid] > 0);
+  const halfDayUserIds = presentUserIds.filter((uid) => perUserMinutes[uid] < HALF_DAY_THRESHOLD_MINUTES);
+  const fullDayUserIds = presentUserIds.filter((uid) => perUserMinutes[uid] >= HALF_DAY_THRESHOLD_MINUTES);
+  const lateArrivals = rows.filter((row) => row.isLate).length;
+
+  return { rows, perUserMinutes, presentUserIds, halfDayUserIds, fullDayUserIds, lateArrivals };
+};
+
+const getAttendanceDashboard = async (filters = {}) => {
+  await closeStaleActiveSessions();
+
+  const now = new Date();
+  const targetDate = filters.date ? dateFromYmd(filters.date) : now;
+  const dayStart = startOfDay(targetDate);
+  const dayEnd = endOfDay(targetDate);
+  const ymd = formatServerDate(targetDate);
+
+  const employees = await User.find({ role: { $in: EMPLOYEE_ROLES } }).select("_id name role");
+  const totalEmployees = employees.length;
+  const employeeIds = new Set(employees.map((e) => String(e._id)));
+
+  const today = await computeDayAttendance(dayStart, dayEnd, employeeIds, now);
+
+  const approvedLeaveToday = await Leave.find({
+    status: "approved",
+    fromDate: { $lte: dayEnd },
+    toDate: { $gte: dayStart },
+  }).select("userId");
+  // An approved leave for today takes precedence over a stray/incidental login —
+  // someone on leave who briefly checked something is still "on leave", not "present".
+  const onLeaveUserIds = new Set(
+    approvedLeaveToday.map((l) => String(l.userId)).filter((uid) => employeeIds.has(uid))
+  );
+
+  // "Present Today" is anyone who logged in at all today (full or half day), minus
+  // anyone on approved leave. The full/half split is still tracked separately for
+  // the "Half Day" breakdown bucket, but doesn't gate the headline present count.
+  const presentUserIds = today.presentUserIds.filter((uid) => !onLeaveUserIds.has(uid));
+  const halfDayUserIds = today.halfDayUserIds.filter((uid) => !onLeaveUserIds.has(uid));
+  const fullDayUserIds = today.fullDayUserIds.filter((uid) => !onLeaveUserIds.has(uid));
+
+  const presentCount = presentUserIds.length;
+  const halfDayCount = halfDayUserIds.length;
+  const onLeaveCount = onLeaveUserIds.size;
+  const absentCount = Math.max(0, totalEmployees - presentCount - onLeaveCount);
+  const attendanceRate = totalEmployees
+    ? Number(((presentCount / totalEmployees) * 100).toFixed(2))
+    : 0;
+
+  // yesterday's rate, just for the "vs yesterday" trend indicator
+  const yesterdayStart = startOfDay(new Date(dayStart.getTime() - 24 * 60 * 60 * 1000));
+  const yesterdayEnd = endOfDay(yesterdayStart);
+  const yesterday = await computeDayAttendance(yesterdayStart, yesterdayEnd, employeeIds, now);
+  const yesterdayPresent = yesterday.fullDayUserIds.length + yesterday.halfDayUserIds.length;
+  const yesterdayRate = totalEmployees ? (yesterdayPresent / totalEmployees) * 100 : 0;
+  const attendanceTrend = Number((attendanceRate - yesterdayRate).toFixed(2));
+
+  const workingMinuteValues = today.presentUserIds.map((uid) => today.perUserMinutes[uid]);
+  const avgWorkingMinutes = workingMinuteValues.length
+    ? Math.round(workingMinuteValues.reduce((a, b) => a + b, 0) / workingMinuteValues.length)
+    : 0;
+  const maxWorkingMinutes = workingMinuteValues.length ? Math.max(...workingMinuteValues) : 0;
+  const minWorkingMinutes = workingMinuteValues.length ? Math.min(...workingMinuteValues) : 0;
+
+  const checkInTimes = today.rows.map((row) => minutesSinceMidnight(row.loginTime));
+  const checkOutTimes = today.rows
+    .filter((row) => row.logoutTime)
+    .map((row) => minutesSinceMidnight(row.logoutTime));
+
+  const avgCheckIn = checkInTimes.length ? checkInTimes.reduce((a, b) => a + b, 0) / checkInTimes.length : null;
+  const avgCheckOut = checkOutTimes.length ? checkOutTimes.reduce((a, b) => a + b, 0) / checkOutTimes.length : null;
+  const earliestCheckIn = checkInTimes.length ? Math.min(...checkInTimes) : null;
+  const latestCheckIn = checkInTimes.length ? Math.max(...checkInTimes) : null;
+
+  const roleWiseAttendance = EMPLOYEE_ROLES.map((role) => {
+    const roleEmployees = employees.filter((e) => e.role === role);
+    const roleTotal = roleEmployees.length;
+    const rolePresent = roleEmployees.filter((e) => presentUserIds.includes(String(e._id))).length;
+    return {
+      role,
+      label: role === "user" ? "Team" : role[0].toUpperCase() + role.slice(1),
+      total: roleTotal,
+      present: rolePresent,
+      percent: roleTotal ? Math.round((rolePresent / roleTotal) * 100) : 0,
+    };
+  }).filter((g) => g.total > 0);
+
+  const month = filters.month || ymd.slice(0, 7);
+  const { monthStart, monthEnd } = buildMonthRange(month);
+
+  const pendingRequests = await Leave.countDocuments({ status: "pending" });
+
+  const monthLeaves = await Leave.find({
+    fromDate: { $lte: monthEnd },
+    toDate: { $gte: monthStart },
+    status: { $in: ["approved", "rejected"] },
+  }).select("status fromDate toDate");
+
+  const approvedLeaves = monthLeaves.filter((l) => l.status === "approved").length;
+  const rejectedLeaves = monthLeaves.filter((l) => l.status === "rejected").length;
+
+  const leavesTaken = monthLeaves
+    .filter((l) => l.status === "approved")
+    .reduce((sum, l) => {
+      const start = new Date(Math.max(new Date(l.fromDate).getTime(), monthStart.getTime()));
+      const end = new Date(Math.min(new Date(l.toDate).getTime(), monthEnd.getTime()));
+      const days = Math.max(1, Math.round((startOfDay(end).getTime() - startOfDay(start).getTime()) / 86400000) + 1);
+      return sum + days;
+    }, 0);
+
+  const approvalRate = approvedLeaves + rejectedLeaves
+    ? Math.round((approvedLeaves / (approvedLeaves + rejectedLeaves)) * 100)
+    : 0;
+
+  return {
+    date: ymd,
+    totalEmployees,
+    presentToday: presentCount,
+    absentToday: absentCount,
+    onLeave: onLeaveCount,
+    halfDay: halfDayCount,
+    lateArrivals: today.lateArrivals,
+    pendingRequests,
+    attendanceRate,
+    attendanceTrend,
+    workingHours: {
+      avgMinutes: avgWorkingMinutes,
+      maxMinutes: maxWorkingMinutes,
+      minMinutes: minWorkingMinutes,
+    },
+    checkIn: {
+      avgCheckIn: formatClockTime(avgCheckIn),
+      avgCheckOut: formatClockTime(avgCheckOut),
+      earliestCheckIn: formatClockTime(earliestCheckIn),
+      latestCheckIn: formatClockTime(latestCheckIn),
+    },
+    roleWiseAttendance,
+    // Non-overlapping breakdown — "Present" here means full-day only, since
+    // "Half Day" is broken out separately (the headline presentToday above
+    // combines both, but this list should sum to totalEmployees).
+    statusBreakdown: [
+      { status: "Present", count: fullDayUserIds.length },
+      { status: "Absent", count: absentCount },
+      { status: "On Leave", count: onLeaveCount },
+      { status: "Half Day", count: halfDayCount },
+    ],
+    leaveAnalytics: {
+      month,
+      pendingRequests,
+      approvedLeaves,
+      rejectedLeaves,
+      leavesTaken,
+      approvalRate,
+    },
+  };
+};
+
 const getTodayAttendance = async (filters = {}) => {
   const today = formatServerDate(new Date());
   return getAttendanceList({ ...filters, date: today });
@@ -390,7 +615,7 @@ const getTodayAttendance = async (filters = {}) => {
 
 const getAttendanceByUser = async (userId, filters = {}) => {
   const user = await User.findById(userId).select("role");
-  if (!user || user.role === "admin") {
+  if (!user || NON_EMPLOYEE_ROLES.includes(user.role)) {
     return {
       rows: [],
       pagination: { page: 1, limit: Number(filters.limit) || 10, total: 0, totalPages: 1 },
@@ -409,7 +634,9 @@ const getAttendanceByUser = async (userId, filters = {}) => {
 };
 
 const exportAttendanceWorkbookBuffer = async (filters = {}) => {
-  const adminIds = await getAdminIds();
+  await closeStaleActiveSessions();
+
+  const excludedRoleIds = await getNonEmployeeIds();
   const now = new Date();
 
   let exportStart;
@@ -441,7 +668,7 @@ const exportAttendanceWorkbookBuffer = async (filters = {}) => {
     ...buildQuery({
       userId: filters.userId,
       status: filters.status,
-      excludeUserIds: adminIds,
+      excludeUserIds: excludedRoleIds,
     }),
     loginTime: { $lte: exportEnd },
     $or: [{ logoutTime: { $gte: exportStart } }, { status: ATTENDANCE_STATUS.ACTIVE }],
@@ -454,7 +681,7 @@ const exportAttendanceWorkbookBuffer = async (filters = {}) => {
   const dailyMap = {};
 
   rows
-    .filter((row) => row.userId && row.userId.role !== "admin")
+    .filter((row) => row.userId && !NON_EMPLOYEE_ROLES.includes(row.userId.role))
     .forEach((row) => {
       const sessionStart = new Date(row.loginTime);
       const sessionEnd = getSessionEnd(row, now);
@@ -555,5 +782,6 @@ module.exports = {
   getAttendanceList,
   getTodayAttendance,
   getAttendanceByUser,
+  getAttendanceDashboard,
   exportAttendanceWorkbookBuffer,
 };

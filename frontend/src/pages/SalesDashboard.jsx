@@ -3,6 +3,7 @@ import { LogOut } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import API from "../services/api";
 import ClientsPage from "./ClientsPage";
+import logo from "../assets/logo.png";
 
 export default function SalesDashboard() {
   const navigate = useNavigate();
@@ -11,7 +12,7 @@ export default function SalesDashboard() {
     try {
       await API.post("/users/logout");
     } catch {
-      // ignore logout errors (local session will be cleared anyway)
+      
     }
 
     localStorage.clear();
@@ -26,13 +27,16 @@ export default function SalesDashboard() {
           top: 0,
           zIndex: 50,
           display: "flex",
-          justifyContent: "flex-end",
-          padding: "14px 18px",
-          background: "rgba(255,255,255,0.85)",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "14px 24px",
+          background: "rgba(255,255,255,0.92)",
           backdropFilter: "blur(10px)",
-          borderBottom: "1px solid rgba(0,0,0,0.06)",
+          borderBottom: "1px solid #e8eaf0",
+          boxShadow: "0 1px 0 0 #e8eaf0",
         }}
       >
+        <img src={logo} alt="Bharat Bizmart" style={{ height: 30, width: "auto", display: "block" }} />
         <button
           onClick={handleLogout}
           style={{

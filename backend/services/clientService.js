@@ -43,11 +43,17 @@ const formatAmount = (value) =>
     maximumFractionDigits: 2,
   }).format(Number(value) || 0);
 
-const buildProposalNumber = () => `PROP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+// PDFKit's standard Helvetica font has no ₹ glyph (renders as a broken superscript),
+// so PDF-rendered amounts use a plain "Rs." prefix instead — the existing contract
+// PDF avoids this the same way by labelling currency separately.
+const formatCurrencyForPdf = (value, currency = "INR") =>
+  currency && currency !== "INR" ? `${currency} ${formatAmount(value)}` : `Rs. ${formatAmount(value)}`;
+
+const buildContractNumber = () => `CONTRACT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
 const buildReminderNumber = () => `REMIND-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-const proposalAsset = (fileName) => {
+const contractAsset = (fileName) => {
   const assetPath = path.join(__dirname, "../../frontend/src/assets", fileName);
   return fs.existsSync(assetPath) ? assetPath : null;
 };
@@ -87,12 +93,152 @@ const drawInfoRow = (doc, label, value, x, y, width) => {
     .text(textOrFallback(value), x, y + 12, { width, lineGap: 1 });
 };
 
-const generateProposalPdf = async ({ client, proposal }) => {
+const buildInvoiceNumber = (contract) => `INV-${contract.contractNumber || contract._id}`;
+
+// Self-contained invoice generator — deliberately NOT sharing closures with
+// generateContractPdf below (that function's draw* helpers are tuned/fragile from
+// many rounds of visual fixes; duplicating the branding constants here is safer
+// than risking a regression in the contract PDF via a shared refactor).
+const generateInvoicePdf = async ({ client, contract }) => {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: "A4", margin: 0 });
     const buffers = [];
-    const logoPath = proposalAsset("logo.png");
-    const signPath = proposalAsset("sign.png");
+    const logoPath = contractAsset("logo.png");
+    const page = { width: 595.28, height: 841.89 };
+    const colors = {
+      black: "#061216",
+      orange: "#f59e0b",
+      orangeDark: "#c2410c",
+      orangeSoft: "#fff7ed",
+      text: "#111827",
+      muted: "#6b7280",
+      line: "#f3d3a4",
+      white: "#ffffff",
+    };
+    const contentX = 52;
+    const contentWidth = page.width - 104;
+
+    doc.on("data", (chunk) => buffers.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(buffers)));
+    doc.on("error", reject);
+
+    const today = new Date().toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" });
+    const drawCard = (x, y, width, height, fill = colors.white) => {
+      doc.roundedRect(x, y, width, height, 9).fillAndStroke(fill, "#f2d7af");
+    };
+
+    // ── background + header ──
+    doc.rect(0, 0, page.width, page.height).fill("#fbfbfa");
+    doc.rect(0, 0, page.width, 6).fill(colors.orange);
+
+    const logoY = 36;
+    const logoHeight = 44;
+    if (logoPath) {
+      doc.image(logoPath, contentX, logoY, { fit: [260, logoHeight], align: "left", valign: "center" });
+    } else {
+      doc.font("Helvetica-Bold").fontSize(20).fillColor(colors.black).text("Bharat Bizmart", contentX, logoY + 12);
+    }
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(28)
+      .fillColor(colors.orangeDark)
+      .text("INVOICE", contentX, logoY + 4, { width: contentWidth, align: "right" });
+    doc
+      .font("Helvetica")
+      .fontSize(10)
+      .fillColor(colors.muted)
+      .text(buildInvoiceNumber(contract), contentX, logoY + 36, { width: contentWidth, align: "right" })
+      .text(`Date: ${today}`, contentX, logoY + 50, { width: contentWidth, align: "right" });
+
+    doc
+      .moveTo(contentX, logoY + logoHeight + 22)
+      .lineTo(contentX + contentWidth, logoY + logoHeight + 22)
+      .lineWidth(0.75)
+      .strokeColor(colors.line)
+      .stroke();
+
+    doc.y = logoY + logoHeight + 40;
+
+    // ── bill to ──
+    const billY = doc.y;
+    drawCard(contentX, billY, contentWidth, 92, colors.orangeSoft);
+    drawInfoRow(doc, "Billed To", client.clientName, contentX + 20, billY + 16, contentWidth - 40);
+    drawInfoRow(doc, "Company", textOrFallback(client.companyName), contentX + 20, billY + 44, (contentWidth - 40) / 2);
+    drawInfoRow(doc, "Email", textOrFallback(client.email), contentX + 20 + (contentWidth - 40) / 2, billY + 44, (contentWidth - 40) / 2);
+    doc.y = billY + 112;
+
+    // ── line item table ──
+    const tableY = doc.y;
+    drawSectionTitle(doc, "Project Summary", contentX, tableY, contentWidth);
+    const rowY = tableY + 36;
+    doc.font("Helvetica-Bold").fontSize(9).fillColor(colors.muted);
+    doc.text("DESCRIPTION", contentX, rowY, { width: contentWidth * 0.55 });
+    doc.text("AMOUNT", contentX + contentWidth * 0.55, rowY, { width: contentWidth * 0.45, align: "right" });
+    doc
+      .moveTo(contentX, rowY + 16)
+      .lineTo(contentX + contentWidth, rowY + 16)
+      .lineWidth(0.75)
+      .strokeColor(colors.line)
+      .stroke();
+
+    doc.font("Helvetica").fontSize(10.5).fillColor(colors.text);
+    doc.text(textOrFallback(contract.projectName, "Project"), contentX, rowY + 26, { width: contentWidth * 0.55 });
+    doc.text(formatCurrencyForPdf(contract.projectAmount, contract.currency), contentX + contentWidth * 0.55, rowY + 26, {
+      width: contentWidth * 0.45,
+      align: "right",
+    });
+
+    doc.y = rowY + 60;
+
+    // ── totals ──
+    const totalsY = doc.y;
+    const totalsWidth = 220;
+    const totalsX = contentX + contentWidth - totalsWidth;
+    drawCard(totalsX, totalsY, totalsWidth, 96, "#fffaf3");
+    const totalsRow = (label, value, offsetY, bold = false) => {
+      doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(10).fillColor(bold ? colors.orangeDark : colors.text);
+      doc.text(label, totalsX + 16, totalsY + offsetY, { width: totalsWidth - 80 });
+      doc.text(formatCurrencyForPdf(value, contract.currency), totalsX + 16, totalsY + offsetY, { width: totalsWidth - 32, align: "right" });
+    };
+    totalsRow("Total", contract.projectAmount, 16);
+    totalsRow("Received", contract.receivedAmount, 40);
+    totalsRow("Due", contract.dueAmount, 64, true);
+
+    doc.y = totalsY + 120;
+
+    // ── bank details (same account used for contracts) ──
+    const bankY = doc.y;
+    drawCard(contentX, bankY, contentWidth, 110, "#fffaf3");
+    drawSectionTitle(doc, "Account Details", contentX + 16, bankY + 16, contentWidth - 32);
+    drawInfoRow(doc, "Bank Name", "Bank Of Baroda", contentX + 18, bankY + 52, 150);
+    drawInfoRow(doc, "IFSC", "BARB0ROHDEL", contentX + 178, bankY + 52, 110);
+    drawInfoRow(doc, "Beneficiary Name", "Bharat Bizmart", contentX + 298, bankY + 52, 172);
+    drawInfoRow(doc, "Account Number", "3733020000670", contentX + 18, bankY + 82, 250);
+
+    // ── footer ──
+    const footerY = page.height - 60;
+    doc
+      .moveTo(contentX, footerY)
+      .lineTo(contentX + contentWidth, footerY)
+      .lineWidth(1)
+      .strokeColor(colors.line)
+      .stroke();
+    doc.font("Helvetica").fontSize(8).fillColor(colors.muted).text(`Generated on ${today}`, contentX, footerY + 14, { width: 200 });
+
+    doc.end();
+  });
+};
+
+const generateContractPdf = async ({ client, contract }) => {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: "A4", margin: 0 });
+    const buffers = [];
+    const logoPath = contractAsset("logo.png");
+    const cybertrickLogoPath = contractAsset("cybertrick.png");
+    const signatureFontPath = contractAsset("DancingScript-Regular.ttf");
+    if (signatureFontPath) {
+      doc.registerFont("Signature", signatureFontPath);
+    }
     const page = { width: 595.28, height: 841.89 };
     const colors = {
       black: "#061216",
@@ -114,23 +260,24 @@ const generateProposalPdf = async ({ client, proposal }) => {
       month: "long",
       day: "numeric",
     });
-    const validUntil = proposal.validUntil
-      ? new Date(proposal.validUntil).toLocaleDateString("en-IN", {
+    const validUntil = contract.validUntil
+      ? new Date(contract.validUntil).toLocaleDateString("en-IN", {
           year: "numeric",
           month: "long",
           day: "numeric",
         })
       : "To be discussed";
     const address = [client.address, client.city, client.state, client.country, client.zipCode].filter(Boolean).join(", ");
-    const contactNumber = "7633093222";
+    const contactDetails = ["+91-8287477783", "bizmartbharat@gmail.com", "info@bharatbizmart.com", "cybertricksmedia.com"];
+    const gstin = "GSTIN: 07BVOPR6276F1ZY";
     const contentX = 52;
     const contentWidth = page.width - 104;
     const bottomLimit = page.height - 92;
     let currentPage = 1;
 
-    const addNewProposalPage = () => {
+    const addNewContractPage = () => {
       drawFooter();
-      doc.addPage({ margin: 0 });
+      doc.addPage({ size: "A4", margin: 0 });
       currentPage += 1;
       drawPageBackground();
       doc.y = 74;
@@ -138,7 +285,7 @@ const generateProposalPdf = async ({ client, proposal }) => {
 
     const addPageIfNeeded = (neededHeight) => {
       if (doc.y + neededHeight <= bottomLimit) return;
-      addNewProposalPage();
+      addNewContractPage();
     };
 
     const drawPageBackground = () => {
@@ -149,36 +296,82 @@ const generateProposalPdf = async ({ client, proposal }) => {
       doc.circle(72, page.height - 54, 58).fillOpacity(0.08).fill(colors.orangeDark).fillOpacity(1);
     };
 
+    const drawServiceChips = (items, rightX, y) => {
+      const chipHeight = 21;
+      const chipGap = 7;
+      const paddingX = 11;
+      const palette = [colors.black, colors.orangeDark, colors.black, colors.orangeDark];
+      let cursorX = rightX;
+
+      for (let i = items.length - 1; i >= 0; i -= 1) {
+        const label = items[i];
+        doc.font("Helvetica-Bold").fontSize(8.5);
+        const w = doc.widthOfString(label) + paddingX * 2;
+        cursorX -= w;
+        const fill = palette[i % palette.length];
+        doc.roundedRect(cursorX, y, w, chipHeight, chipHeight / 2).fill(fill);
+        doc
+          .font("Helvetica-Bold")
+          .fontSize(8.5)
+          .fillColor(colors.white)
+          .text(label, cursorX, y + 6, { width: w, align: "center" });
+        cursorX -= chipGap;
+      }
+    };
+
     const drawHeader = () => {
-      doc.rect(0, 0, page.width, 142).fill(colors.black);
-      doc.rect(0, 132, page.width, 10).fill(colors.orange);
-      doc.polygon([page.width - 150, 0], [page.width, 0], [page.width, 142], [page.width - 82, 142]).fill("#09161a");
-      doc.polygon([page.width - 96, 132], [page.width, 132], [page.width, 142], [page.width - 102, 142]).fill(colors.orangeDark);
+      const headerHeight = 196;
+      doc.rect(0, 0, page.width, headerHeight).fill(colors.white);
+      doc.rect(0, 0, page.width, 6).fill(colors.orange);
+      doc.circle(page.width - 30, 8, 70).fillOpacity(0.07).fill(colors.orange).fillOpacity(1);
+      doc.circle(page.width - 140, -20, 46).fillOpacity(0.05).fill(colors.orangeDark).fillOpacity(1);
+
+      const logoY = 40;
+      const logoHeight = 48;
 
       if (logoPath) {
-        doc.image(logoPath, 54, 34, { fit: [150, 72], align: "left", valign: "center" });
+        doc.image(logoPath, contentX, logoY, { fit: [300, logoHeight], align: "left", valign: "center" });
       } else {
-        doc.font("Helvetica-Bold").fontSize(22).fillColor(colors.white).text("Bharat Bizmart", 54, 54);
+        doc.font("Helvetica-Bold").fontSize(22).fillColor(colors.black).text("Bharat Bizmart", contentX, logoY + 12);
+      }
+
+      if (cybertrickLogoPath) {
+        doc.image(cybertrickLogoPath, contentX + contentWidth - 200, logoY, {
+          fit: [200, logoHeight],
+          align: "right",
+          valign: "center",
+        });
       }
 
       doc
-        .font("Helvetica-Bold")
-        .fontSize(25)
-        .fillColor(colors.white)
-        .text("Sr. Software Engineer", 272, 42, { width: 270, align: "right" });
+        .moveTo(contentX, logoY + logoHeight + 10)
+        .lineTo(contentX + contentWidth, logoY + logoHeight + 10)
+        .lineWidth(0.75)
+        .strokeColor(colors.line)
+        .stroke();
+
+      drawServiceChips(["Web App", "Android App", "Ads", "SMM"], contentX + contentWidth, logoY + logoHeight + 20);
+
+      const barY = headerHeight - 52;
+      doc.roundedRect(contentX, barY, contentWidth, 46, 8).fillAndStroke(colors.orangeSoft, colors.line);
       doc
-        .font("Helvetica")
-        .fontSize(10)
-        .fillColor("#fde7c4")
-        .text("Website | Web App | Ecommerce | CRM | ERP | Custom App", 244, 76, {
-          width: 298,
-          align: "right",
+        .font("Helvetica-Bold")
+        .fontSize(8.5)
+        .fillColor(colors.orangeDark)
+        .text(contactDetails.join("    |    "), contentX + 14, barY + 10, {
+          width: contentWidth - 28,
+          align: "center",
         });
       doc
         .font("Helvetica-Bold")
-        .fontSize(9)
-        .fillColor(colors.orange)
-        .text(`Mob - ${contactNumber}`, 272, 106, { width: 270, align: "right" });
+        .fontSize(8)
+        .fillColor(colors.muted)
+        .text(gstin, contentX + 14, barY + 27, {
+          width: contentWidth - 28,
+          align: "center",
+        });
+
+      doc.rect(0, headerHeight - 4, page.width, 4).fill(colors.orange);
     };
 
     const drawFooter = () => {
@@ -224,16 +417,57 @@ const generateProposalPdf = async ({ client, proposal }) => {
       doc.y = y + height + 18;
     };
 
+    const drawDeliverablesCard = () => {
+      const deliverables = Array.isArray(contract.deliverables) ? contract.deliverables : [];
+
+      if (!deliverables.length) {
+        if (contract.projectScope) {
+          drawParagraphCard("Scope Of Work", contract.projectScope, contentX, doc.y, contentWidth);
+        }
+        return;
+      }
+
+      const rowHeight = 24;
+      const height = Math.max(108, deliverables.length * rowHeight + 64);
+      addPageIfNeeded(height + 18);
+      const y = doc.y;
+      drawCard(contentX, y, contentWidth, height);
+      drawSectionTitle(doc, "Scope Of Work", contentX + 16, y + 16, contentWidth - 32);
+
+      let rowY = y + 54;
+      deliverables.forEach((item) => {
+        const frequencyLabel =
+          item.frequency === "week" ? "per week" : item.frequency === "month" ? "per month" : "one-time";
+
+        doc
+          .font("Helvetica-Bold")
+          .fontSize(10)
+          .fillColor(colors.text)
+          .text(`•  ${textOrFallback(item.title)}`, contentX + 24, rowY, { width: contentWidth - 220 });
+        doc
+          .font("Helvetica")
+          .fontSize(9.5)
+          .fillColor(colors.muted)
+          .text(`${textOrFallback(item.quantity, "0")} ${frequencyLabel}`, contentX + contentWidth - 180, rowY, {
+            width: 156,
+            align: "right",
+          });
+        rowY += rowHeight;
+      });
+
+      doc.y = y + height + 18;
+    };
+
     const drawTimelinePaymentCard = () => {
       addPageIfNeeded(98);
       const y = doc.y;
       drawCard(contentX, y, contentWidth, 78, colors.orangeSoft);
       drawSectionTitle(doc, "Timeline & Payment Terms", contentX + 16, y + 14, contentWidth - 32);
-      drawInfoRow(doc, "Timeline", proposal.timeline || "To be agreed upon", contentX + 18, y + 48, 160);
+      drawInfoRow(doc, "Timeline", contract.timeline || "To be agreed upon", contentX + 18, y + 48, 160);
       drawInfoRow(
         doc,
         "Payment Terms",
-        proposal.paymentTerms || "Payment terms will be discussed and finalized before project kickoff.",
+        contract.paymentTerms || "Payment terms will be discussed and finalized before project kickoff.",
         contentX + 210,
         y + 48,
         250
@@ -241,56 +475,40 @@ const generateProposalPdf = async ({ client, proposal }) => {
       doc.y = y + 96;
     };
 
-    const drawPaymentBadge = (label, x, y, width, color) => {
-      doc.roundedRect(x, y, width, 34, 7).fillAndStroke("#ffffff", "#f2d7af");
-      doc.circle(x + 18, y + 17, 11).fill(color);
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(9)
-        .fillColor("#ffffff")
-        .text(label.charAt(0), x + 14, y + 11, { width: 8, align: "center" });
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(9.5)
-        .fillColor(colors.text)
-        .text(label, x + 36, y + 8, { width: width - 42 });
-      doc
-        .font("Helvetica")
-        .fontSize(8)
-        .fillColor(colors.muted)
-        .text(contactNumber, x + 36, y + 20, { width: width - 42 });
-    };
-
     const drawAccountDetails = () => {
       if (currentPage === 1) {
-        addNewProposalPage();
+        addNewContractPage();
       }
 
       addPageIfNeeded(176);
       const y = doc.y;
-      drawCard(contentX, y, contentWidth, 154, "#fffaf3");
+      drawCard(contentX, y, contentWidth, 136, "#fffaf3");
       drawSectionTitle(doc, "Account Details", contentX + 16, y + 16, contentWidth - 32);
-      drawInfoRow(doc, "Bank Name", "Central Bank of India", contentX + 18, y + 52, 170);
-      drawInfoRow(doc, "IFSC", "CBIN0281086", contentX + 210, y + 52, 110);
-      drawInfoRow(doc, "Account Holder", "Himanshu Kumar Tiwari", contentX + 340, y + 52, 130);
-      drawInfoRow(doc, "Account Number", "3507840080", contentX + 18, y + 92, 170);
-      drawInfoRow(doc, "UPI / Wallet Number", contactNumber, contentX + 210, y + 92, 150);
+      drawInfoRow(doc, "Bank Name", "Bank Of Baroda", contentX + 18, y + 52, 150);
+      drawInfoRow(doc, "IFSC", "BARB0ROHDEL", contentX + 178, y + 52, 110);
+      drawInfoRow(doc, "Beneficiary Name", "Bharat Bizmart", contentX + 298, y + 52, 172);
+      drawInfoRow(doc, "Account Number", "3733020000670", contentX + 18, y + 92, 150);
+      drawInfoRow(
+        doc,
+        "Branch",
+        "H.No. 1, Pocket A, Rohini, Sector - 15, Delhi - 110085",
+        contentX + 178,
+        y + 92,
+        292
+      );
 
-      drawPaymentBadge("PhonePe", contentX + 18, y + 128, 134, "#5f259f");
-      drawPaymentBadge("Google Pay", contentX + 178, y + 128, 146, "#4285f4");
-      drawPaymentBadge("Paytm", contentX + 350, y + 128, 120, "#00baf2");
-      doc.y = y + 176;
+      doc.y = y + 156;
     };
 
     drawPageBackground();
     drawHeader();
 
-    doc.y = 176;
+    doc.y = 228;
     doc
       .font("Helvetica-Bold")
       .fontSize(26)
       .fillColor(colors.orangeDark)
-      .text(`Project Proposal - ${textOrFallback(proposal.projectName, "Project")}`, contentX, doc.y, {
+      .text(`Project Contract - ${textOrFallback(contract.projectName, "Project")}`, contentX, doc.y, {
         width: contentWidth,
         align: "center",
       });
@@ -320,8 +538,8 @@ const generateProposalPdf = async ({ client, proposal }) => {
       .fillColor(colors.muted)
       .text(textOrFallback(client.companyName, client.email), contentX + 20, introY + 58, { width: 228 });
 
-    drawInfoRow(doc, "Proposal Number", proposal.proposalNumber, contentX + 286, introY + 16, 188);
-    drawInfoRow(doc, "Proposal Date", today, contentX + 286, introY + 58, 86);
+    drawInfoRow(doc, "Contract Number", contract.contractNumber, contentX + 286, introY + 16, 188);
+    drawInfoRow(doc, "Contract Date", today, contentX + 286, introY + 58, 86);
     drawInfoRow(doc, "Valid Until", validUntil, contentX + 386, introY + 58, 88);
     doc.y = introY + 134;
 
@@ -342,17 +560,15 @@ const generateProposalPdf = async ({ client, proposal }) => {
       .font("Helvetica-Bold")
       .fontSize(24)
       .fillColor(colors.black)
-      .text(formatAmount(proposal.projectAmount), contentX + 276, detailsY + 42, {
+      .text(formatAmount(contract.projectAmount), contentX + 276, detailsY + 42, {
         width: 196,
       });
-    drawInfoRow(doc, "Currency", proposal.currency || "INR", contentX + 276, detailsY + 92, 90);
+    drawInfoRow(doc, "Currency", contract.currency || "INR", contentX + 276, detailsY + 92, 90);
     doc.y = detailsY + 174;
 
-    drawParagraphCard("Project Overview", proposal.projectDescription, contentX, doc.y, contentWidth);
+    drawParagraphCard("Project Overview", contract.projectDescription, contentX, doc.y, contentWidth);
 
-    if (proposal.projectScope) {
-      drawParagraphCard("Scope Of Work", proposal.projectScope, contentX, doc.y, contentWidth);
-    }
+    drawDeliverablesCard();
 
     drawTimelinePaymentCard();
 
@@ -370,13 +586,15 @@ const generateProposalPdf = async ({ client, proposal }) => {
       .font("Helvetica")
       .fontSize(9)
       .fillColor(colors.muted)
-      .text("Thank you for considering this proposal. We look forward to building something polished, reliable, and ready to grow.", contentX + 18, signY + 42, {
+      .text("Thank you for considering this contract. We look forward to building something polished, reliable, and ready to grow.", contentX + 18, signY + 42, {
         width: 260,
         lineGap: 3,
       });
-    if (signPath) {
-      doc.image(signPath, contentX + 330, signY + 12, { fit: [118, 42] });
-    }
+    doc
+      .font(signatureFontPath ? "Signature" : "Helvetica-BoldOblique")
+      .fontSize(signatureFontPath ? 22 : 16)
+      .fillColor(colors.orangeDark)
+      .text("Sunny Rathore", contentX + 314, signY + 30, { width: 150, align: "center" });
     doc
       .moveTo(contentX + 314, signY + 66)
       .lineTo(contentX + 462, signY + 66)
@@ -398,13 +616,13 @@ const generateProposalPdf = async ({ client, proposal }) => {
   });
 };
 
-const buildProposalEmailText = ({ client }) =>
+const buildContractEmailText = ({ client }) =>
   `Dear ${client.clientName},
 
-Please find attached your project proposal in PDF format.`;
+Please find attached your project contract in PDF format.`;
 
-const buildProposalEmailHtml = ({ client }) =>
-  `<p>Dear ${client.clientName},</p><p>Please find attached your project proposal in PDF format.</p>`;
+const buildContractEmailHtml = ({ client }) =>
+  `<p>Dear ${client.clientName},</p><p>Please find attached your project contract in PDF format.</p>`;
 
 
 const buildPaymentReminderEmailHtml = ({ client, reminder }) => {
@@ -486,27 +704,27 @@ const buildPaymentReminderEmailHtml = ({ client, reminder }) => {
   `;
 };
 
-const sendProposalEmail = async ({ client, proposal }) => {
+const sendContractEmail = async ({ client, contract }) => {
   try {
-    console.log("Attempting to send proposal email to:", client.email);
+    console.log("Attempting to send contract email to:", client.email);
     const transporter = createTransporter();
     const fromName = process.env.SMTP_FROM_NAME || "Automated mail";
     const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
 
-    console.log("Generating PDF for proposal:", proposal.proposalNumber);
-    const pdfBuffer = await generateProposalPdf({ client, proposal });
-    const safeName = proposal.projectName.replace(/[^a-z0-9-_]/gi, "-");
+    console.log("Generating PDF for contract:", contract.contractNumber);
+    const pdfBuffer = await generateContractPdf({ client, contract });
+    const safeName = contract.projectName.replace(/[^a-z0-9-_]/gi, "-");
 
     console.log("Sending email with attachment to:", client.email);
     const result = await transporter.sendMail({
       from: `"${fromName}" <${fromEmail}>`,
       to: client.email,
-      subject: `Project Proposal: ${proposal.projectName} - ${formatCurrency(proposal.projectAmount, proposal.currency)}`,
-      text: buildProposalEmailText({ client }),
-      html: buildProposalEmailHtml({ client }),
+      subject: `Project Contract: ${contract.projectName} - ${formatCurrency(contract.projectAmount, contract.currency)}`,
+      text: buildContractEmailText({ client }),
+      html: buildContractEmailHtml({ client }),
       attachments: [
         {
-          filename: `Proposal-${safeName}.pdf`,
+          filename: `Contract-${safeName}.pdf`,
           content: pdfBuffer,
           contentType: "application/pdf",
         },
@@ -520,8 +738,8 @@ const sendProposalEmail = async ({ client, proposal }) => {
       sentAt: new Date(),
     };
   } catch (error) {
-    console.error("Failed to send proposal email:", error);
-    const err = new Error(`Failed to send proposal email: ${error.message}`);
+    console.error("Failed to send contract email:", error);
+    const err = new Error(`Failed to send contract email: ${error.message}`);
     err.statusCode = 500;
     throw err;
   }
@@ -553,10 +771,11 @@ const sendPaymentReminderEmail = async ({ client, reminder }) => {
 };
 
 module.exports = {
-  buildProposalNumber,
+  buildContractNumber,
   buildReminderNumber,
-  generateProposalPdf,
-  sendProposalEmail,
+  generateContractPdf,
+  generateInvoicePdf,
+  sendContractEmail,
   sendPaymentReminderEmail,
   createTransporter,
 };

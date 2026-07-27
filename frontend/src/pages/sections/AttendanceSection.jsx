@@ -1,11 +1,24 @@
 import React from "react";
 import {
-  Activity, AlertCircle, Calendar, CheckCircle2, ChevronLeft, ChevronRight,
-  Clock, Download, Users,
+  Activity, AlarmClock, AlertCircle, Calendar, CheckCircle2, ChevronLeft, ChevronRight,
+  Clock, Download, FileText, Hourglass, LogIn, Palmtree, Timer, TrendingDown, TrendingUp,
+  UserCheck, Users, UserX, XCircle,
 } from "lucide-react";
 import {
-  ATT_STATUS_META, AttStatCard, FieldIcon, T, baseFilter, fmtDateTime, fmtMin,
+  Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from "recharts";
+import {
+  ATT_STATUS_META, AttStatCard, ChartCard, CustomTooltip, FieldIcon, KpiCard, T,
+  baseFilter, fmtDateTime, fmtMin, fmtShortDate,
 } from "./shared";
+
+const LEAVE_STATUS_META = {
+  pending:  { label: "Pending",  color: T.yellow, bg: T.yellowBg, border: T.yellowBorder, Icon: Hourglass    },
+  approved: { label: "Approved", color: T.green,  bg: T.greenBg,  border: T.greenBorder,  Icon: CheckCircle2 },
+  rejected: { label: "Rejected", color: T.red,    bg: T.redBg,    border: T.redBorder,    Icon: XCircle      },
+};
+
+const STATUS_BREAKDOWN_COLORS = { Present: T.green, Absent: T.red, "On Leave": T.brand, "Half Day": "#7c3aed" };
 
 export default function AttendanceSection({
   attFilters,
@@ -23,21 +36,140 @@ export default function AttendanceSection({
   selectedDayTotal,
   attSummary,
   attActiveNow,
+  leaves = [],
+  leaveActionId,
+  handleLeaveDecision,
+  attDashboard,
+  attDashboardLoading,
+  attDashboardError,
+  attDashboardDate,
+  setAttDashboardDate,
 }) {
+  const pendingLeaves = leaves.filter(l => l.status === "pending").length;
+  const d = attDashboard || {};
+  const workingHours = d.workingHours || {};
+  const checkIn = d.checkIn || {};
+  const leaveAnalytics = d.leaveAnalytics || {};
+  const trend = d.attendanceTrend || 0;
+  const ratePieData = [
+    { name: "Present", value: d.attendanceRate || 0 },
+    { name: "Remaining", value: Math.max(0, 100 - (d.attendanceRate || 0)) },
+  ];
+  const statusBreakdownData = (d.statusBreakdown || []).filter(s => s.count > 0);
+
   return (
     <div className="fade-up">
-      <div style={{ marginBottom: 20 }}>
-        <h2 style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 19, color: T.textPrimary }}>Attendance Management</h2>
-        <p style={{ fontSize: 12.5, color: T.textMuted, marginTop: 3 }}>Track login/logout, active/offline status and working hours.</p>
+      <div style={{ marginBottom: 20, display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
+        <div>
+          <h2 style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 19, color: T.textPrimary }}>Attendance Dashboard</h2>
+          <p style={{ fontSize: 12.5, color: T.textMuted, marginTop: 3 }}>Overview of your organization's attendance.</p>
+        </div>
+        <div style={{ position: "relative" }}>
+          <FieldIcon icon={Calendar} small />
+          <input type="date" value={attDashboardDate} onChange={e => setAttDashboardDate(e.target.value)} className="att-inp" style={baseFilter} />
+        </div>
       </div>
 
-      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 20 }}>
-        <AttStatCard icon={Clock} label={attFilters.date ? `${attFilters.date} Active` : "Today Overall"} value={fmtMin(attSummary.todayOverallMinutes || 0)} color="#0891b2" bg="#ecfeff" />
-        <AttStatCard icon={Calendar} label="Monthly Total" value={fmtMin(attSummary.monthlyTotalMinutes || 0)} color={T.brand} bg={T.brandLight} />
-        <AttStatCard icon={Activity} label="Active Now" value={attActiveNow} color={T.green} bg={T.greenBg} />
-        <AttStatCard icon={Users} label="Records" value={attPagination.total || 0} color={T.slate} bg={T.slateBg} />
-        {attFilters.date && <AttStatCard icon={CheckCircle2} label={`${attFilters.date} Total`} value={selectedDayTotal || "0h 0m"} color={T.yellow} bg={T.yellowBg} />}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 14, marginBottom: 18 }}>
+        <KpiCard Icon={Users} label="Total Employees" value={d.totalEmployees ?? "—"} color={T.brand} bgColor={T.brandLight} sub="All active employees" />
+        <KpiCard Icon={UserCheck} label="Present Today" value={d.presentToday ?? "—"} color={T.green} bgColor={T.greenBg} sub={d.totalEmployees ? `${((d.presentToday / d.totalEmployees) * 100).toFixed(2)}% of total` : ""} />
+        <KpiCard Icon={UserX} label="Absent Today" value={d.absentToday ?? "—"} color={T.red} bgColor={T.redBg} sub={d.totalEmployees ? `${((d.absentToday / d.totalEmployees) * 100).toFixed(2)}% of total` : ""} />
+        <KpiCard Icon={Palmtree} label="On Leave" value={d.onLeave ?? "—"} color="#d97706" bgColor="#fff7ed" sub={d.totalEmployees ? `${((d.onLeave / d.totalEmployees) * 100).toFixed(2)}% of total` : ""} />
+{/*         <KpiCard Icon={AlarmClock} label="Late Arrivals" value={d.lateArrivals ?? "—"} color="#7c3aed" bgColor="#f5f3ff" sub={d.totalEmployees ? `${((d.lateArrivals / d.totalEmployees) * 100).toFixed(2)}% of total` : ""} />
+ */}        <KpiCard Icon={FileText} label="Pending Requests" value={d.pendingRequests ?? "—"} color={T.yellow} bgColor={T.yellowBg} sub="Leave requests" />
       </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr ", gap: 16, marginBottom: 18 }}>
+        <ChartCard title="Attendance Rate">
+          <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+            <div style={{ position: "relative", width: 130, height: 130, flexShrink: 0 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={ratePieData} cx="50%" cy="50%" innerRadius={48} outerRadius={62} startAngle={90} endAngle={-270} dataKey="value" stroke="none">
+                    <Cell fill={T.green} />
+                    <Cell fill={T.borderLight} />
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+              <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
+                <span style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 20, color: T.textPrimary }}>{(d.attendanceRate ?? 0).toFixed(2)}%</span>
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary }}>Today's Attendance</div>
+              <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 3 }}>(Present + Half Day) / Total Employees</div>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 10, fontSize: 11.5, fontWeight: 700, padding: "4px 10px", borderRadius: 999, color: trend >= 0 ? T.green : T.red, background: trend >= 0 ? T.greenBg : T.redBg }}>
+                {trend >= 0 ? <TrendingUp size={12} strokeWidth={2.4} /> : <TrendingDown size={12} strokeWidth={2.4} />}
+                {Math.abs(trend).toFixed(2)}% vs Yesterday
+              </div>
+            </div>
+          </div>
+        </ChartCard>
+
+       {/*  <ChartCard title="Average Working Hours">
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+            <div style={{ width: 38, height: 38, borderRadius: 11, background: "#dbeafe", display: "grid", placeItems: "center" }}>
+              <Timer size={17} color="#1d4ed8" strokeWidth={2} />
+            </div>
+            <div>
+              <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 22, color: T.textPrimary, lineHeight: 1 }}>{fmtMin(workingHours.avgMinutes || 0)}</div>
+              <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 3 }}>Today's Average</div>
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, background: T.bg, borderRadius: 12, padding: "12px 14px" }}>
+            <div>
+              <div style={{ fontSize: 11, color: T.textMuted }}>Max Working Hours</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: T.textPrimary, marginTop: 4 }}>{fmtMin(workingHours.maxMinutes || 0)}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: T.textMuted }}>Min Working Hours</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: T.textPrimary, marginTop: 4 }}>{fmtMin(workingHours.minMinutes || 0)}</div>
+            </div>
+          </div>
+        </ChartCard> */}
+        <ChartCard title="Leave Analytics" subtitle={leaveAnalytics.month ? `Month: ${leaveAnalytics.month}` : ""}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {[
+              { label: "Pending Requests", value: leaveAnalytics.pendingRequests ?? 0 },
+              { label: "Approved Leaves", value: leaveAnalytics.approvedLeaves ?? 0 },
+              { label: "Rejected Leaves", value: leaveAnalytics.rejectedLeaves ?? 0 },
+              { label: "Leaves Taken", value: leaveAnalytics.leavesTaken ?? 0 },
+            ].map(item => (
+              <div key={item.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 12.5, color: T.textSecondary }}>{item.label}</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: T.textPrimary, fontFamily: "'Syne', sans-serif" }}>{item.value}</span>
+              </div>
+            ))}
+            <div style={{ marginTop: 4 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 11.5, color: T.textMuted }}>
+                <span>Approval Rate</span>
+                <span style={{ fontWeight: 700, color: T.green }}>{leaveAnalytics.approvalRate ?? 0}%</span>
+              </div>
+              <div style={{ height: 6, background: T.borderLight, borderRadius: 99, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${leaveAnalytics.approvalRate ?? 0}%`, borderRadius: 99, background: "linear-gradient(90deg, #f7931e, #16a34a)" }} />
+              </div>
+            </div>
+          </div>
+        </ChartCard>
+      
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 24 }}>
+      
+
+        
+      </div>
+
+      {attDashboardLoading && !attDashboard && (
+        <div style={{ textAlign: "center", padding: "14px 0", color: T.textMuted, fontSize: 12.5 }}>Loading dashboard…</div>
+      )}
+
+      {attDashboardError && (
+        <div style={{ marginBottom: 18, display: "flex", alignItems: "center", gap: 9, color: T.red, background: T.redBg, border: `1px solid ${T.redBorder}`, borderRadius: 9, padding: "10px 14px", fontSize: 12.5 }}>
+          <AlertCircle size={14} strokeWidth={2} />{attDashboardError}
+        </div>
+      )}
+
 
       <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, boxShadow: "0 1px 3px rgba(0,0,0,.04)", overflow: "hidden" }}>
         <div style={{ padding: "18px 22px", borderBottom: `1px solid ${T.borderLight}`, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
@@ -142,6 +274,73 @@ export default function AttendanceSection({
               <ChevronRight size={15} strokeWidth={2} />
             </button>
           </div>
+        </div>
+      </div>
+
+      <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, boxShadow: "0 1px 3px rgba(0,0,0,.04)", overflow: "hidden", marginTop: 24 }}>
+        <div style={{ padding: "18px 22px", borderBottom: `1px solid ${T.borderLight}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <h3 style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 16, color: T.textPrimary }}>Leave Requests</h3>
+            <p style={{ fontSize: 12, color: T.textMuted, marginTop: 3 }}>Review and approve or reject employee leave requests.</p>
+          </div>
+          {pendingLeaves > 0 && (
+            <span style={{ fontSize: 11.5, fontWeight: 700, padding: "6px 12px", borderRadius: 999, color: T.yellow, background: T.yellowBg, border: `1px solid ${T.yellowBorder}` }}>
+              {pendingLeaves} pending
+            </span>
+          )}
+        </div>
+
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: T.bg }}>
+                {["Employee", "From", "To", "Reason", "Status", "Actions"].map(h => (
+                  <th key={h} style={{ textAlign: "left", padding: "11px 16px", borderBottom: `1px solid ${T.border}`, fontSize: 10.5, fontWeight: 700, letterSpacing: ".09em", textTransform: "uppercase", color: T.textMuted, whiteSpace: "nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {leaves.length === 0 && (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: "center", padding: "50px 0" }}>
+                    <FileText size={32} strokeWidth={1} color={T.textMuted} style={{ display: "block", margin: "0 auto 10px" }} />
+                    <p style={{ fontSize: 13, color: T.textMuted }}>No leave requests yet</p>
+                  </td>
+                </tr>
+              )}
+              {leaves.map((leave, i) => {
+                const lm = LEAVE_STATUS_META[leave.status] || LEAVE_STATUS_META.pending;
+                const isActing = leaveActionId === leave._id;
+                return (
+                  <tr key={leave._id} style={{ background: i % 2 === 0 ? "#fff" : T.bg, borderBottom: `1px solid ${T.borderLight}` }}>
+                    <td style={{ padding: "13px 16px", fontWeight: 600, color: T.textPrimary }}>{leave.userId?.name || "Unknown"}</td>
+                    <td style={{ padding: "13px 16px", color: T.textSecondary, whiteSpace: "nowrap" }}>{fmtShortDate(leave.fromDate)}</td>
+                    <td style={{ padding: "13px 16px", color: T.textSecondary, whiteSpace: "nowrap" }}>{fmtShortDate(leave.toDate)}</td>
+                    <td style={{ padding: "13px 16px", color: T.textSecondary, maxWidth: 240 }}>{leave.reason}</td>
+                    <td style={{ padding: "13px 16px" }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, padding: "5px 11px", borderRadius: 8, color: lm.color, background: lm.bg, border: `1px solid ${lm.border}` }}>
+                        <lm.Icon size={11} strokeWidth={2} />{lm.label}
+                      </span>
+                    </td>
+                    <td style={{ padding: "13px 16px", whiteSpace: "nowrap" }}>
+                      {leave.status === "pending" ? (
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button disabled={isActing} onClick={() => handleLeaveDecision(leave._id, "approved")} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 700, padding: "6px 11px", borderRadius: 7, border: "none", color: "#fff", background: T.green, cursor: isActing ? "not-allowed" : "pointer", opacity: isActing ? .6 : 1 }}>
+                            <CheckCircle2 size={12} strokeWidth={2.2} /> Approve
+                          </button>
+                          <button disabled={isActing} onClick={() => handleLeaveDecision(leave._id, "rejected")} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 700, padding: "6px 11px", borderRadius: 7, border: "none", color: "#fff", background: T.red, cursor: isActing ? "not-allowed" : "pointer", opacity: isActing ? .6 : 1 }}>
+                            <XCircle size={12} strokeWidth={2.2} /> Reject
+                          </button>
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: 12, color: T.textMuted }}>—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

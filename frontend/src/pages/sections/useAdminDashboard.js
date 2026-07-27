@@ -18,6 +18,16 @@ import {
   listFromResponse,
 } from "./shared";
 
+// Maps a Client's latest Work Progress status onto the same 3-bucket model used by
+// plain Tasks (pending/in-progress/completed), so clients assigned via the Client
+// Detail page's "Assign Task" action count toward the same Total/Done/In-Progress/
+// Pending stats as real Task-model entries shown on "All Tasks".
+const mapProgressToTaskStatus = (progressStatus) => {
+  if (progressStatus === "Completed") return "completed";
+  if (progressStatus === "In Progress") return "in-progress";
+  return "pending";
+};
+
 export default function useAdminDashboard() {
   const navigate = useNavigate();
 
@@ -25,8 +35,18 @@ export default function useAdminDashboard() {
   const [tasksState, setTasks] = useState([]);
   const [clients, setClients] = useState([]);
   const [projectsState, setProjects] = useState([]);
-  const [proposals, setProposals] = useState([]);
+  const [contracts, setContracts] = useState([]);
   const [reminders, setReminders] = useState([]);
+  const [dashboardStats, setDashboardStats] = useState({
+    totalDeliverables: 0,
+    completedDeliverables: 0,
+    pendingDeliverables: 0,
+    overallCompletionPercent: 0,
+    totalRevenue: 0,
+    outstandingPayments: 0,
+    overduePayments: 0,
+    collectedThisMonth: 0,
+  });
   const [tab, setTab] = useState("dashboard");
   const [toast, setToast] = useState(null);
   const [showPw, setShowPw] = useState(false);
@@ -60,29 +80,24 @@ export default function useAdminDashboard() {
     deductions: "",
   });
 
+  const [attFilters, setAttFilters] = useState({ date: "", userId: "", status: "", month: new Date().toISOString().slice(0, 7) });
+  const [attRows, setAttRows] = useState([]);
+  const [attLoading, setAttLoading] = useState(false);
+  const [attError, setAttError] = useState(null);
+  const [attPage, setAttPage] = useState(1);
+  const [attPagination, setAttPagination] = useState({ total: 0, totalPages: 1 });
+  const [attSummary, setAttSummary] = useState({ todayOverallMinutes: 0, monthlyTotalMinutes: 0 });
+
+  const [leaves, setLeaves] = useState([]);
+  const [leaveActionId, setLeaveActionId] = useState(null);
+
+  const [attDashboardDate, setAttDashboardDate] = useState(new Date().toISOString().slice(0, 10));
+  const [attDashboard, setAttDashboard] = useState(null);
+  const [attDashboardLoading, setAttDashboardLoading] = useState(false);
+  const [attDashboardError, setAttDashboardError] = useState(null);
+
   const tasks = Array.isArray(tasksState) ? tasksState : [];
   const projects = Array.isArray(projectsState) ? projectsState : [];
-
-  const [attRows, setAttRows] = useState([]);
-  const [attUsers, setAttUsers] = useState([]);
-  const [attLoading, setAttLoading] = useState(false);
-  const [attPage, setAttPage] = useState(1);
-  const [attPagination, setAttPagination] = useState({ totalPages: 1, total: 0 });
-  const [attSummary, setAttSummary] = useState({
-    perDay: [],
-    monthlyTotalMinutes: 0,
-    todayOverallMinutes: 0,
-    overallDate: "",
-  });
-  const [attTick, setAttTick] = useState(Date.now());
-  const [attError, setAttError] = useState("");
-  const [stopPolling, setStopPolling] = useState(false);
-  const [attFilters, setAttFilters] = useState({
-    date: "",
-    userId: "",
-    status: "",
-    month: new Date().toISOString().slice(0, 7),
-  });
 
   const showToast = (msg, ok = true) => {
     setToast({ msg, ok });
@@ -93,105 +108,97 @@ export default function useAdminDashboard() {
   const fetchTasks = async () => { try { const { data } = await API.get("/tasks"); setTasks(listFromResponse(data, "tasks")); } catch { /* dashboard keeps partial data when a widget fails */ } };
   const fetchClients = async () => { try { const { data } = await API.get("/clients"); setClients(listFromResponse(data, "clients")); } catch { /* dashboard keeps partial data when a widget fails */ } };
   const fetchProjects = async () => { try { const { data } = await API.get("/projects"); setProjects(listFromResponse(data, "projects")); } catch { /* dashboard keeps partial data when a widget fails */ } };
-  const fetchProposals = async () => { try { const { data } = await API.get("/clients/proposals/all"); setProposals(listFromResponse(data, "proposals")); } catch { /* dashboard keeps partial data when a widget fails */ } };
+  const fetchContracts = async () => { try { const { data } = await API.get("/clients/contracts/all"); setContracts(listFromResponse(data, "contracts")); } catch { /* dashboard keeps partial data when a widget fails */ } };
   const fetchReminders = async () => { try { const { data } = await API.get("/clients/reminders/all"); setReminders(listFromResponse(data, "reminders")); } catch { /* dashboard keeps partial data when a widget fails */ } };
-
-  useEffect(() => { fetchUsers(); fetchTasks(); fetchClients(); fetchProjects(); fetchProposals(); fetchReminders(); }, []);
-
-  const attParams = useMemo(() => ({
-    page: attPage,
-    limit: 10,
-    date: attFilters.date || undefined,
-    userId: attFilters.userId || undefined,
-    status: attFilters.status || undefined,
-    month: attFilters.month || undefined,
-  }), [attFilters, attPage]);
-
-  const fetchAttUsers = async () => {
+  const fetchDashboardStats = async (range) => {
     try {
-      const { data } = await API.get("/users");
-      setAttUsers(listFromResponse(data, "users").filter(u => u.role === "user"));
-    } catch (err) {
-      const s = err?.response?.status;
-      if (s === 401 || s === 403) { setAttError("Admin access required."); setStopPolling(true); }
+      const params = range?.start && range?.end ? { start: range.start, end: range.end } : undefined;
+      const { data } = await API.get("/clients/dashboard-stats", { params });
+      setDashboardStats(data);
+    } catch { /* dashboard keeps partial data when a widget fails */ }
+  };
+
+  const fetchLeaves = async () => {
+    try { const { data } = await API.get("/leaves"); setLeaves(Array.isArray(data) ? data : []); }
+    catch { /* dashboard keeps partial data when a widget fails */ }
+  };
+
+  useEffect(() => { fetchUsers(); fetchTasks(); fetchClients(); fetchProjects(); fetchContracts(); fetchReminders(); fetchDashboardStats(); fetchLeaves(); }, []);
+
+  const handleLeaveDecision = async (leaveId, status) => {
+    setLeaveActionId(leaveId);
+    try {
+      await API.put(`/leaves/${leaveId}/status`, { status });
+      showToast(`Leave request ${status}`);
+      fetchLeaves();
+    } catch (error) {
+      showToast(error?.response?.data?.message || "Failed to update leave request", false);
+    } finally {
+      setLeaveActionId(null);
     }
   };
 
   const fetchAttendance = async () => {
     setAttLoading(true);
+    setAttError(null);
     try {
-      const { data } = await API.get("/attendance", { params: attParams });
-      setAttRows(data.rows || []);
-      setAttPagination(data.pagination || { totalPages: 1, total: 0 });
-      setAttSummary(data.summary || {
-        perDay: [],
-        monthlyTotalMinutes: 0,
-        todayOverallMinutes: 0,
-        overallDate: "",
-      });
-      setAttError("");
-      setStopPolling(false);
-    } catch (err) {
-      const s = err?.response?.status;
-      if (s === 404) setAttError("Attendance API route not found. Restart backend.");
-      else if (s === 401 || s === 403) { setAttError("Not authorized to view attendance."); setStopPolling(true); }
-      else setAttError("Failed to load attendance records.");
-      setAttRows([]);
+      const { data } = await API.get("/attendance", { params: { ...attFilters, page: attPage, limit: 10 } });
+      setAttRows(Array.isArray(data?.rows) ? data.rows : []);
+      setAttPagination(data?.pagination || { total: 0, totalPages: 1 });
+      setAttSummary(data?.summary || { todayOverallMinutes: 0, monthlyTotalMinutes: 0 });
+    } catch (error) {
+      setAttError(error?.response?.data?.message || "Failed to load attendance records");
     } finally {
       setAttLoading(false);
     }
   };
 
+  useEffect(() => { fetchAttendance(); }, [attFilters, attPage]);
+
+  const fetchAttDashboard = async () => {
+    setAttDashboardLoading(true);
+    setAttDashboardError(null);
+    try {
+      const { data } = await API.get("/attendance/dashboard", { params: { date: attDashboardDate } });
+      setAttDashboard(data);
+    } catch (error) {
+      setAttDashboardError(error?.response?.data?.message || "Failed to load attendance dashboard");
+    } finally { setAttDashboardLoading(false); }
+  };
+
+  useEffect(() => { fetchAttDashboard(); }, [attDashboardDate]);
+
+  useEffect(() => {
+    if (tab !== "attendance") return;
+    const interval = setInterval(() => { fetchAttendance(); fetchLeaves(); fetchAttDashboard(); }, 20000);
+    return () => clearInterval(interval);
+  }, [tab, attFilters, attPage, attDashboardDate]);
+
+  const setAttFilter = (key, value) => {
+    setAttFilters(prev => ({ ...prev, [key]: value }));
+    setAttPage(1);
+  };
+
   const handleExport = async () => {
     try {
-      const res = await API.get("/attendance/export/excel", { params: attParams, responseType: "blob" });
-      const ct = res.headers?.["content-type"] || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-      const ext = ct.includes("csv") ? "csv" : "xlsx";
-      const url = window.URL.createObjectURL(new Blob([res.data], { type: ct }));
+      const { data } = await API.get("/attendance/export/excel", { params: attFilters, responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([data]));
       const a = document.createElement("a");
       a.href = url;
-      a.download = `attendance-${new Date().toISOString().slice(0, 10)}.${ext}`;
+      a.download = `attendance-${new Date().toISOString().slice(0, 10)}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
     } catch {
-      setAttError("Failed to export attendance.");
+      showToast("Failed to export attendance", false);
     }
   };
 
-  useEffect(() => { fetchAttUsers(); }, []);
-  useEffect(() => { fetchAttendance(); }, [attParams]);
-  useEffect(() => { const id = setInterval(() => setAttTick(Date.now()), 1000); return () => clearInterval(id); }, []);
-
-  useEffect(() => {
-    if (stopPolling) return undefined;
-    const pollId = setInterval(fetchAttendance, 15000);
-    const io = typeof window !== "undefined" ? window.io : null;
-    let socket = null;
-    if (io) {
-      socket = io("https://crm.cybertricksmedia.in", { transports: ["websocket"] });
-      socket.on("attendance:updated", fetchAttendance);
-    }
-    return () => {
-      clearInterval(pollId);
-      if (socket) { socket.off("attendance:updated", fetchAttendance); socket.disconnect(); }
-    };
-  }, [attParams, stopPolling]);
-
-  const selectedDayTotal = useMemo(() => {
-    if (!attFilters.date) return null;
-    const f = attSummary.perDay?.find(d => d.date === attFilters.date);
-    return f ? fmtMin(f.totalMinutes) : "0h 0m";
-  }, [attFilters.date, attSummary.perDay]);
-
-  const computeRunning = (row) => {
-    if (typeof row.displayWorkingMinutes === "number") return row.displayWorkingMinutes;
-    if (row.status !== "Active") return row.totalSessionTime || 0;
-    return Math.max(0, Math.round((new Date(attTick) - new Date(row.loginTime)) / 60000));
-  };
-
-  const setAttFilter = (key, val) => { setAttPage(1); setAttFilters(p => ({ ...p, [key]: val })); };
+  const computeRunning = (row) => row.displayWorkingMinutes ?? 0;
+  const attUsers = users.filter(u => !["admin", "client"].includes(u.role));
+  const attActiveNow = attRows.filter(r => r.status === "Active").length;
+  const selectedDayTotal = fmtMin(attSummary.todayOverallMinutes || 0);
 
   const handleCreateUser = async (e) => {
     e.preventDefault();
@@ -463,12 +470,25 @@ export default function useAdminDashboard() {
     }
   };
 
-  const done = tasks.filter(t => t.status === "completed").length;
-  const inProg = tasks.filter(t => t.status === "in-progress").length;
-  const pend = tasks.filter(t => !t.status || t.status === "pending").length;
+  // Clients assigned to a non-sales User via the Client Detail page's "Assign Task"
+  // action are real assigned work too — fold them into the same task counts shown
+  // on "All Tasks" so the Dashboard's Total/Done/In-Progress/Pending stay consistent.
+  const assignedClientTasks = clients.filter(c => c.assignedUser);
+  const assignedClientStatuses = assignedClientTasks.map(c => {
+    const latest = c.workProgress?.[c.workProgress.length - 1];
+    return mapProgressToTaskStatus(latest?.status);
+  });
+  const totalTaskCount = tasks.length + assignedClientTasks.length;
+
+  const done = tasks.filter(t => t.status === "completed").length
+    + assignedClientStatuses.filter(s => s === "completed").length;
+  const inProg = tasks.filter(t => t.status === "in-progress").length
+    + assignedClientStatuses.filter(s => s === "in-progress").length;
+  const pend = tasks.filter(t => !t.status || t.status === "pending").length
+    + assignedClientStatuses.filter(s => s === "pending").length;
   const admins = users.filter(u => u.role === "admin").length;
   const regularUsers = users.filter(u => u.role === "user").length;
-  const completionRate = tasks.length ? Math.round((done / tasks.length) * 100) : 0;
+  const completionRate = totalTaskCount ? Math.round((done / totalTaskCount) * 100) : 0;
   const activeProjects = projects.filter(p => p.status === "Active").length;
 
   const getProjectCategory = (project) => {
@@ -488,6 +508,25 @@ export default function useAdminDashboard() {
     if (domainDays !== null && domainDays >= 0 && domainDays <= 30) stats.domainDueSoon += 1;
     return stats;
   }, { websiteDueSoon: 0, domainDueSoon: 0, overdue: 0 });
+
+  const projectDueDetails = projects.reduce((details, project) => {
+    const projectName = project.companyName || project.domain || "Unnamed project";
+    const websiteDays = daysUntil(project.websiteDueDate);
+    const domainDays = daysUntil(project.domainDueDate);
+    if (websiteDays !== null && websiteDays >= 0 && websiteDays <= 30) {
+      details.websiteDueSoon.push({ name: projectName, domain: project.domain, date: project.websiteDueDate, type: "Website" });
+    }
+    if (domainDays !== null && domainDays >= 0 && domainDays <= 30) {
+      details.domainDueSoon.push({ name: projectName, domain: project.domain, date: project.domainDueDate, type: "Domain" });
+    }
+    if (websiteDays !== null && websiteDays < 0) {
+      details.overdue.push({ name: projectName, domain: project.domain, date: project.websiteDueDate, type: "Website" });
+    }
+    if (domainDays !== null && domainDays < 0) {
+      details.overdue.push({ name: projectName, domain: project.domain, date: project.domainDueDate, type: "Domain" });
+    }
+    return details;
+  }, { websiteDueSoon: [], domainDueSoon: [], overdue: [] });
 
   const projectAssignChartData = Object.entries(
     projects.reduce((acc, project) => {
@@ -514,9 +553,9 @@ export default function useAdminDashboard() {
     .slice(0, 8);
 
   const projectDueChartData = [
-    { name: "Website Due", count: projectDueStats.websiteDueSoon, fill: "#0891b2" },
-    { name: "Domain Due", count: projectDueStats.domainDueSoon, fill: "#d97706" },
-    { name: "Overdue", count: projectDueStats.overdue, fill: "#dc2626" },
+    { id: "websiteDueSoon", name: "Website Due", count: projectDueStats.websiteDueSoon, fill: "#0891b2", projects: projectDueDetails.websiteDueSoon },
+    { id: "domainDueSoon", name: "Domain Due", count: projectDueStats.domainDueSoon, fill: "#d97706", projects: projectDueDetails.domainDueSoon },
+    { id: "overdue", name: "Overdue", count: projectDueStats.overdue, fill: "#dc2626", projects: projectDueDetails.overdue },
   ];
 
   const statusPieData = [
@@ -541,23 +580,12 @@ export default function useAdminDashboard() {
     .sort((a, b) => b.total - a.total)
     .slice(0, 6);
 
-  const activeUserIds = new Set(attRows.filter(r => r.status === "Active").map(r => r.userId?._id || r.userId));
-  const activeUsersData = users
-    .filter(u => u.role === "user")
-    .map(u => ({
-      name: u.name?.split(" ")[0] || "?",
-      isActive: activeUserIds.has(u._id),
-      tasks: tasks.filter(t => t.assignedTo?._id === u._id || t.assignedTo === u._id).length,
-    }))
-    .sort((a, b) => b.isActive - a.isActive || b.tasks - a.tasks)
-    .slice(0, 8);
-
   const role = localStorage.getItem("role") || "";
 
   const ROLE_TABS = {
     hr: [
-      { id: "attendance", label: "Attendance", Icon: Clock, section: "overview" },
       { id: "users", label: "Users", Icon: Users, section: "overview" },
+      { id: "attendance", label: "Attendance", Icon: Clock, section: "overview" },
       { id: "salary", label: "Salary", Icon: Briefcase, section: "manage" },
       { id: "createUser", label: "New User", Icon: UserPlus, section: "manage" },
     ],
@@ -569,9 +597,9 @@ export default function useAdminDashboard() {
   const TABS = ROLE_TABS[role] || [
     // fallback to admin-like access if role is missing/unknown
     { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard, section: "overview" },
-    { id: "attendance", label: "Attendance", Icon: Clock, section: "overview" },
     { id: "tasks", label: "All Tasks", Icon: ClipboardList, section: "overview" },
     { id: "users", label: "All Users", Icon: Users, section: "overview" },
+    { id: "attendance", label: "Attendance", Icon: Clock, section: "overview" },
     { id: "clients", label: "Clients", Icon: Building2, section: "overview" },
     { id: "projects", label: "Projects", Icon: Briefcase, section: "overview" },
     { id: "salary", label: "Salary", Icon: Briefcase, section: "manage" },
@@ -581,19 +609,15 @@ export default function useAdminDashboard() {
   ];
 
   const currentLabel = TABS.find(t => t.id === tab)?.label || "Dashboard";
-  const attActiveNow = attRows.filter(r => r.status === "Active").length;
 
   return {
-    users, tasks, clients, projects, proposals, reminders,
+    users, tasks, clients, projects, contracts, reminders, dashboardStats,
     tab, setTab, toast, setToast, showPw, setShowPw,
     userForm, setUserForm, taskForm, setTaskForm, projectForm, setProjectForm, projectFormTab, setProjectFormTab, projectListTab, setProjectListTab,
     editTask, setEditTask, editTaskForm, setEditTaskForm,
     editUser, setEditUser, editUserForm, setEditUserForm, editProject, setEditProject, showEditPw, setShowEditPw,
     deleteTask, setDeleteTask, deleteUser, setDeleteUser, deleteProject, setDeleteProject,
     payUser, setPayUser, payingSalary, salaryForm, setSalaryForm, salaryPreview,
-    attFilters, setAttFilters, attUsers, attError, attLoading, attRows,
-    attPagination, attPage, setAttPage, selectedDayTotal, attSummary, attActiveNow,
-    setAttFilter, computeRunning, handleExport,
     handleCreateUser, handleCreateTask, handleCreateProject, handleDownloadProjectsCsv,
     openCreateProject, openEditProject, cancelProjectForm,
     openEditTask, handleUpdateTask, handleDeleteTask,
@@ -601,7 +625,12 @@ export default function useAdminDashboard() {
     openPaySalary, handlePaySalary, handleDeleteProject, handleLogout,
     done, inProg, pend, completionRate, activeProjects, ongoingProjects,
     projectDueStats, projectAssignChartData, projectPlatformChartData, projectDueChartData,
-    statusPieData, priorityBarData, activeUsersData, activeUserIds,
-    tasksByUser, admins, regularUsers, TABS, currentLabel,
+    statusPieData, priorityBarData,
+    tasksByUser, admins, regularUsers, totalTaskCount, TABS, currentLabel,
+    fetchDashboardStats,
+    attFilters, setAttFilter, setAttFilters, attUsers, handleExport, attError, attLoading,
+    attRows, computeRunning, attPagination, attPage, setAttPage, selectedDayTotal, attSummary, attActiveNow,
+    leaves, leaveActionId, handleLeaveDecision,
+    attDashboard, attDashboardLoading, attDashboardError, attDashboardDate, setAttDashboardDate,
   };
 }
