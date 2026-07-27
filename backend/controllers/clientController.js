@@ -879,7 +879,12 @@ exports.getDashboardStats = async (req, res) => {
         overduePayments += 1;
       }
 
-      const isActive = contract.contractStatus === "sent" || contract.contractStatus === "accepted";
+      // "Active" = a real, ongoing contract — everything except one that was
+      // explicitly rejected or has expired. Contracts now stay in "draft"
+      // indefinitely unless an admin manually emails them (no more auto-send
+      // on creation), so draft must count as active or every newly created
+      // contract would silently vanish from this section.
+      const isActive = contract.contractStatus !== "rejected" && contract.contractStatus !== "expired";
       if (isActive) {
         (contract.selectedServices || []).forEach((cat) => {
           if (!cat?.enabled || !(cat.selections || []).length) return;

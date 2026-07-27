@@ -284,7 +284,7 @@ export default function ClientsSection({ clients = [], contracts = [], dashboard
 
       {/* ── Service Wise Active Cases / Revenue Summary ── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 18, marginBottom: 18 }}>
-        <SectionCard Icon={Layers} accent={TEAL} title="Service Wise Active Cases" subtitle="Only status = sent/accepted contracts count">
+        <SectionCard Icon={Layers} accent={TEAL} title="Service Wise Active Cases" subtitle="Excludes rejected/expired contracts">
           {loadingStats ? (
             <Skeleton height={160} radius={12} />
           ) : serviceWiseActiveCases.length === 0 ? (
