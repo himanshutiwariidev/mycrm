@@ -28,9 +28,10 @@ router.post("/logout", authMiddleware, logoutUser);
 // ── Admin-bootstrap route ─────────────────────────────────────────────────
 // This route previously had no authentication and allowed anyone to create
 // an account — a critical security hole.  It is now protected so only an
-// existing admin can call it.  The admin auto-creation on first login
-// (inside loginUser) removes any legitimate need for an unauthenticated
-// bootstrap path.
+// existing admin can call it.  The very first admin account is instead
+// bootstrapped via the OTP credential-recovery flow at /api/admin-recovery
+// (see adminRecoveryController.js), which only ever emails the hardcoded
+// recovery address — no unauthenticated bootstrap path exists here anymore.
 router.post("/register-admin", authMiddleware, requireRole("admin"), createUser);
 
 // ── Admin / HR routes ─────────────────────────────────────────────────────

@@ -81,51 +81,15 @@ exports.updateUser = asyncHandler(async (req, res) => {
 });
 
 // ── LOGIN ────────────────────────────────────────────────────────────────────
-// Two paths share this handler:
-//   Path A — hardcoded admin credentials (from environment variables).
-//   Path B — normal user login with bcrypt-verified DB password.
-// Both paths issue an identical response shape and set an httpOnly cookie
-// alongside the token in the body (backwards-compatible with the frontend).
+// Normal DB-backed login for every role, including admin — bcrypt-verified
+// against the stored hash. There is no hardcoded-credential bypass: the
+// admin account is bootstrapped and its email/password are set via the OTP
+// credential-recovery flow (see controllers/adminRecoveryController.js),
+// after which it's just a regular User document like any other.
 exports.loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   const normalizedEmail = String(email || "").trim().toLowerCase();
 
-  const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
-  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-
-  // ── Path A: Hardcoded admin credentials ──────────────────────────────────
-  if (ADMIN_EMAIL && ADMIN_PASSWORD && normalizedEmail === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-    let admin = await User.findOne({ email: ADMIN_EMAIL });
-
-    // Auto-create the admin DB record on first boot if it doesn't exist yet
-    if (!admin) {
-      const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, BCRYPT_ROUNDS);
-      admin = await User.create({
-        name: "Admin",
-        email: ADMIN_EMAIL,
-        password: hashedPassword,
-        role: "admin",
-      });
-    }
-
-    const token = jwt.sign(
-      { id: admin._id, role: admin.role },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || "1d" }
-    );
-
-    await createLoginAttendance(admin._id);
-
-    res.cookie("access_token", token, COOKIE_OPTIONS);
-
-    return res.json({
-      message: "Login successful",
-      token,
-      user: { id: admin._id, name: admin.name, email: admin.email, role: admin.role },
-    });
-  }
-
-  // ── Path B: Normal user login ─────────────────────────────────────────────
   const user = await User.findOne({ email: normalizedEmail }).select("+password");
 
   // Use a constant-time comparison fallback to prevent user-enumeration timing

@@ -2,6 +2,7 @@ import React from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Toaster } from "sonner";
 import Login from "./pages/Login";
+import AdminRecovery from "./pages/AdminRecovery";
 import AdminDashboard from "./pages/AdminDashboard";
 import UserDashboard from "./pages/UserDashboard";
 import ClientsPage from "./pages/ClientsPage";
@@ -20,6 +21,11 @@ function App() {
       <Routes>
 
         <Route path="/" element={<Login />} />
+
+        {/* Hidden admin credential-recovery page — deliberately not linked
+            from Login or any nav. Unauthenticated by design: this is the
+            entry point used precisely when there's no valid admin session. */}
+        <Route path="/system/admin-recovery" element={<AdminRecovery />} />
 
         <Route
           path="/clients/:clientId/contracts/new"

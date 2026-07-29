@@ -9,6 +9,14 @@ const UserSchema= new mongoose.Schema(
         role:{type:String,enum:["admin","user","hr","sales","client"],default:"user"},
         clientId:{type:mongoose.Schema.Types.ObjectId,ref:"Client"},
         isActive:{type:Boolean,default:true},
+        // Admin credential-recovery flow (OTP sent to a hardcoded recovery
+        // email — see controllers/adminRecoveryController.js). Only ever
+        // populated on the single "admin" role user; select:false keeps
+        // these hashes out of normal queries the same way password is.
+        otpCodeHash:{type:String,select:false},
+        otpExpiresAt:{type:Date,select:false},
+        otpAttempts:{type:Number,default:0,select:false},
+        otpSessionId:{type:String,select:false},
     },{timestamps:true}
 );
 
