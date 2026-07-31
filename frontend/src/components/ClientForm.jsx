@@ -32,6 +32,15 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
   const [salesUsers, setSalesUsers] = useState([]);
   const [salesUsersLoading, setSalesUsersLoading] = useState(true);
 
+  // A logged-in Sales Person is always force-assigned to their own new
+  // clients on the backend (see createClient), regardless of what this form
+  // submits — so for them the field is locked to their own name instead of
+  // offering a choice that would silently be overridden.
+  const userRole = localStorage.getItem("role");
+  const userId = localStorage.getItem("userId");
+  const userName = localStorage.getItem("userName");
+  const isSalesUser = userRole === "sales";
+
   useEffect(() => {
     if (client) {
       setFormData({
@@ -39,10 +48,20 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
         salesPerson: client.salesPerson?._id || client.salesPerson || "",
         password: "",
       });
+    } else if (isSalesUser) {
+      setFormData((prev) => ({ ...prev, salesPerson: userId || "" }));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client]);
 
   useEffect(() => {
+    // Sales Persons can't reassign a client to anyone else, so there's no
+    // need to fetch the full list for them.
+    if (isSalesUser) {
+      setSalesUsersLoading(false);
+      return undefined;
+    }
+
     let isMounted = true;
     getUsersByRole("sales")
       .then((res) => {
@@ -57,6 +76,7 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     return () => {
       isMounted = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleChange = (e) => {
@@ -169,14 +189,18 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
         <div className="form-row">
           <div className="form-group">
             <label>Sales Person *</label>
-            <SearchableSelect
-              options={salesUsers.map((u) => ({ value: u._id, label: u.name }))}
-              value={formData.salesPerson}
-              onChange={(value) => setFormData((prev) => ({ ...prev, salesPerson: value }))}
-              placeholder={salesUsersLoading ? "Loading sales users..." : "Select sales person"}
-              emptyLabel="No Sales User Found"
-              disabled={salesUsersLoading}
-            />
+            {isSalesUser ? (
+              <input type="text" value={userName || "You"} disabled readOnly />
+            ) : (
+              <SearchableSelect
+                options={salesUsers.map((u) => ({ value: u._id, label: u.name }))}
+                value={formData.salesPerson}
+                onChange={(value) => setFormData((prev) => ({ ...prev, salesPerson: value }))}
+                placeholder={salesUsersLoading ? "Loading sales users..." : "Select sales person"}
+                emptyLabel="No Sales User Found"
+                disabled={salesUsersLoading}
+              />
+            )}
           </div>
           <div className="form-group">
             <label>Lead Source</label>

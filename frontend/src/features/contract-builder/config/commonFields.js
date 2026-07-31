@@ -13,5 +13,4 @@ export const COMMON_FIELDS = [
   // GST" checkbox on Step 1 (synced into every service), never edited here.
   { name: "gst", type: FIELD_TYPES.NUMBER, label: "GST %", min: 0, max: 100, defaultValue: 0, readOnly: true },
   { name: "finalPrice", type: FIELD_TYPES.CURRENCY, label: "Final Price", readOnly: true, derived: true },
-  { name: "attachments", type: FIELD_TYPES.FILE, label: "Attachments" },
 ];

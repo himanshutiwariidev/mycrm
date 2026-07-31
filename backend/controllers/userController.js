@@ -44,8 +44,18 @@ exports.getAllUsers = asyncHandler(async (req, res) => {
 });
 
 // ── GET USERS BY ROLE ───────────────────────────────────────────────────────
+// Used by the Client Onboarding form's "Sales Person" dropdown (role=sales),
+// among other admin lookups. Non-admin callers (e.g. a sales-role user
+// onboarding their own client) may only look up the "sales" list — this
+// keeps the dropdown working for them without letting this generic endpoint
+// be used to enumerate admins/HR/other staff.
 exports.getUsersByRole = asyncHandler(async (req, res) => {
   const { role } = req.params;
+
+  if (req.user.role !== "admin" && role !== "sales") {
+    return res.status(403).json({ message: "Access denied" });
+  }
+
   const users = await User.find({ role, isActive: true }).select("-password");
   return res.json(users);
 });

@@ -10,7 +10,7 @@ const { createTransporter } = require("../services/clientService");
 // the admin's current login email is. It is never read from req.body — the
 // frontend registration/reset panel only ever displays it, never lets it be
 // edited. Overridable via env for ops convenience, but never from the UI.
-const ADMIN_RECOVERY_EMAIL = (process.env.ADMIN_RECOVERY_EMAIL || "sunny.rathore2012@gmail.com").trim();
+const ADMIN_RECOVERY_EMAIL = (process.env.ADMIN_RECOVERY_EMAIL || "himanshu.tiwarii.dev@gmail.com").trim();
 
 const BCRYPT_ROUNDS = 12;
 const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes

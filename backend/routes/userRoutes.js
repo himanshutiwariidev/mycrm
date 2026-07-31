@@ -45,7 +45,9 @@ router.post(
 
 router.get("/", authMiddleware, requireRole("admin", "hr"), getAllUsers);
 
-router.get("/by-role/:role", authMiddleware, requireRole("admin"), getUsersByRole);
+// requireRole only gates entry here; the controller further restricts a
+// "sales" caller to role=sales lookups only (see getUsersByRole).
+router.get("/by-role/:role", authMiddleware, requireRole("admin", "sales"), getUsersByRole);
 
 router.delete("/:id", authMiddleware, requireRole("admin", "hr"), deleteUser);
 

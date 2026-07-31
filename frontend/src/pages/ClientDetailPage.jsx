@@ -5,14 +5,14 @@ import {
   CreditCard, History, Plus, X, User, CheckCircle2, ChevronDown, ChevronRight,
   Activity, Inbox, IndianRupee,
   UserPlus, Send, RefreshCw, Edit3, ShieldCheck, FilePlus,
-  MessageSquare, TrendingUp, UserCog, Paperclip, UploadCloud, File, Image, FileSpreadsheet,
+  MessageSquare, TrendingUp, UserCog,
 } from "lucide-react";
 import {
   getClientById, updateClient, deleteClient, getClientActivity,
   sendContract, downloadInvoice, deleteContract, deletePaymentReminder,
   getUsersByRole, assignUserToClient, getClientRemarks, addClientRemark,
   getWorkProgress, addWorkProgress, updateWorkProgress,
-  uploadPiAttachment, deletePiAttachment, updateDeliverable,
+  updateDeliverable,
 } from "../services/clientApi";
 import ClientForm from "../components/ClientForm";
 import PaymentReminderForm from "../components/PaymentReminderForm";
@@ -167,9 +167,6 @@ export default function ClientDetailPage() {
   const [progressForm, setProgressForm] = useState(null); // null | { editingId, title, description, status, percentage }
   const [progressSaving, setProgressSaving] = useState(false);
 
-  const [piUploading, setPiUploading] = useState(false);
-  const [piError, setPiError] = useState("");
-
   const userRole = localStorage.getItem("role");
   const userId = localStorage.getItem("userId");
   const isAdmin = userRole === "admin";
@@ -262,32 +259,6 @@ export default function ClientDetailPage() {
       alert(err.response?.data?.message || "Failed to save work progress update");
     } finally {
       setProgressSaving(false);
-    }
-  };
-
-  const handlePiUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setPiError("");
-    setPiUploading(true);
-    try {
-      await uploadPiAttachment(clientId, file);
-      await loadAll();
-    } catch (err) {
-      setPiError(err.response?.data?.message || "Upload failed");
-    } finally {
-      setPiUploading(false);
-      e.target.value = "";
-    }
-  };
-
-  const handlePiDelete = async (attachmentId, name) => {
-    if (!window.confirm(`Delete "${name}"?`)) return;
-    try {
-      await deletePiAttachment(clientId, attachmentId);
-      await loadAll();
-    } catch (err) {
-      alert(err.response?.data?.message || "Failed to delete attachment");
     }
   };
 
@@ -912,88 +883,6 @@ export default function ClientDetailPage() {
               </table>
             </div>
           )}
-
-          {/* PI Attachments */}
-          <div className="cd-pi-section">
-            <div className="cd-pi-header">
-              <div className="cd-pi-header-left">
-                <Paperclip size={16} strokeWidth={2} color="#f7931e" />
-                <h3>PI Attachments</h3>
-                <span className="cd-pi-count">{(client.piAttachments || []).length}</span>
-              </div>
-              {isAdmin && (
-                <label className={`cd-pi-upload-btn${piUploading ? " disabled" : ""}`}>
-                  <UploadCloud size={14} strokeWidth={2.2} />
-                  {piUploading ? "Uploading..." : "Attach PI"}
-                  <input
-                    type="file"
-                    hidden
-                    accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx"
-                    disabled={piUploading}
-                    onChange={handlePiUpload}
-                  />
-                </label>
-              )}
-            </div>
-            {piError && <p className="cd-pi-error">{piError}</p>}
-            {(client.piAttachments || []).length === 0 ? (
-              <div className="cd-pi-empty">
-                <Paperclip size={22} strokeWidth={1.5} />
-                <span>No PI attachments yet</span>
-              </div>
-            ) : (
-              <div className="cd-pi-list">
-                {[...(client.piAttachments || [])].reverse().map((att) => {
-                  const ext = att.originalname?.split(".").pop()?.toLowerCase() || "";
-                  const isImage = ["png", "jpg", "jpeg"].includes(ext);
-                  const isPdf = ext === "pdf";
-                  const isSheet = ["xls", "xlsx"].includes(ext);
-                  const FileIcon = isImage ? Image : isSheet ? FileSpreadsheet : File;
-                  const iconColor = isPdf ? "#e8590c" : isImage ? "#2563eb" : isSheet ? "#16a34a" : "#7c3aed";
-                  const sizeKb = att.size ? (att.size / 1024).toFixed(1) : "—";
-                  const baseUrl = import.meta.env.VITE_API_BASE_URL
-                    ? import.meta.env.VITE_API_BASE_URL.replace("/api", "")
-                    : "http://localhost:4050";
-                  const fileUrl = `${baseUrl}/uploads/${att.filename}`;
-
-                  return (
-                    <div key={att._id} className="cd-pi-item">
-                      <div className="cd-pi-icon" style={{ background: `${iconColor}18`, color: iconColor }}>
-                        <FileIcon size={18} strokeWidth={1.8} />
-                      </div>
-                      <div className="cd-pi-info">
-                        <span className="cd-pi-name" title={att.originalname}>{att.originalname}</span>
-                        <span className="cd-pi-meta">
-                          {sizeKb} KB · {att.uploadedBy?.name || "—"} · {fmtDate(att.uploadedAt)}
-                        </span>
-                      </div>
-                      <div className="cd-pi-actions">
-                        <a
-                          href={fileUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          download={att.originalname}
-                          className="btn-small"
-                          title="Download"
-                        >
-                          <Download size={14} strokeWidth={2.1} />
-                        </a>
-                        {isAdmin && (
-                          <button
-                            className="btn-small btn-small-danger"
-                            title="Delete attachment"
-                            onClick={() => handlePiDelete(att._id, att.originalname)}
-                          >
-                            <Trash2 size={14} strokeWidth={2.1} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
         </div>
       )}
 

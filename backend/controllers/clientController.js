@@ -37,6 +37,15 @@ exports.createClient = async (req, res) => {
       }
     }
 
+    // Sales Person assignment:
+    //  - Admin (or any other role reaching this endpoint): use whatever was
+    //    selected in the form, unchanged — including left blank.
+    //  - Sales: always force-assign to themselves, regardless of what (if
+    //    anything) was submitted. A salesperson can only ever onboard clients
+    //    under their own name, so this also closes off the client showing up
+    //    with no owner — or the wrong owner — on their own Sales Dashboard.
+    const assignedSalesPerson = req.user.role === "sales" ? req.user.id : salesPerson;
+
     const client = await Client.create({
       clientName,
       email: normalizedEmail,
@@ -44,7 +53,7 @@ exports.createClient = async (req, res) => {
       companyName,
       gstNo,
       tanNo,
-      salesPerson,
+      salesPerson: assignedSalesPerson,
       leadSource,
       clientType,
       projectType,
@@ -62,7 +71,7 @@ exports.createClient = async (req, res) => {
       onboardedAt: new Date(),
     });
 
-    await logActivity(client._id, "client_created", `Client "${clientName}" was onboarded`, { salesPerson, leadSource, status: client.status });
+    await logActivity(client._id, "client_created", `Client "${clientName}" was onboarded`, { salesPerson: assignedSalesPerson, leadSource, status: client.status });
 
     if (password) {
       try {

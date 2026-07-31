@@ -96,10 +96,9 @@ function withLeafDefaults(leafConfig, meta) {
     COMMON_FIELDS.forEach((f) => {
       advanced[f.name] = getFieldDefaultValue(f);
     });
-    if (leafConfig.pricing?.defaultUnitPrice !== undefined) {
-      advanced.sellingPrice = leafConfig.pricing.defaultUnitPrice;
-      advanced.estimatedCost = leafConfig.pricing.defaultUnitPrice;
-    }
+    // Estimated Cost / Selling Price are left blank on purpose — admin or
+    // sales must fill these in manually, rather than being seeded from the
+    // config's defaultUnitPrice (which was previously a misleading pre-fill).
     // When the contract's own GST checkbox (Step 1) is enabled, every
     // service's Advanced Settings GST field should reflect that admin-set
     // rate instead of the config's static default, so the whole contract
