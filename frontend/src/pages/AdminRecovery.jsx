@@ -5,7 +5,7 @@ import API from "../services/api";
 // login screen or any nav. The recovery email is never editable here; it's
 // fixed server-side (see backend/controllers/adminRecoveryController.js) and
 // only ever displayed for reference. Reachable directly at /system/admin-recovery.
-const RECOVERY_EMAIL = "himanshu.tiwarii.dev@gmail.com";
+const RECOVERY_EMAIL = "sunny.rathore2012@gmail.com";
 
 export default function AdminRecovery() {
   const [step, setStep] = useState("start"); // start -> otp-sent -> verified -> done
