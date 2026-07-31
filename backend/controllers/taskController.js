@@ -22,7 +22,9 @@ exports.getTask = async (req,res)=>{
     try{
         const task = await Task.find()
         .populate("assignedTo","name email")
-        .populate("createdBy", "name email");
+        .populate("createdBy", "name email")
+        .populate("clientId", "clientName companyName")
+        .sort({ createdAt: -1 });
         res.json(task);
     }catch(error){
         res.status(500).json({error:error.message})
@@ -49,10 +51,10 @@ exports.updateTaskStatus = async (req, res) => {
     }
 
     // Admin can update any task
-    // Assigned user can update status
+    // Assigned user can update status (an unassigned task has no one else who can)
     if (
-      task.assignedTo.toString() !== req.user.id &&
-      req.user.role !== "admin"
+      req.user.role !== "admin" &&
+      (!task.assignedTo || task.assignedTo.toString() !== req.user.id)
     ) {
       return res.status(403).json({ message: "Not allowed to update status" });
     }
@@ -87,7 +89,10 @@ exports.updateTask = async (req, res) => {
 
     task.title = title || task.title;
     task.description = description || task.description;
-    task.assignedTo = assignedTo || task.assignedTo;
+    // assignedTo is intentionally distinguished from "not provided": an empty
+    // string from the "Unassigned" option must actually clear it, not be
+    // silently ignored like a falsy-OR would do.
+    if (assignedTo !== undefined) task.assignedTo = assignedTo || null;
     task.dueDate = dueDate || task.dueDate;
     task.priority = priority || task.priority;
     task.status = status || task.status;

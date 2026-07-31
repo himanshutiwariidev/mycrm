@@ -18,16 +18,6 @@ import {
   listFromResponse,
 } from "./shared";
 
-// Maps a Client's latest Work Progress status onto the same 3-bucket model used by
-// plain Tasks (pending/in-progress/completed), so clients assigned via the Client
-// Detail page's "Assign Task" action count toward the same Total/Done/In-Progress/
-// Pending stats as real Task-model entries shown on "All Tasks".
-const mapProgressToTaskStatus = (progressStatus) => {
-  if (progressStatus === "Completed") return "completed";
-  if (progressStatus === "In Progress") return "in-progress";
-  return "pending";
-};
-
 export default function useAdminDashboard() {
   const navigate = useNavigate();
 
@@ -470,22 +460,14 @@ export default function useAdminDashboard() {
     }
   };
 
-  // Clients assigned to a non-sales User via the Client Detail page's "Assign Task"
-  // action are real assigned work too — fold them into the same task counts shown
-  // on "All Tasks" so the Dashboard's Total/Done/In-Progress/Pending stay consistent.
-  const assignedClientTasks = clients.filter(c => c.assignedUser);
-  const assignedClientStatuses = assignedClientTasks.map(c => {
-    const latest = c.workProgress?.[c.workProgress.length - 1];
-    return mapProgressToTaskStatus(latest?.status);
-  });
-  const totalTaskCount = tasks.length + assignedClientTasks.length;
+  // Task documents are the single source of truth for assigned work — both
+  // manually-created tasks and the ones auto-generated from contract
+  // deliverables (see backend createContract) live in the same `tasks` array.
+  const totalTaskCount = tasks.length;
 
-  const done = tasks.filter(t => t.status === "completed").length
-    + assignedClientStatuses.filter(s => s === "completed").length;
-  const inProg = tasks.filter(t => t.status === "in-progress").length
-    + assignedClientStatuses.filter(s => s === "in-progress").length;
-  const pend = tasks.filter(t => !t.status || t.status === "pending").length
-    + assignedClientStatuses.filter(s => s === "pending").length;
+  const done = tasks.filter(t => t.status === "completed").length;
+  const inProg = tasks.filter(t => t.status === "in-progress").length;
+  const pend = tasks.filter(t => !t.status || t.status === "pending").length;
   const admins = users.filter(u => u.role === "admin").length;
   const regularUsers = users.filter(u => u.role === "user").length;
   const completionRate = totalTaskCount ? Math.round((done / totalTaskCount) * 100) : 0;

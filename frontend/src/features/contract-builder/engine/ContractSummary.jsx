@@ -7,7 +7,18 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useContractWizard } from "../context/useContractWizard";
 import { getCategoryMeta } from "../config/serviceCategories";
+import { getLeafConfig } from "../utils/configLookup";
 import { computeLeafFinalPrice, formatCurrency, computeContractTaxSummary } from "../config/pricing";
+
+function describeQuantity(sel, categoryId) {
+  const leafConfig = getLeafConfig(categoryId, sel.path);
+  const itemQuantityField = (leafConfig?.fields || []).find((f) => f.type === "per-item-quantity");
+  const selectedItems = itemQuantityField ? sel.values?.[itemQuantityField.sourceField] : null;
+  if (itemQuantityField && Array.isArray(selectedItems) && selectedItems.length) {
+    return `${selectedItems.length} item${selectedItems.length === 1 ? "" : "s"}`;
+  }
+  return sel.values?.quantityPerMonth || sel.values?.quantity || null;
+}
 
 export default function ContractSummary({ variant = "sidebar" }) {
   const { state, dispatch, ACTIONS } = useContractWizard();
@@ -48,7 +59,7 @@ export default function ContractSummary({ variant = "sidebar" }) {
             <ul className="space-y-1.5 pl-1">
               {cat.selections.map((sel) => {
                 const { finalPrice } = computeLeafFinalPrice(sel.advanced);
-                const qty = sel.values?.quantityPerMonth || sel.values?.quantity;
+                const qty = describeQuantity(sel, cat.categoryId);
                 return (
                   <li key={sel.path} className="flex items-center justify-between gap-2 rounded-md bg-muted/60 px-2.5 py-1.5 text-xs">
                     <span className="truncate">

@@ -11,6 +11,7 @@ import TagsInput from "./TagsInput";
 import MultiSelectField from "./MultiSelectField";
 import DateField from "./DateField";
 import AttachmentUploader from "./AttachmentUploader";
+import PerItemQuantityField from "./PerItemQuantityField";
 
 function FieldShell({ field, className, children }) {
   return (
@@ -54,7 +55,7 @@ export default function DynamicFieldRenderer({ fields = [], values = {}, onChang
       {fields.map((field) => {
         const value = values[field.name];
         const set = (val) => onChange(field.name, val);
-        const span2 = field.type === FIELD_TYPES.TEXTAREA || field.type === FIELD_TYPES.MULTISELECT;
+        const span2 = field.type === FIELD_TYPES.TEXTAREA || field.type === FIELD_TYPES.MULTISELECT || field.type === FIELD_TYPES.PER_ITEM_QUANTITY;
 
         return (
           <FieldShell key={field.name} field={field} className={span2 ? "sm:col-span-2" : undefined}>
@@ -105,6 +106,9 @@ export default function DynamicFieldRenderer({ fields = [], values = {}, onChang
               </div>
             )}
             {field.type === FIELD_TYPES.FILE && <AttachmentUploader value={value || []} onChange={set} />}
+            {field.type === FIELD_TYPES.PER_ITEM_QUANTITY && (
+              <PerItemQuantityField field={field} values={values} value={value} onChange={set} />
+            )}
           </FieldShell>
         );
       })}

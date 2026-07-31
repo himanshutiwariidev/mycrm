@@ -1,15 +1,9 @@
 import React from "react";
-import { useNavigate } from "react-router-dom";
-import { Calendar, ClipboardList, Pencil, Plus, Trash2, User, Briefcase, ChevronRight } from "lucide-react";
+import { Calendar, ClipboardList, Pencil, Plus, Trash2, User } from "lucide-react";
 import { IconBtn, PRIORITY, STATUS, T } from "./shared";
 
-export default function TasksSection({ tasks, clients = [], setTab, openEditTask, setDeleteTask }) {
-  const navigate = useNavigate();
-  // Clients assigned to a non-sales User via the Client Detail page's "Assign Task"
-  // action are real work assigned to someone too — surface them here alongside
-  // plain Task-model entries so Admin sees everything assigned, in one place.
-  const assignedClientTasks = clients.filter((c) => c.assignedUser);
-  const totalCount = tasks.length + assignedClientTasks.length;
+export default function TasksSection({ tasks, setTab, openEditTask, setDeleteTask }) {
+  const totalCount = tasks.length;
 
   return (
     <div className="fade-up">
@@ -59,36 +53,6 @@ export default function TasksSection({ tasks, clients = [], setTab, openEditTask
               </div>
             );
           })}
-
-          {assignedClientTasks.map((client, i) => (
-            <div
-              key={client._id}
-              className="card card-in"
-              onClick={() => navigate(`/clients/${client._id}`)}
-              style={{
-                background: T.card, border: `1.5px solid ${T.border}`, borderRadius: 14,
-                padding: "18px 20px", animationDelay: `${(tasks.length + i) * 35}ms`,
-                display: "flex", alignItems: "center", boxShadow: "0 1px 3px rgba(0,0,0,.04)",
-                cursor: "pointer",
-              }}
-            >
-              <div style={{ width: 3, borderRadius: 99, background: T.brand, alignSelf: "stretch", marginRight: 16, flexShrink: 0, minHeight: 40 }} />
-              <Briefcase size={18} color={T.brand} strokeWidth={2} style={{ marginRight: 14, flexShrink: 0 }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", marginBottom: 4 }}>
-                  <h3 style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14.5, color: T.textPrimary }}>{client.clientName}</h3>
-                  <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 5, color: T.brand, background: T.brandLight, border: `1px solid ${T.brandMid}`, letterSpacing: ".07em", textTransform: "uppercase" }}>Client Assignment</span>
-                </div>
-                <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: 12, color: T.textMuted, alignItems: "center" }}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 5 }}><User size={12} strokeWidth={1.8} />Assigned to {client.assignedUser?.name || "Unassigned"}</span>
-                  {client.companyName && <span>{client.companyName}</span>}
-                </div>
-              </div>
-              <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, color: T.brand, marginLeft: 14, flexShrink: 0 }}>
-                View Client <ChevronRight size={13} strokeWidth={2.4} />
-              </span>
-            </div>
-          ))}
         </div>
       )}
     </div>

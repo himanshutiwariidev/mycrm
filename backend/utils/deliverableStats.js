@@ -1,5 +1,5 @@
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
-const PERIOD_MS = { week: 7 * ONE_DAY_MS, month: 30 * ONE_DAY_MS };
+const PERIOD_MS = { week: 7 * ONE_DAY_MS, month: 30 * ONE_DAY_MS, year: 365 * ONE_DAY_MS };
 
 function computeDeliverableStats(deliverable, sinceDate) {
   const quantity = deliverable.quantity || 0;
@@ -13,7 +13,7 @@ function computeDeliverableStats(deliverable, sinceDate) {
     return { frequency, periodsElapsed: 1, due: quantity, delivered, pending: 0, status: deliverable.status || "Pending" };
   }
 
-  if (frequency === "week" || frequency === "month") {
+  if (frequency === "week" || frequency === "month" || frequency === "year") {
     const elapsedMs = Math.max(0, Date.now() - new Date(sinceDate).getTime());
     const periodsElapsed = Math.floor(elapsedMs / PERIOD_MS[frequency]) + 1;
     const due = quantity * periodsElapsed;

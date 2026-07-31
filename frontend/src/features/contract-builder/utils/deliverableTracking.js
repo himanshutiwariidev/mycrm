@@ -7,7 +7,7 @@
  */
 export function getTrackingMode(leafConfig) {
   const hasQuantityField = (leafConfig?.fields || []).some(
-    (f) => f.name === "quantityPerMonth" || f.name === "quantity"
+    (f) => f.name === "quantityPerMonth" || f.name === "quantity" || f.type === "per-item-quantity"
   );
   return hasQuantityField ? "quantity" : "status";
 }

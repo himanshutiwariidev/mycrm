@@ -38,14 +38,24 @@ const META_ADS_CAMPAIGNS = [
   "Website Traffic",
 ];
 
-function buildCampaignItems(labels, defaultUnitPrice) {
-  return labels.map((label) => ({
-    id: slugify(label),
-    label,
-    fields: CAMPAIGN_FIELDS,
+function toOptions(labels) {
+  return labels.map((label) => ({ value: slugify(label), label }));
+}
+
+// Pricing lives on the ad platform itself (Google Ads, Meta Ads) — the
+// specific campaign type (Search Ads, Shopping Ads, ...) is recorded as a
+// checklist field on that one package rather than as its own priced leaf.
+function buildAdPackage(adTypeLabel, campaignList, defaultUnitPrice) {
+  return {
+    id: "package",
+    label: `${adTypeLabel} Campaign Package`,
+    fields: [
+      { name: "campaignTypes", type: FIELD_TYPES.MULTISELECT, label: "Campaign Types", options: toOptions(campaignList) },
+      ...CAMPAIGN_FIELDS,
+    ],
     commonFields: true,
     pricing: { basis: "flat", defaultUnitPrice },
-  }));
+  };
 }
 
 export const sponsoredAdsConfig = {
@@ -55,8 +65,8 @@ export const sponsoredAdsConfig = {
   description: "Google Ads, Meta Ads and OTT advertising campaigns.",
   kind: "tab-tree",
   groups: [
-    { id: "googleAds", label: "Google Ads", kind: "grid", items: buildCampaignItems(GOOGLE_ADS_CAMPAIGNS, 8000) },
-    { id: "metaAds", label: "Meta Ads", kind: "grid", items: buildCampaignItems(META_ADS_CAMPAIGNS, 6000) },
+    { id: "googleAds", label: "Google Ads", kind: "leaf-group", items: [buildAdPackage("Google Ads", GOOGLE_ADS_CAMPAIGNS, 8000)] },
+    { id: "metaAds", label: "Meta Ads", kind: "leaf-group", items: [buildAdPackage("Meta Ads", META_ADS_CAMPAIGNS, 6000)] },
     {
       id: "ottAds",
       label: "OTT Ads",

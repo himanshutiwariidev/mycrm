@@ -45,7 +45,11 @@ export default function Step4ReviewContract() {
             <p className="font-medium">{state.meta.timeline || "—"}</p>
           </div>
           <div>
-            <p className="text-muted-foreground">Valid Until</p>
+            <p className="text-muted-foreground">Contract Start Date</p>
+            <p className="font-medium">{state.meta.contractStartDate ? new Date(state.meta.contractStartDate).toLocaleDateString() : "—"}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Contract End Date</p>
             <p className="font-medium">{state.meta.validUntil ? new Date(state.meta.validUntil).toLocaleDateString() : "—"}</p>
           </div>
           <div>

@@ -23,6 +23,10 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     contactPerson: "",
     designation: "",
     status: "open",
+    // "active" for current/ongoing clients, "inactive" (labeled "Dead" in the
+    // UI) for past clients — lets old clients be entered into the CRM as
+    // historical records instead of implying they're still being worked.
+    activeStatus: "active",
     notes: "",
     password: "",
   });
@@ -138,25 +142,24 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
 
       <form onSubmit={handleSubmit} className="client-form">
         <div className="form-row">
-          <div className="form-group">
-            <label>Client Name *</label>
+            <div className="form-group">
+            <label>Company Name</label>
             <input
               type="text"
-              name="clientName"
-              value={formData.clientName}
+              name="companyName"
+              value={formData.companyName}
               onChange={handleChange}
-              required
-              placeholder="Enter client name"
+              placeholder="Enter company name"
             />
           </div>
           <div className="form-group">
-            <label>Email *</label>
+            <label>Email</label>
             <input
               type="email"
               name="email"
               value={formData.email}
               onChange={handleChange}
-              required
+              
               placeholder="Enter email"
             />
           </div>
@@ -175,15 +178,17 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
             />
           </div>
           <div className="form-group">
-            <label>Company Name</label>
+            <label>Client Name *</label>
             <input
               type="text"
-              name="companyName"
-              value={formData.companyName}
+              name="clientName"
+              value={formData.clientName}
               onChange={handleChange}
-              placeholder="Enter company name"
+              required
+              placeholder="Enter client name"
             />
           </div>
+        
         </div>
 
         <div className="form-row">
@@ -225,7 +230,7 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
               <option value="pvt ltd">Pvt Ltd</option>
               <option value="ltd">Ltd</option>
               <option value="llp">LLP</option>
-              <option value="hup">HUF</option>
+              <option value="huf">HUF</option>
               <option value="proprietor">Proprietor</option>
               <option value="other">Other</option>
             </select>
@@ -236,6 +241,19 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
               <option value="service">Service</option>
               <option value="product">Product</option>
             </select>
+          </div>
+        </div>
+
+        <div className="form-row">
+          <div className="form-group">
+            <label>Client Status</label>
+            <select name="activeStatus" value={formData.activeStatus} onChange={handleChange}>
+              <option value="active">Active</option>
+              <option value="inactive">Dead</option>
+            </select>
+            <small style={{ color: "#6b7280", fontSize: 12 }}>
+              Mark past clients as "Dead" when adding historical records.
+            </small>
           </div>
         </div>
 

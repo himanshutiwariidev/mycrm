@@ -100,11 +100,21 @@
   font-weight: 600;
 }
 
+.cd-header-right {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .cd-status-block {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .cd-active-toggle {
@@ -141,8 +151,6 @@
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  padding-top: 16px;
-  border-top: 1px solid #f0f1f6;
 }
 
 .cd-action-btn {

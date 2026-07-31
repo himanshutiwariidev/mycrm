@@ -75,11 +75,19 @@ export default function Step1ClientDetails({ client }) {
             />
           </div>
           <div className="space-y-1.5">
-            <Label>Valid Until</Label>
+            <Label>Contract Start Date</Label>
+            <DateField
+              value={state.meta.contractStartDate}
+              onChange={(value) => setField("contractStartDate", value)}
+              placeholder="Select start date"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Contract End Date</Label>
             <DateField
               value={state.meta.validUntil}
               onChange={(value) => setField("validUntil", value)}
-              placeholder="Select expiry date"
+              placeholder="Select end date"
             />
           </div>
           <div className="space-y-1.5 sm:col-span-2">

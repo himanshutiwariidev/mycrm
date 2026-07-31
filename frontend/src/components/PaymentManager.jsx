@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { addPayment } from "../services/clientApi";
+import { Trash2 } from "lucide-react";
+import { addPayment, deletePayment } from "../services/clientApi";
 import "./PaymentManager.css";
 
 const PAYMENT_METHODS = ["UPI", "Cash", "Cheque", "Bank Transfer", "Card", "Other"];
@@ -25,6 +26,7 @@ const PaymentManager = ({ contract, onUpdated }) => {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState(null);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -45,6 +47,20 @@ const PaymentManager = ({ contract, onUpdated }) => {
       setError(err.response?.data?.message || "Failed to add payment");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDelete = async (paymentId, amount) => {
+    if (!window.confirm(`Delete this ₹${Number(amount).toLocaleString("en-IN")} payment? This cannot be undone.`)) return;
+    setDeletingId(paymentId);
+    setError("");
+    try {
+      const response = await deletePayment(contract._id, paymentId);
+      onUpdated(response.data.contract);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to delete payment");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -165,6 +181,7 @@ const PaymentManager = ({ contract, onUpdated }) => {
                 <th>Amount</th>
                 <th>Method</th>
                 <th>Notes</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -174,6 +191,27 @@ const PaymentManager = ({ contract, onUpdated }) => {
                   <td>₹{Number(payment.amount).toLocaleString("en-IN")}</td>
                   <td>{payment.method}</td>
                   <td>{payment.notes || "—"}</td>
+                  <td>
+                    <button
+                      type="button"
+                      title="Delete payment"
+                      disabled={deletingId === payment._id}
+                      onClick={() => handleDelete(payment._id, payment.amount)}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        background: "none",
+                        border: "none",
+                        color: "#dc2626",
+                        cursor: deletingId === payment._id ? "not-allowed" : "pointer",
+                        opacity: deletingId === payment._id ? 0.5 : 1,
+                        padding: 4,
+                      }}
+                    >
+                      <Trash2 size={14} strokeWidth={2.1} />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

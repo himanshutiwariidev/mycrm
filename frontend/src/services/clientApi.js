@@ -115,6 +115,9 @@ export const deleteDeliverable = (contractId, deliverableId) =>
 export const addPayment = (contractId, paymentData) =>
   API.post(`/clients/contracts/${contractId}/payments`, paymentData);
 
+export const deletePayment = (contractId, paymentId) =>
+  API.delete(`/clients/contracts/${contractId}/payments/${paymentId}`);
+
 // ============= CONTRACT PI (PROFORMA INVOICE) =============
 
 export const uploadContractPi = (contractId, file) => {

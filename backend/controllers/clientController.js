@@ -3,6 +3,7 @@ const Client = require("../models/Client");
 const Contract = require("../models/Contract");
 const PaymentReminder = require("../models/PaymentReminder");
 const User = require("../models/User");
+const Task = require("../models/Task");
 const clientService = require("../services/clientService");
 const { computeDeliverableStats, decorateContract } = require("../utils/deliverableStats");
 const { logActivity } = require("../utils/activityLogger");
@@ -462,9 +463,24 @@ exports.getClientActivity = async (req, res) => {
 
 // ============= CONTRACT OPERATIONS =============
 
+// Turns a freshly-created contract's deliverables into unassigned Task
+// records so they show up in the "All Tasks" section for an admin to assign
+// to a team member — replaces the old client-level "Assign Task" flow.
+async function createTasksFromDeliverables(contract, client, createdByUserId) {
+  if (!contract.deliverables?.length) return;
+  const tasks = contract.deliverables.map((d) => ({
+    title: `${client.clientName}: ${d.title}`,
+    description: `Auto-created from contract "${contract.projectName}" (${contract.contractNumber})`,
+    createdBy: createdByUserId,
+    contractId: contract._id,
+    clientId: client._id,
+  }));
+  await Task.insertMany(tasks);
+}
+
 exports.createContract = async (req, res) => {
   try {
-    const { clientId, projectName, projectDescription, projectScope, timeline, projectAmount, preTaxAmount, gstEnabled, gstPercent, gstAmount, tdsEnabled, tdsPercent, tdsAmount, currency, paymentTerms, validUntil, notes, deliverables, nextDueDate, selectedServices, pricingSummary, payments } = req.body;
+    const { clientId, projectName, projectDescription, projectScope, timeline, contractStartDate, projectAmount, preTaxAmount, gstEnabled, gstPercent, gstAmount, tdsEnabled, tdsPercent, tdsAmount, currency, paymentTerms, validUntil, notes, deliverables, nextDueDate, selectedServices, pricingSummary, payments } = req.body;
 
     if (!clientId || !projectName || !projectDescription || !projectAmount) {
       return res.status(400).json({ message: "Missing required fields: clientId, projectName, projectDescription, projectAmount" });
@@ -484,6 +500,7 @@ exports.createContract = async (req, res) => {
       projectDescription,
       projectScope,
       timeline,
+      contractStartDate,
       projectAmount,
       preTaxAmount: preTaxAmount ?? projectAmount,
       gstEnabled: gstEnabled || false,
@@ -503,6 +520,16 @@ exports.createContract = async (req, res) => {
       payments: payments || [],
       contractStatus: "draft",
     });
+
+    // Auto-create one unassigned Task per deliverable so they show up in
+    // "All Tasks" for an admin to assign to a team member — replaces the old
+    // client-level "Assign Task" flow. Best-effort: a failure here must never
+    // fail contract creation itself.
+    try {
+      await createTasksFromDeliverables(contract, client, req.user.id);
+    } catch (taskError) {
+      console.error("Error auto-creating tasks from deliverables:", taskError);
+    }
 
     // No PDF/email is generated on creation anymore — the contract is
     // immediately visible to the client in their portal (getMyProject
@@ -744,6 +771,32 @@ exports.addPayment = async (req, res) => {
   }
 };
 
+exports.deletePayment = async (req, res) => {
+  try {
+    const { id, paymentId } = req.params;
+    const contract = await Contract.findById(id);
+    if (!contract) {
+      return res.status(404).json({ message: "Contract not found" });
+    }
+
+    const payment = contract.payments.id(paymentId);
+    if (!payment) {
+      return res.status(404).json({ message: "Payment not found" });
+    }
+
+    const { amount, method } = payment;
+    contract.payments.pull({ _id: paymentId });
+    await contract.save();
+
+    await logActivity(contract.clientId, "payment_deleted", `Payment of ₹${amount} removed from "${contract.projectName}"`, { contractId: contract._id, amount, method });
+
+    return res.json({ message: "Payment deleted successfully", contract: decorateContract(contract) });
+  } catch (error) {
+    console.error("Error deleting payment:", error);
+    return res.status(500).json({ message: error.message || "Failed to delete payment" });
+  }
+};
+
 // ============= CLIENT PORTAL (role: "client") =============
 
 exports.getMyProject = async (req, res) => {
@@ -881,7 +934,6 @@ exports.getDashboardStats = async (req, res) => {
         if (stats.status === "Completed") completedDeliverables += 1;
       });
 
-      totalRevenue += contract.receivedAmount || 0;
       outstandingPayments += contract.dueAmount || 0;
 
       if (contract.nextDueDate && contract.dueAmount > 0 && new Date(contract.nextDueDate) < now) {
@@ -953,6 +1005,14 @@ exports.getDashboardStats = async (req, res) => {
         }
       });
     });
+
+    // "Revenue" must reflect money actually collected within the selected range,
+    // keyed off each payment's own paymentDate — same figure as collectedThisMonth
+    // / revenueSummary above. It must NOT be the sum of receivedAmount on contracts
+    // merely created in-range, which silently misses backdated payments recorded
+    // today against older contracts (and over-counts a whole contract's lifetime
+    // receivedAmount just because it happened to be created inside the range).
+    totalRevenue = collectedThisMonth;
 
     const pendingDeliverables = totalDeliverables - completedDeliverables;
     const overallCompletionPercent = totalDue > 0 ? Math.round((totalDelivered / totalDue) * 100) : 0;

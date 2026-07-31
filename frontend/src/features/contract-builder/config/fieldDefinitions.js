@@ -12,6 +12,12 @@ export const FIELD_TYPES = {
   TOGGLE: "toggle",
   RADIO: "radio",
   FILE: "file",
+  // Renders one quantity+period row per item currently selected in another
+  // field on the same leaf (see `sourceField`) — e.g. Social Media's
+  // "Deliverables Included" checklist, where each picked deliverable gets
+  // its own quantity and per-week/month/year cadence instead of one shared
+  // quantity for the whole leaf.
+  PER_ITEM_QUANTITY: "per-item-quantity",
 };
 
 const FIELD_DEFAULTS = {
@@ -26,6 +32,7 @@ const FIELD_DEFAULTS = {
   [FIELD_TYPES.TOGGLE]: false,
   [FIELD_TYPES.RADIO]: "",
   [FIELD_TYPES.FILE]: [],
+  [FIELD_TYPES.PER_ITEM_QUANTITY]: {},
 };
 
 /** Returns the value a field should start with when a leaf/advanced panel is first enabled. */

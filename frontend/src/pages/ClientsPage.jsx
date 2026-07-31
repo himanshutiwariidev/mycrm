@@ -31,7 +31,7 @@ const fmtDate = (value) => {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 };
 
-const CLIENT_TYPE_OPTIONS = ["pvt ltd", "ltd", "llp", "hup", "proprietor", "other"];
+const CLIENT_TYPE_OPTIONS = ["pvt ltd", "ltd", "llp", "huf", "proprietor", "other"];
 
 const STATUS_DONUT_META = {
   converted: { label: "Converted", color: "#16a34a" },
@@ -450,8 +450,8 @@ const ClientsPage = () => {
                       <div className="client-identity">
                         <div className="client-avatar">{initials(client.clientName)}</div>
                         <div>
-                          <h3>{client.clientName}</h3>
-                          {client.companyName && <div className="client-company">{client.companyName}</div>}
+                          <h3>{client.companyName || client.clientName}</h3>
+                          {client.companyName && <div className="client-company">{client.clientName}</div>}
                         </div>
                       </div>
                       <span className={`status ${client.status}`}>{client.status}</span>
@@ -505,8 +505,8 @@ const ClientsPage = () => {
                           <div className="client-identity">
                             <div className="client-avatar" style={{ width: 32, height: 32, fontSize: 12 }}>{initials(client.clientName)}</div>
                             <div>
-                              <div style={{ fontWeight: 700, color: "#0f172a" }}>{client.clientName}</div>
-                              {client.companyName && <div className="client-company">{client.companyName}</div>}
+                              <div style={{ fontWeight: 700, color: "#0f172a" }}>{client.companyName || client.clientName}</div>
+                              {client.companyName && <div className="client-company">{client.clientName}</div>}
                             </div>
                           </div>
                         </td>

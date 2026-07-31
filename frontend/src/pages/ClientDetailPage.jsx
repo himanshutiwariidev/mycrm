@@ -1,23 +1,22 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Pencil, Trash2, Mail, Download, FileText, Wallet, Package,
+  ArrowLeft, Pencil, Trash2, Download, FileText, Wallet, Package,
   CreditCard, History, Plus, X, User, CheckCircle2, ChevronDown, ChevronRight,
-  Activity, Inbox, IndianRupee,
+  Activity, Inbox, IndianRupee, Eye,
   UserPlus, Send, RefreshCw, Edit3, ShieldCheck, FilePlus,
-  MessageSquare, TrendingUp, UserCog,
+  MessageSquare, TrendingUp,
 } from "lucide-react";
 import {
   getClientById, updateClient, deleteClient, getClientActivity,
-  sendContract, downloadInvoice, deleteContract, deletePaymentReminder,
-  getUsersByRole, assignUserToClient, getClientRemarks, addClientRemark,
+  deleteContract, deletePaymentReminder,
+  getClientRemarks, addClientRemark,
   getWorkProgress, addWorkProgress, updateWorkProgress,
   updateDeliverable,
 } from "../services/clientApi";
 import ClientForm from "../components/ClientForm";
 import PaymentReminderForm from "../components/PaymentReminderForm";
 import ContractDetail from "./ContractDetail";
-import SearchableSelect from "../components/SearchableSelect";
 import DeliverableDetailPanel from "../components/DeliverableDetailPanel";
 import { getLeafConfig } from "../features/contract-builder/utils/configLookup";
 import { findMatchingSelection } from "../features/contract-builder/utils/deliverableTracking";
@@ -152,14 +151,10 @@ export default function ClientDetailPage() {
   const [selectedReminder, setSelectedReminder] = useState(null);
   const [manageContractId, setManageContractId] = useState(null);
   const [manageContractTab, setManageContractTab] = useState(null);
+  const [manageContractDefaultTab, setManageContractDefaultTab] = useState(null);
   const [paymentContractId, setPaymentContractId] = useState(null);
   const [expandedDeliverableKey, setExpandedDeliverableKey] = useState(null);
   const [deliverableStatusSaving, setDeliverableStatusSaving] = useState(null);
-
-  const [assignableUsers, setAssignableUsers] = useState([]);
-  const [assigningOpen, setAssigningOpen] = useState(false);
-  const [assigningUserId, setAssigningUserId] = useState("");
-  const [assignSaving, setAssignSaving] = useState(false);
 
   const [remarkText, setRemarkText] = useState("");
   const [remarkSaving, setRemarkSaving] = useState(false);
@@ -196,31 +191,11 @@ export default function ClientDetailPage() {
 
   useEffect(() => { loadAll(); }, [clientId]);
 
-  useEffect(() => {
-    if (!isAdmin) return;
-    getUsersByRole("user").then((res) => setAssignableUsers(res.data || [])).catch(() => setAssignableUsers([]));
-  }, [isAdmin]);
-
   const canManageRemarksOrProgress = isAdmin
     || (client?.salesPerson?._id && String(client.salesPerson._id) === userId)
     || (client?.assignedUser?._id && String(client.assignedUser._id) === userId);
 
   const canAddWorkProgress = isAdmin || (client?.assignedUser?._id && String(client.assignedUser._id) === userId);
-
-  const handleAssignUser = async () => {
-    if (!assigningUserId) return;
-    setAssignSaving(true);
-    try {
-      await assignUserToClient(clientId, assigningUserId);
-      setAssigningOpen(false);
-      setAssigningUserId("");
-      await loadAll();
-    } catch (err) {
-      alert(err.response?.data?.message || "Failed to assign user");
-    } finally {
-      setAssignSaving(false);
-    }
-  };
 
   const handleAddRemark = async () => {
     if (!remarkText.trim()) return;
@@ -330,26 +305,6 @@ export default function ClientDetailPage() {
 
   const latestContract = contracts[0]; // backend sorts contracts desc by createdAt
 
-  const handleSendEmail = async () => {
-    if (!latestContract) return;
-    try {
-      await sendContract(latestContract._id);
-      alert("Email sent to client");
-      loadAll();
-    } catch {
-      alert("Failed to send email");
-    }
-  };
-
-  const handleGenerateInvoice = async () => {
-    if (!latestContract) return;
-    try {
-      await downloadInvoice(latestContract._id, `invoice-${latestContract.contractNumber}.pdf`);
-    } catch {
-      alert("Failed to generate invoice");
-    }
-  };
-
   const handleFormSuccess = () => {
     setShowForm(false);
     loadAll();
@@ -414,84 +369,48 @@ export default function ClientDetailPage() {
               {client.companyName && <p className="cd-company"><User size={13} strokeWidth={2} /> {client.clientName}</p>}
               <div className="cd-meta-row">
                 <span>Sales Person: <strong>{client.salesPerson?.name || "Unassigned"}</strong></span>
-                <span>Assigned User: <strong>{client.assignedUser?.name || "Unassigned"}</strong></span>
                 <span>Created: {fmtDate(client.createdAt)}</span>
                 <span>Updated: {fmtDate(client.updatedAt)}</span>
               </div>
             </div>
           </div>
 
-          <div className="cd-status-block">
-            <select
-              className={`status status-select ${client.status}`}
-              value={client.status}
-              disabled={statusSaving}
-              onChange={(e) => handleStatusChange(e.target.value)}
-              title="Update lead status"
-            >
-              {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-            {client.status === "converted" && (
+          <div className="cd-header-right">
+            <div className="cd-actions">
+              <button className="btn-small" title="Edit Client" onClick={() => { setFormType("client"); setShowForm(true); }}>
+                <Pencil size={15} strokeWidth={2.1} />
+              </button>
+              <button className="btn-small" title="Delete Client" onClick={handleDeleteClient}>
+                <Trash2 size={15} strokeWidth={2.1} />
+              </button>
+            </div>
+
+            <div className="cd-status-block">
+              <select
+                className={`status status-select ${client.status}`}
+                value={client.status}
+                disabled={statusSaving}
+                onChange={(e) => handleStatusChange(e.target.value)}
+                title="Update lead status"
+              >
+                {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
               <button
                 className={`cd-active-toggle ${client.activeStatus}`}
                 disabled={statusSaving}
                 onClick={handleActiveStatusToggle}
-                title="Toggle whether this client's work is ongoing"
+                title="Toggle whether this client is active or a past (dead) client"
               >
-                <Activity size={13} strokeWidth={2.2} /> {client.activeStatus === "active" ? "Active" : "Inactive"}
+                <Activity size={13} strokeWidth={2.2} /> {client.activeStatus === "active" ? "Active" : "Dead"}
               </button>
-            )}
-            {client.hasLoginAccess && (
-              <span className="login-access-badge">
-                <CheckCircle2 size={13} strokeWidth={2.4} /> Portal access enabled
-              </span>
-            )}
-          </div>
-        </div>
-
-        <div className="cd-actions">
-          <button className="cd-action-btn" onClick={() => { setFormType("client"); setShowForm(true); }}>
-            <Pencil size={14} strokeWidth={2.2} /> Edit Client
-          </button>
-          <button className="cd-action-btn cd-action-danger" onClick={handleDeleteClient}>
-            <Trash2 size={14} strokeWidth={2.2} /> Delete Client
-          </button>
-          <button className="cd-action-btn" disabled={!latestContract} title={!latestContract ? "No contract to email yet" : "Resend the latest contract email"} onClick={handleSendEmail}>
-            <Mail size={14} strokeWidth={2.2} /> Send Email
-          </button>
-          <button className="cd-action-btn" disabled={!latestContract} title={!latestContract ? "No contract to invoice yet" : "Download invoice PDF"} onClick={handleGenerateInvoice}>
-            <Download size={14} strokeWidth={2.2} /> Generate Invoice
-          </button>
-          <button className="cd-action-btn cd-action-primary" onClick={() => navigate(`/clients/${clientId}/contracts/new`)}>
-            <Plus size={14} strokeWidth={2.4} /> Add New Contract
-          </button>
-          <button className="cd-action-btn cd-action-primary" onClick={() => { setSelectedReminder(null); setFormType("reminder"); setShowForm(true); }}>
-            <Plus size={14} strokeWidth={2.4} /> Add Reminder
-          </button>
-          {isAdmin && (
-            <button className="cd-action-btn" onClick={() => { setAssigningOpen((o) => !o); setAssigningUserId(client.assignedUser?._id || ""); }}>
-              <UserCog size={14} strokeWidth={2.2} /> {client.assignedUser ? "Reassign Task" : "Assign Task"}
-            </button>
-          )}
-        </div>
-
-        {isAdmin && assigningOpen && (
-          <div className="cd-assign-block">
-            <div className="cd-assign-row">
-              <SearchableSelect
-                options={assignableUsers.map((u) => ({ value: u._id, label: u.name }))}
-                value={assigningUserId}
-                onChange={setAssigningUserId}
-                placeholder="Select a user to assign"
-                emptyLabel="No Users Found"
-              />
-              <button className="cd-action-btn cd-action-primary" disabled={!assigningUserId || assignSaving} onClick={handleAssignUser}>
-                {assignSaving ? "Saving..." : "Save Assignment"}
-              </button>
-              <button className="cd-action-btn" onClick={() => setAssigningOpen(false)}>Cancel</button>
+              {client.hasLoginAccess && (
+                <span className="login-access-badge">
+                  <CheckCircle2 size={13} strokeWidth={2.4} /> Portal access enabled
+                </span>
+              )}
             </div>
           </div>
-        )}
+        </div>
       </div>
 
       <div className="cd-tabs">
@@ -531,7 +450,6 @@ export default function ClientDetailPage() {
           <Section title="Lead Information">
             <Field label="Lead Source" value={client.leadSource} />
             <Field label="Sales Person" value={client.salesPerson?.name} />
-            <Field label="Assigned User" value={client.assignedUser?.name} />
             <Field label="Status" value={client.status} />
           </Section>
 
@@ -580,12 +498,13 @@ export default function ClientDetailPage() {
                 <thead>
                   <tr>
                     <th>ID</th>
-                    <th>Project</th>
-                    <th>Project Amount</th>
+                    <th>Contract</th>
+                    <th>Contract Start Date</th>
+                    <th>Contract End Date</th>
+                    <th>Contract Amount</th>
                     <th>Received Amount</th>
                     <th>Balance Amount</th>
-                    <th>TDS</th>
-                    <th>Created</th>
+                    <th>Due Date</th>
                     <th>PI</th>
                     <th>Actions</th>
                   </tr>
@@ -600,19 +519,20 @@ export default function ClientDetailPage() {
                       <tr key={contract._id}>
                         <td>{contract.contractNumber}</td>
                         <td>{contract.projectName}</td>
+                        <td>{fmtDate(contract.contractStartDate)}</td>
+                        <td>{fmtDate(contract.validUntil)}</td>
                         <td>{contract.projectAmount} {contract.currency}</td>
                         <td>{contract.receivedAmount || 0} {contract.currency}</td>
                         <td>{contract.dueAmount ?? contract.projectAmount} {contract.currency}</td>
                         <td>
-                          {contract.tdsEnabled ? (
-                            <span title="Records only — does not affect due/received amounts">
-                              {contract.tdsPercent}% ({contract.tdsAmount} {contract.currency})
+                          {contract.nextDueDate ? (
+                            <span style={contract.nextDueDate && contract.dueAmount > 0 && new Date(contract.nextDueDate) < now ? { color: "#dc2626", fontWeight: 600 } : undefined}>
+                              {fmtDate(contract.nextDueDate)}
                             </span>
                           ) : (
                             <span className="cd-pi-none">—</span>
                           )}
                         </td>
-                        <td>{fmtDate(contract.createdAt)}</td>
                         <td>
                           {piUrl ? (
                             <a
@@ -631,8 +551,8 @@ export default function ClientDetailPage() {
                         </td>
                         <td>
                           <div className="action-buttons">
-                            <button className="btn-small" title="Manage Deliverables & Payments" onClick={() => { setManageContractId(contract._id); setManageContractTab(null); }}>
-                              <Package size={15} strokeWidth={2.1} />
+                            <button className="btn-small" title="View Full Details" onClick={() => { setManageContractId(contract._id); setManageContractTab(null); setManageContractDefaultTab("details"); }}>
+                              <Eye size={15} strokeWidth={2.1} />
                             </button>
                             <button className="btn-small" title="Edit" onClick={() => navigate(`/clients/${clientId}/contracts/${contract._id}/edit`)}>
                               <Pencil size={15} strokeWidth={2.1} />
@@ -1075,15 +995,16 @@ export default function ClientDetailPage() {
       )}
 
       {manageContractId && (
-        <div className="modal-overlay" onClick={() => { setManageContractId(null); setManageContractTab(null); }}>
+        <div className="modal-overlay" onClick={() => { setManageContractId(null); setManageContractTab(null); setManageContractDefaultTab(null); }}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="close-btn" onClick={() => { setManageContractId(null); setManageContractTab(null); }}>
+            <button className="close-btn" onClick={() => { setManageContractId(null); setManageContractTab(null); setManageContractDefaultTab(null); }}>
               <X size={18} strokeWidth={2} />
             </button>
             <ContractDetail
               contractId={manageContractId}
               onlyTab={manageContractTab}
-              onClose={() => { setManageContractId(null); setManageContractTab(null); loadAll(); }}
+              defaultTab={manageContractDefaultTab}
+              onClose={() => { setManageContractId(null); setManageContractTab(null); setManageContractDefaultTab(null); loadAll(); }}
             />
           </div>
         </div>

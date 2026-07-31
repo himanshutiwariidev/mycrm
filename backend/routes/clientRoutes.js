@@ -49,6 +49,7 @@ router.delete("/contracts/:id/deliverables/:deliverableId", authMiddleware, clie
 
 // Contract Payments Routes
 router.post("/contracts/:id/payments", authMiddleware, clientAccess, clientController.addPayment);
+router.delete("/contracts/:id/payments/:paymentId", authMiddleware, clientAccess, clientController.deletePayment);
 
 // Contract PI (proforma invoice) Routes
 router.post("/contracts/:id/pi", authMiddleware, clientAccess, clientController.uploadPiAttachmentMiddleware, clientController.uploadContractPi);

@@ -29,7 +29,6 @@ const ClientSchema = new mongoose.Schema(
     },
     email: {
       type: String,
-      required: [true, "Client email is required"],
       unique: true,
       lowercase: true,
       trim: true,
@@ -54,7 +53,7 @@ const ClientSchema = new mongoose.Schema(
     },
     clientType: {
       type: String,
-      enum: ["pvt ltd", "ltd", "llp", "hup", "proprietor", "other"],
+      enum: ["pvt ltd", "ltd", "llp", "huf", "proprietor", "other"],
     },
     projectType: {
       type: String,

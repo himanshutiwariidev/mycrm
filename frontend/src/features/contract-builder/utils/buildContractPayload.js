@@ -29,6 +29,7 @@ export function buildContractPayload(state) {
     projectScope: generateProjectScope(enabledCategories),
     deliverables: flattenDeliverables(enabledCategories),
     timeline: state.meta.timeline,
+    contractStartDate: state.meta.contractStartDate || undefined,
     // The contract amount is entered directly on Step 1 — authoritative, not
     // derived from the itemized per-service pricing (which remains available
     // as an internal cost breakdown but doesn't have to sum to this total).

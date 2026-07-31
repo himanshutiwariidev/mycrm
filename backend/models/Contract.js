@@ -31,6 +31,11 @@ const ContractSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    // Contract End Date reuses the existing validUntil field below (same
+    // semantic meaning) rather than duplicating it — only the start date is new.
+    contractStartDate: {
+      type: Date,
+    },
     // The final, GST-inclusive total — the actual amount owed/collected.
     // Equal to preTaxAmount when GST isn't enabled, so this stays exactly
     // what it always was for every contract created before GST support.
@@ -122,7 +127,7 @@ const ContractSchema = new mongoose.Schema(
         delivered: { type: Number, default: 0, min: 0 },
         frequency: {
           type: String,
-          enum: ["one-time", "week", "month"],
+          enum: ["one-time", "week", "month", "year"],
           default: "one-time",
         },
         status: {

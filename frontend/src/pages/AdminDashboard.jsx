@@ -89,7 +89,7 @@ export default function AdminDashboard() {
           />
         );
       case "tasks":
-        return <TasksSection tasks={tasks} clients={clients} setTab={setTab} openEditTask={openEditTask} setDeleteTask={setDeleteTask} />;
+        return <TasksSection tasks={tasks} setTab={setTab} openEditTask={openEditTask} setDeleteTask={setDeleteTask} />;
       case "clients":
         return <ClientsSection clients={clients} contracts={contracts} reminders={reminders} dashboardStats={dashboardStats} fetchDashboardStats={fetchDashboardStats} />;
       case "projects":

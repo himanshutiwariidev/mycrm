@@ -12,6 +12,7 @@ function reverseMapContractToState(contract) {
       contractId: contract._id,
       projectName: contract.projectName || "",
       timeline: contract.timeline || "",
+      contractStartDate: contract.contractStartDate ? String(contract.contractStartDate).slice(0, 10) : "",
       validUntil: contract.validUntil ? String(contract.validUntil).slice(0, 10) : "",
       paymentTerms: contract.paymentTerms || "",
       notes: contract.notes || "",

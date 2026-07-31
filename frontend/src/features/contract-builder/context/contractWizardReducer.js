@@ -41,6 +41,7 @@ export function createInitialState({ clientId }) {
       clientEmail: "",
       projectName: "",
       timeline: "",
+      contractStartDate: "",
       validUntil: "",
       paymentTerms: "",
       notes: "",
