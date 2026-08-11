@@ -10,6 +10,10 @@ import SalarySection from "./sections/SalarySection";
 import CreateTaskSection from "./sections/CreateTaskSection";
 import CreateProjectSection from "./sections/CreateProjectSection";
 import CreateUserSection from "./sections/CreateUserSection";
+import ExpensesSection from "./sections/ExpensesSection";
+import CreateExpenseSection from "./sections/CreateExpenseSection";
+import MeetingsSection from "./sections/MeetingsSection";
+import CreateMeetingSection from "./sections/CreateMeetingSection";
 import DashboardModals from "./sections/DashboardModals";
 import useAdminDashboard from "./sections/useAdminDashboard";
 import { T } from "./sections/shared";
@@ -17,14 +21,14 @@ import AttendanceSection from "./sections/AttendanceSection";
 
 export default function AdminDashboard() {
   const {
-    users, tasks, clients, projects, contracts, reminders, dashboardStats, fetchDashboardStats,
+    users, tasks, clients, projects, contracts, reminders, expenses, meetings, activityLog, dashboardStats, fetchDashboardStats,
     tab, setTab, toast, setToast, showPw, setShowPw,
-    userForm, setUserForm, taskForm, setTaskForm, projectForm, setProjectForm, projectFormTab, setProjectFormTab, projectListTab, setProjectListTab,
+    userForm, setUserForm, taskForm, setTaskForm, expenseForm, setExpenseForm, meetingForm, setMeetingForm, projectForm, setProjectForm, projectFormTab, setProjectFormTab, projectListTab, setProjectListTab,
     editTask, setEditTask, editTaskForm, setEditTaskForm,
     editUser, setEditUser, editUserForm, setEditUserForm, editProject, showEditPw, setShowEditPw,
-    deleteTask, setDeleteTask, deleteUser, setDeleteUser, deleteProject, setDeleteProject,
+    deleteTask, setDeleteTask, deleteUser, setDeleteUser, deleteProject, setDeleteProject, deleteExpense, setDeleteExpense, deleteMeeting, setDeleteMeeting,
     payUser, setPayUser, payingSalary, salaryForm, setSalaryForm, salaryPreview,
-    handleCreateUser, handleCreateTask, handleCreateProject, handleDownloadProjectsCsv,
+    handleCreateUser, handleCreateTask, handleCreateExpense, handleDeleteExpense, handleCreateMeeting, handleDeleteMeeting, handleCreateProject, handleDownloadProjectsCsv,
     openCreateProject, openEditProject, cancelProjectForm,
     openEditTask, handleUpdateTask, handleDeleteTask,
     openEditUser, handleUpdateUser, handleDeleteUser,
@@ -44,20 +48,11 @@ export default function AdminDashboard() {
       case "dashboard":
         return (
           <DashboardSection
-            users={users}
-            tasks={tasks}
-            totalTaskCount={totalTaskCount}
-            projects={projects}
-            activeProjects={activeProjects}
-            done={done}
-            inProg={inProg}
-            pend={pend}
-            completionRate={completionRate}
-            statusPieData={statusPieData}
-            priorityBarData={priorityBarData}
-            tasksByUser={tasksByUser}
-            admins={admins}
-            regularUsers={regularUsers}
+            dashboardStats={dashboardStats}
+            meetings={meetings}
+            activityLog={activityLog}
+            setTab={setTab}
+            fetchDashboardStats={fetchDashboardStats}
           />
         );
         case "attendance":
@@ -112,6 +107,14 @@ export default function AdminDashboard() {
         return <UsersSection users={users} tasks={tasks} setTab={setTab} openEditUser={openEditUser} setDeleteUser={setDeleteUser} />;
       case "salary":
         return <SalarySection users={users} openPaySalary={openPaySalary} />;
+      case "expenses":
+        return <ExpensesSection expenses={expenses} setTab={setTab} setDeleteExpense={setDeleteExpense} />;
+      case "createExpense":
+        return <CreateExpenseSection expenseForm={expenseForm} setExpenseForm={setExpenseForm} handleCreateExpense={handleCreateExpense} />;
+      case "meetings":
+        return <MeetingsSection meetings={meetings} setTab={setTab} setDeleteMeeting={setDeleteMeeting} />;
+      case "createMeeting":
+        return <CreateMeetingSection meetingForm={meetingForm} setMeetingForm={setMeetingForm} handleCreateMeeting={handleCreateMeeting} />;
       case "createTask":
         return <CreateTaskSection users={users} taskForm={taskForm} setTaskForm={setTaskForm} handleCreateTask={handleCreateTask} />;
       case "createProject":
@@ -202,11 +205,14 @@ export default function AdminDashboard() {
             {["overview", "manage"].map(section => (
               <div key={section}>
                 <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: ".14em", textTransform: "uppercase", fontWeight: 700, padding: section === "manage" ? "18px 12px 8px" : "4px 12px 8px" }}>{section}</div>
-                {TABS.filter(t => t.section === section).map(({ id, label, Icon }) => {
+                {TABS.filter(t => t.section === section).map(({ id, label, Icon, color }) => {
                   const active = tab === id;
+                  const iconColor = color || T.brand;
                   return (
-                    <button key={id} className={`nav-btn${active ? " nav-active" : ""}`} onClick={() => (id === "createProject" ? openCreateProject() : setTab(id))} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px", borderRadius: 9, textAlign: "left", color: active ? T.brand : T.textSecondary, background: active ? T.brandLight : "transparent", fontWeight: active ? 600 : 400, fontSize: 13.5, borderLeft: `3px solid ${active ? T.brand : "transparent"}` }}>
-                      <Icon size={16} strokeWidth={active ? 2.2 : 1.8} color={active ? T.brand : T.textMuted} />
+                    <button key={id} className={`nav-btn${active ? " nav-active" : ""}`} onClick={() => (id === "createProject" ? openCreateProject() : setTab(id))} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 12px", borderRadius: 9, textAlign: "left", color: active ? T.brand : T.textPrimary, background: active ? T.brandLight : "transparent", fontWeight: active ? 600 : 500, fontSize: 13.5, borderLeft: `3px solid ${active ? T.brand : "transparent"}` }}>
+                      <div style={{ width: 26, height: 26, borderRadius: 8, flexShrink: 0, display: "grid", placeItems: "center", background: `${iconColor}1f` }}>
+                        <Icon size={14} strokeWidth={2.2} color={iconColor} />
+                      </div>
                       {label}
                       {active && <div style={{ marginLeft: "auto", width: 6, height: 6, borderRadius: "50%", background: T.brand, flexShrink: 0 }} />}
                     </button>
@@ -284,6 +290,12 @@ export default function AdminDashboard() {
           deleteProject={deleteProject}
           setDeleteProject={setDeleteProject}
           handleDeleteProject={handleDeleteProject}
+          deleteExpense={deleteExpense}
+          setDeleteExpense={setDeleteExpense}
+          handleDeleteExpense={handleDeleteExpense}
+          deleteMeeting={deleteMeeting}
+          setDeleteMeeting={setDeleteMeeting}
+          handleDeleteMeeting={handleDeleteMeeting}
         />
 
       </div>

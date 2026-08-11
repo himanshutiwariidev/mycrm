@@ -79,7 +79,7 @@ export default function WizardShell({ client, onSubmit }) {
                 </Button>
               </div>
             </div>
-            <StepIndicator currentStep={currentStep} furthestStep={furthestStep} onStepClick={goToStep} />
+            <StepIndicator currentStep={currentStep} furthestStep={furthestStep} onStepClick={goToStep} isEdit={!!state.meta.contractId} />
           </div>
         </header>
 

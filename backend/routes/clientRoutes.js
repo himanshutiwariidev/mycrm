@@ -13,6 +13,7 @@ const workProgressViewAccess = requireRole("admin", "sales", "user", "client");
 
 // Dashboard Stats (must come before "/:id")
 router.get("/dashboard-stats", authMiddleware, clientAccess, clientController.getDashboardStats);
+router.get("/activity/all", authMiddleware, clientAccess, clientController.getAllActivity);
 
 // Client Portal (role: "client") - must come before "/:id"
 router.get("/my-project", authMiddleware, requireRole("client"), clientController.getMyProject);

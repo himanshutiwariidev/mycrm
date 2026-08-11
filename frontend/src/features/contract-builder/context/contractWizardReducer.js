@@ -48,6 +48,11 @@ export function createInitialState({ clientId }) {
       currency: "INR",
       contractAmount: "",
       amountReceived: "",
+      // Defaults to today, but must stay editable — a backdated contract's
+      // initial "Amount Received" needs to be recorded against the date it
+      // was actually received (e.g. January), not the date the contract was
+      // entered into the system (e.g. August).
+      paymentDate: new Date().toISOString(),
       dueDate: "",
       paymentMethod: "Cash",
       gstEnabled: false,

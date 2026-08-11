@@ -22,7 +22,9 @@ function reverseMapContractToState(contract) {
       contractAmount: contract.preTaxAmount ?? contract.projectAmount ?? "",
       amountReceived: contract.receivedAmount ?? "",
       dueDate: contract.nextDueDate ? String(contract.nextDueDate).slice(0, 10) : "",
-      paymentMethod: contract.payments?.[0]?.method || "Cash",
+      // Falls back to the first payment's method for contracts saved before
+      // paymentMethod became its own top-level field.
+      paymentMethod: contract.paymentMethod || contract.payments?.[0]?.method || "Cash",
       gstEnabled: contract.gstEnabled || false,
       gstPercent: contract.gstEnabled ? String(contract.gstPercent ?? "18") : "18",
       tdsEnabled: contract.tdsEnabled || false,

@@ -323,7 +323,7 @@ export default function ClientsSection({ clients = [], contracts = [], dashboard
                             <tbody>
                               {(s.cases || []).map((c) => (
                                 <tr key={c.contractId} style={{ borderTop: `1px solid ${T.borderLight}` }}>
-                                  <td style={{ padding: "6px 8px", color: T.textPrimary, fontWeight: 600 }}>{c.clientName}</td>
+                                  <td style={{ padding: "6px 8px", color: T.textPrimary, fontWeight: 600 }}>{c.companyName || c.clientName}</td>
                                   <td style={{ padding: "6px 8px", color: T.textSecondary }}>{c.projectName}</td>
                                   <td style={{ padding: "6px 8px", color: T.textSecondary, textTransform: "capitalize" }}>{c.contractStatus}</td>
                                   <td style={{ padding: "6px 8px", color: T.textPrimary, fontWeight: 600, textAlign: "right" }}>{fmtINR(c.amount)}</td>
@@ -407,7 +407,7 @@ export default function ClientsSection({ clients = [], contracts = [], dashboard
                   const statusAccent = RENEWAL_STATUS_COLORS[r.status] || RENEWAL_STATUS_COLORS.Upcoming;
                   return (
                     <tr key={r.contractId} style={{ borderBottom: `1px solid ${T.borderLight}` }}>
-                      <td style={{ padding: "10px", color: T.textPrimary, fontWeight: 600 }}>{r.clientName}</td>
+                      <td style={{ padding: "10px", color: T.textPrimary, fontWeight: 600 }}>{r.companyName || r.clientName}</td>
                       <td style={{ padding: "10px", color: T.textSecondary }}>{r.serviceName}</td>
                       <td style={{ padding: "10px", color: T.textSecondary }}>{fmtRange(r.renewalDate)}</td>
                       <td style={{ padding: "10px", color: T.textPrimary, fontWeight: 600 }}>{fmtINR(r.renewalAmount)}</td>

@@ -83,6 +83,7 @@ const ACTIVITY_META = {
   client_updated: { Icon: Edit3, color: "#2563eb" },
   status_changed: { Icon: RefreshCw, color: "#f7931e" },
   contract_created: { Icon: FileText, color: "#2563eb" },
+  contract_updated: { Icon: Edit3, color: "#2563eb" },
   contract_sent: { Icon: Send, color: "#16a34a" },
   deliverable_added: { Icon: Package, color: "#f7931e" },
   deliverable_updated: { Icon: Package, color: "#2563eb" },

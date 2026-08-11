@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Briefcase, Building2, ClipboardList, Clock,
-  LayoutDashboard, Plus, UserPlus, Users,
+  Briefcase, Building2, CalendarClock, ClipboardList, Clock,
+  LayoutDashboard, Plus, Receipt, UserPlus, Users,
 } from "lucide-react";
 import API from "../../services/api";
 import {
@@ -27,6 +27,9 @@ export default function useAdminDashboard() {
   const [projectsState, setProjects] = useState([]);
   const [contracts, setContracts] = useState([]);
   const [reminders, setReminders] = useState([]);
+  const [expensesState, setExpenses] = useState([]);
+  const [meetingsState, setMeetings] = useState([]);
+  const [activityLog, setActivityLog] = useState([]);
   const [dashboardStats, setDashboardStats] = useState({
     totalDeliverables: 0,
     completedDeliverables: 0,
@@ -36,6 +39,8 @@ export default function useAdminDashboard() {
     outstandingPayments: 0,
     overduePayments: 0,
     collectedThisMonth: 0,
+    totalExpenses: 0,
+    netProfit: 0,
   });
   const [tab, setTab] = useState("dashboard");
   const [toast, setToast] = useState(null);
@@ -43,6 +48,8 @@ export default function useAdminDashboard() {
 
   const [userForm, setUserForm] = useState({ name: "", email: "", password: "", role: "user" });
   const [taskForm, setTaskForm] = useState({ title: "", description: "", assignedTo: "", priority: "medium", dueDate: "" });
+  const [expenseForm, setExpenseForm] = useState({ title: "", category: "Other", amount: "", expenseDate: new Date().toISOString().slice(0, 10), paymentMethod: "Cash", notes: "" });
+  const [meetingForm, setMeetingForm] = useState({ title: "", meetingDate: "", location: "", attendees: "", description: "" });
   const [projectForm, setProjectForm] = useState(PROJECT_EMPTY_FORM);
   const [projectFormTab, setProjectFormTab] = useState("allProjects");
   const [projectListTab, setProjectListTab] = useState("allProjects");
@@ -57,6 +64,8 @@ export default function useAdminDashboard() {
   const [deleteTask, setDeleteTask] = useState(null);
   const [deleteUser, setDeleteUser] = useState(null);
   const [deleteProject, setDeleteProject] = useState(null);
+  const [deleteExpense, setDeleteExpense] = useState(null);
+  const [deleteMeeting, setDeleteMeeting] = useState(null);
   const [payUser, setPayUser] = useState(null);
   const [payingSalary, setPayingSalary] = useState(false);
   const [salaryForm, setSalaryForm] = useState({
@@ -88,6 +97,8 @@ export default function useAdminDashboard() {
 
   const tasks = Array.isArray(tasksState) ? tasksState : [];
   const projects = Array.isArray(projectsState) ? projectsState : [];
+  const expenses = Array.isArray(expensesState) ? expensesState : [];
+  const meetings = Array.isArray(meetingsState) ? meetingsState : [];
 
   const showToast = (msg, ok = true) => {
     setToast({ msg, ok });
@@ -100,6 +111,9 @@ export default function useAdminDashboard() {
   const fetchProjects = async () => { try { const { data } = await API.get("/projects"); setProjects(listFromResponse(data, "projects")); } catch { /* dashboard keeps partial data when a widget fails */ } };
   const fetchContracts = async () => { try { const { data } = await API.get("/clients/contracts/all"); setContracts(listFromResponse(data, "contracts")); } catch { /* dashboard keeps partial data when a widget fails */ } };
   const fetchReminders = async () => { try { const { data } = await API.get("/clients/reminders/all"); setReminders(listFromResponse(data, "reminders")); } catch { /* dashboard keeps partial data when a widget fails */ } };
+  const fetchExpenses = async () => { try { const { data } = await API.get("/expenses"); setExpenses(listFromResponse(data, "expenses")); } catch { /* dashboard keeps partial data when a widget fails */ } };
+  const fetchMeetings = async () => { try { const { data } = await API.get("/meetings"); setMeetings(listFromResponse(data, "meetings")); } catch { /* dashboard keeps partial data when a widget fails */ } };
+  const fetchActivityLog = async () => { try { const { data } = await API.get("/clients/activity/all"); setActivityLog(listFromResponse(data, "activity")); } catch { /* dashboard keeps partial data when a widget fails */ } };
   const fetchDashboardStats = async (range) => {
     try {
       const params = range?.start && range?.end ? { start: range.start, end: range.end } : undefined;
@@ -113,7 +127,7 @@ export default function useAdminDashboard() {
     catch { /* dashboard keeps partial data when a widget fails */ }
   };
 
-  useEffect(() => { fetchUsers(); fetchTasks(); fetchClients(); fetchProjects(); fetchContracts(); fetchReminders(); fetchDashboardStats(); fetchLeaves(); }, []);
+  useEffect(() => { fetchUsers(); fetchTasks(); fetchClients(); fetchProjects(); fetchContracts(); fetchReminders(); fetchExpenses(); fetchMeetings(); fetchActivityLog(); fetchDashboardStats(); fetchLeaves(); }, []);
 
   const handleLeaveDecision = async (leaveId, status) => {
     setLeaveActionId(leaveId);
@@ -211,6 +225,57 @@ export default function useAdminDashboard() {
       fetchTasks();
     } catch {
       showToast("Failed to create task", false);
+    }
+  };
+
+  const handleCreateExpense = async (e) => {
+    e.preventDefault();
+    try {
+      await API.post("/expenses", expenseForm);
+      showToast("Expense recorded successfully");
+      setExpenseForm({ title: "", category: "Other", amount: "", expenseDate: new Date().toISOString().slice(0, 10), paymentMethod: "Cash", notes: "" });
+      fetchExpenses();
+      fetchDashboardStats();
+    } catch (error) {
+      showToast(error?.response?.data?.message || "Failed to record expense", false);
+    }
+  };
+
+  const handleDeleteExpense = async () => {
+    try {
+      await API.delete(`/expenses/${deleteExpense._id}`);
+      showToast("Expense deleted");
+      setDeleteExpense(null);
+      fetchExpenses();
+      fetchDashboardStats();
+    } catch {
+      showToast("Failed to delete expense", false);
+    }
+  };
+
+  const handleCreateMeeting = async (e) => {
+    e.preventDefault();
+    try {
+      const attendees = meetingForm.attendees
+        ? meetingForm.attendees.split(",").map((a) => a.trim()).filter(Boolean)
+        : [];
+      await API.post("/meetings", { ...meetingForm, attendees });
+      showToast("Meeting scheduled successfully");
+      setMeetingForm({ title: "", meetingDate: "", location: "", attendees: "", description: "" });
+      fetchMeetings();
+    } catch (error) {
+      showToast(error?.response?.data?.message || "Failed to schedule meeting", false);
+    }
+  };
+
+  const handleDeleteMeeting = async () => {
+    try {
+      await API.delete(`/meetings/${deleteMeeting._id}`);
+      showToast("Meeting deleted");
+      setDeleteMeeting(null);
+      fetchMeetings();
+    } catch {
+      showToast("Failed to delete meeting", false);
     }
   };
 
@@ -566,41 +631,45 @@ export default function useAdminDashboard() {
 
   const ROLE_TABS = {
     hr: [
-      { id: "users", label: "Users", Icon: Users, section: "overview" },
-      { id: "attendance", label: "Attendance", Icon: Clock, section: "overview" },
-      { id: "salary", label: "Salary", Icon: Briefcase, section: "manage" },
-      { id: "createUser", label: "New User", Icon: UserPlus, section: "manage" },
+      { id: "users", label: "Users", Icon: Users, section: "overview", color: "#db2777" },
+      { id: "attendance", label: "Attendance", Icon: Clock, section: "overview", color: "#d97706" },
+      { id: "salary", label: "Salary", Icon: Briefcase, section: "manage", color: "#9333ea" },
+      { id: "createUser", label: "New User", Icon: UserPlus, section: "manage", color: "#db2777" },
     ],
     sales: [
-      { id: "clients", label: "Clients", Icon: Building2, section: "overview" },
+      { id: "clients", label: "Clients", Icon: Building2, section: "overview", color: "#2563eb" },
     ],
   };
 
   const TABS = ROLE_TABS[role] || [
     // fallback to admin-like access if role is missing/unknown
-    { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard, section: "overview" },
-    { id: "tasks", label: "All Tasks", Icon: ClipboardList, section: "overview" },
-    { id: "users", label: "All Users", Icon: Users, section: "overview" },
-    { id: "attendance", label: "Attendance", Icon: Clock, section: "overview" },
-    { id: "clients", label: "Clients", Icon: Building2, section: "overview" },
-    { id: "projects", label: "Projects", Icon: Briefcase, section: "overview" },
-    { id: "salary", label: "Salary", Icon: Briefcase, section: "manage" },
-    { id: "createTask", label: "New Task", Icon: Plus, section: "manage" },
-    { id: "createProject", label: "New Project", Icon: Plus, section: "manage" },
-    { id: "createUser", label: "New User", Icon: UserPlus, section: "manage" },
+    { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard, section: "overview", color: "#7c3aed" },
+    { id: "tasks", label: "All Tasks", Icon: ClipboardList, section: "overview", color: "#0891b2" },
+    { id: "users", label: "All Users", Icon: Users, section: "overview", color: "#db2777" },
+    { id: "attendance", label: "Attendance", Icon: Clock, section: "overview", color: "#d97706" },
+    { id: "clients", label: "Clients", Icon: Building2, section: "overview", color: "#2563eb" },
+    { id: "projects", label: "Projects", Icon: Briefcase, section: "overview", color: "#0f766e" },
+    { id: "expenses", label: "Expenses", Icon: Receipt, section: "overview", color: "#16a34a" },
+    { id: "meetings", label: "Meeting Scheduler", Icon: CalendarClock, section: "overview", color: "#f7931e" },
+    { id: "salary", label: "Salary", Icon: Briefcase, section: "manage", color: "#9333ea" },
+    { id: "createTask", label: "New Task", Icon: Plus, section: "manage", color: "#0891b2" },
+    { id: "createProject", label: "New Project", Icon: Plus, section: "manage", color: "#0f766e" },
+    { id: "createExpense", label: "New Expense", Icon: Plus, section: "manage", color: "#16a34a" },
+    { id: "createMeeting", label: "New Meeting", Icon: Plus, section: "manage", color: "#f7931e" },
+    { id: "createUser", label: "New User", Icon: UserPlus, section: "manage", color: "#db2777" },
   ];
 
   const currentLabel = TABS.find(t => t.id === tab)?.label || "Dashboard";
 
   return {
-    users, tasks, clients, projects, contracts, reminders, dashboardStats,
+    users, tasks, clients, projects, contracts, reminders, expenses, meetings, activityLog, dashboardStats,
     tab, setTab, toast, setToast, showPw, setShowPw,
-    userForm, setUserForm, taskForm, setTaskForm, projectForm, setProjectForm, projectFormTab, setProjectFormTab, projectListTab, setProjectListTab,
+    userForm, setUserForm, taskForm, setTaskForm, expenseForm, setExpenseForm, meetingForm, setMeetingForm, projectForm, setProjectForm, projectFormTab, setProjectFormTab, projectListTab, setProjectListTab,
     editTask, setEditTask, editTaskForm, setEditTaskForm,
     editUser, setEditUser, editUserForm, setEditUserForm, editProject, setEditProject, showEditPw, setShowEditPw,
-    deleteTask, setDeleteTask, deleteUser, setDeleteUser, deleteProject, setDeleteProject,
+    deleteTask, setDeleteTask, deleteUser, setDeleteUser, deleteProject, setDeleteProject, deleteExpense, setDeleteExpense, deleteMeeting, setDeleteMeeting,
     payUser, setPayUser, payingSalary, salaryForm, setSalaryForm, salaryPreview,
-    handleCreateUser, handleCreateTask, handleCreateProject, handleDownloadProjectsCsv,
+    handleCreateUser, handleCreateTask, handleCreateExpense, handleDeleteExpense, handleCreateMeeting, handleDeleteMeeting, handleCreateProject, handleDownloadProjectsCsv,
     openCreateProject, openEditProject, cancelProjectForm,
     openEditTask, handleUpdateTask, handleDeleteTask,
     openEditUser, handleUpdateUser, handleDeleteUser,

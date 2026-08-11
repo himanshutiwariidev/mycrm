@@ -11,10 +11,19 @@ export const STEP_LABELS = [
   "Generate Contract",
 ];
 
-export default function StepIndicator({ currentStep, onStepClick, furthestStep }) {
+export default function StepIndicator({ currentStep, onStepClick, furthestStep, isEdit }) {
+  // Step 5's pill must match whatever the actual submit button at the bottom
+  // of the page says ("Update Contract" when editing) — otherwise the page
+  // shows two differently-labeled "Generate Contract"/"Update Contract"
+  // controls and clicking the (inert, already-current-step) pill up here
+  // looks like a broken submit button.
+  const labels = isEdit
+    ? [...STEP_LABELS.slice(0, 4), "Update Contract"]
+    : STEP_LABELS;
+
   return (
     <div className="flex items-center gap-1 overflow-x-auto py-1">
-      {STEP_LABELS.map((label, index) => {
+      {labels.map((label, index) => {
         const step = index + 1;
         const isComplete = step < currentStep;
         const isActive = step === currentStep;

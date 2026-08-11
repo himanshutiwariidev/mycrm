@@ -4,10 +4,16 @@ import { DayPicker } from "react-day-picker";
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
 
-function Calendar({ className, classNames, showOutsideDays = true, ...props }) {
+function Calendar({ className, classNames, showOutsideDays = true, fixedWeeks = true, ...props }) {
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
+      // Always render 6 week-rows regardless of how many weeks the current
+      // month actually spans. Without this, switching to a shorter/longer
+      // month changes the calendar's height, which makes the Radix Popover
+      // it lives in reposition itself mid-interaction (most visible in
+      // Safari) — exactly the "jumps around while picking a date" bug.
+      fixedWeeks={fixedWeeks}
       className={cn("p-3", className)}
       classNames={{
         months: "flex flex-col sm:flex-row gap-2",

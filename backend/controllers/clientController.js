@@ -4,6 +4,7 @@ const Contract = require("../models/Contract");
 const PaymentReminder = require("../models/PaymentReminder");
 const User = require("../models/User");
 const Task = require("../models/Task");
+const Expense = require("../models/Expense");
 const clientService = require("../services/clientService");
 const { computeDeliverableStats, decorateContract } = require("../utils/deliverableStats");
 const { logActivity } = require("../utils/activityLogger");
@@ -461,6 +462,24 @@ exports.getClientActivity = async (req, res) => {
   }
 };
 
+// CRM-wide activity feed for the main Dashboard — most recent events across
+// every client, not scoped to one. Capped at 40 so the dashboard payload
+// stays light; the per-client Activity Timeline tab remains the place for a
+// full, unbounded history of a single client.
+exports.getAllActivity = async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 40, 100);
+    const activity = await ActivityLog.find()
+      .populate("clientId", "clientName companyName")
+      .sort({ createdAt: -1 })
+      .limit(limit);
+    return res.json({ activity, total: activity.length });
+  } catch (error) {
+    console.error("Error fetching CRM activity:", error);
+    return res.status(500).json({ message: error.message || "Failed to fetch activity log" });
+  }
+};
+
 // ============= CONTRACT OPERATIONS =============
 
 // Turns a freshly-created contract's deliverables into unassigned Task
@@ -480,7 +499,7 @@ async function createTasksFromDeliverables(contract, client, createdByUserId) {
 
 exports.createContract = async (req, res) => {
   try {
-    const { clientId, projectName, projectDescription, projectScope, timeline, contractStartDate, projectAmount, preTaxAmount, gstEnabled, gstPercent, gstAmount, tdsEnabled, tdsPercent, tdsAmount, currency, paymentTerms, validUntil, notes, deliverables, nextDueDate, selectedServices, pricingSummary, payments } = req.body;
+    const { clientId, projectName, projectDescription, projectScope, timeline, contractStartDate, projectAmount, preTaxAmount, gstEnabled, gstPercent, gstAmount, tdsEnabled, tdsPercent, tdsAmount, currency, paymentMethod, paymentTerms, validUntil, notes, deliverables, nextDueDate, selectedServices, pricingSummary, payments } = req.body;
 
     if (!clientId || !projectName || !projectDescription || !projectAmount) {
       return res.status(400).json({ message: "Missing required fields: clientId, projectName, projectDescription, projectAmount" });
@@ -510,6 +529,7 @@ exports.createContract = async (req, res) => {
       tdsPercent: tdsPercent || 0,
       tdsAmount: tdsAmount || 0,
       currency: currency || "INR",
+      paymentMethod: paymentMethod || "Cash",
       paymentTerms,
       validUntil,
       notes,
@@ -633,6 +653,14 @@ exports.sendContract = async (req, res) => {
 exports.updateContract = async (req, res) => {
   try {
     const updatePayload = { ...req.body };
+    // Marker-only flag sent by the wizard's final "Update Contract" submit —
+    // never persisted on the document. The same route also receives a PUT
+    // every ~1.5s from autosave while a contract is being edited (see
+    // useAutosave.js), and those must NOT show up in the activity timeline —
+    // only this deliberate, final save should log an entry.
+    const shouldLogEdit = Boolean(updatePayload.logEdit);
+    delete updatePayload.logEdit;
+
     const contract = await Contract.findByIdAndUpdate(req.params.id, updatePayload, {
       new: true,
       runValidators: true,
@@ -640,6 +668,16 @@ exports.updateContract = async (req, res) => {
 
     if (!contract) {
       return res.status(404).json({ message: "Contract not found" });
+    }
+
+    if (shouldLogEdit) {
+      const actor = await User.findById(req.user.id).select("name");
+      await logActivity(
+        contract.clientId,
+        "contract_updated",
+        `Contract "${contract.projectName}" updated by ${actor?.name || "an admin"}`,
+        { contractId: contract._id, updatedBy: req.user.id }
+      );
     }
 
     return res.json({ message: "Contract updated successfully", contract: decorateContract(contract) });
@@ -874,22 +912,23 @@ exports.getDashboardStats = async (req, res) => {
     }
 
     const dateFilter = { createdAt: { $gte: periodStart, $lte: periodEnd } };
-    // Renewal cases key off validUntil (the renewal date), not createdAt — a
-    // contract created months ago can still renew inside the selected range.
-    const renewalDateFilter = { validUntil: { $gte: periodStart, $lte: periodEnd } };
 
-    const [clients, contracts, reminders, allContracts, renewalContracts] = await Promise.all([
+    const [clients, contracts, reminders, allContracts, allExpenses] = await Promise.all([
       Client.find(dateFilter).sort({ createdAt: -1 }),
-      // Populated with clientName so Service Wise Active Cases can list which
-      // client/contract each case belongs to, for the drill-down view.
-      Contract.find(dateFilter).populate("clientId", "clientName"),
+      // Populated with clientName/companyName so Service Wise Active Cases can
+      // list which client/contract each case belongs to, for the drill-down view.
+      Contract.find(dateFilter).populate("clientId", "clientName companyName"),
       PaymentReminder.find(dateFilter),
-      Contract.find(), // unfiltered — needed for the trailing monthly revenue trend below
-      Contract.find(renewalDateFilter).populate({
+      // Unfiltered — needed for the trailing monthly revenue/expense trend,
+      // Balance Due, and Renewal Cases below, all of which must see every
+      // contract regardless of when it was created (and, for renewals, must
+      // be able to carry a still-unrenewed contract into later months too).
+      Contract.find().populate({
         path: "clientId",
-        select: "clientName salesPerson",
+        select: "clientName companyName salesPerson",
         populate: { path: "salesPerson", select: "name" },
       }),
+      Expense.find(), // unfiltered — needed for the trailing monthly expense/profit trend below
     ]);
 
     const totalClients = clients.length;
@@ -961,6 +1000,7 @@ exports.getDashboardStats = async (req, res) => {
           bucket.cases.push({
             contractId: contract._id,
             clientName: contract.clientId?.clientName || "—",
+            companyName: contract.clientId?.companyName || "",
             projectName: contract.projectName,
             contractStatus: contract.contractStatus,
             amount: Math.round(categoryAmount * 100) / 100,
@@ -995,8 +1035,9 @@ exports.getDashboardStats = async (req, res) => {
           collectedThisMonth += payment.amount || 0;
 
           // Revenue Summary: Cash is the "Cash" method exactly; every other
-          // recorded method (Bank Transfer, UPI, Cheque, Card, Razorpay, Other)
-          // is digital/bank-settled money, so it's bucketed as "Bank".
+          // recorded method (NEFT, RTGS, Bank Draft, UPI, Cheque, Card Swap,
+          // Other, and legacy values like Bank Transfer/Card/Razorpay) is
+          // digital/bank-settled money, so it's bucketed as "Bank".
           const bucket = payment.method === "Cash" ? "Cash" : "Bank";
           if (!paymentModeFilter || paymentModeFilter === bucket) {
             if (bucket === "Cash") cashCollection += payment.amount || 0;
@@ -1014,16 +1055,98 @@ exports.getDashboardStats = async (req, res) => {
     // receivedAmount just because it happened to be created inside the range).
     totalRevenue = collectedThisMonth;
 
+    // ── Expenses / Net Profit ────────────────────────────────────────────────
+    // Scoped by the expense's own date (like payments above), not when it was
+    // entered, for the same backdated-entry reason.
+    const expensesInRange = await Expense.find({ expenseDate: { $gte: periodStart, $lte: periodEnd } });
+    const totalExpenses = expensesInRange.reduce((sum, e) => sum + (e.amount || 0), 0);
+    const netProfit = totalRevenue - totalExpenses;
+
     const pendingDeliverables = totalDeliverables - completedDeliverables;
     const overallCompletionPercent = totalDue > 0 ? Math.round((totalDelivered / totalDue) * 100) : 0;
     const pendingReminders = reminders.filter((r) => r.reminderStatus !== "paid").length;
     const hasData = totalClients > 0 || contracts.length > 0 || reminders.length > 0;
 
+    // ── Balance Due ─────────────────────────────────────────────────────────
+    // Filtered by the contract's own due date (nextDueDate), never by when the
+    // contract was created — a contract created in January with an August due
+    // date must appear in the August Balance Due list, not January's. Scans
+    // allContracts (unfiltered) for the same reason.
+    //
+    // Balance is recomputed here from the real payments ledger rather than
+    // trusted from contract.receivedAmount/dueAmount — those two fields can be
+    // directly overridden by an admin from the contract edit screen (a
+    // deliberate, separate feature), which would otherwise let a stale manual
+    // entry hide or wrongly surface a contract in this list.
+    const todayDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    // When the selected period is (or spans) the actual current month, still-
+    // unpaid balances that fell due in an EARLIER period must keep surfacing
+    // here too — otherwise a March-due balance that's still unpaid in August
+    // would only ever show up if an admin thought to go back and re-select
+    // March, instead of showing where it actually matters: today's view.
+    // Viewing a genuinely past period (e.g. July, with July over) stays
+    // strict — only items actually due within that period appear.
+    const periodIncludesToday = periodStart <= now && periodEnd >= now;
+    const balanceDue = allContracts
+      .filter((contract) => contract.nextDueDate)
+      .map((contract) => {
+        const totalPaid = contract.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+        const balance = Math.max(Math.round(((contract.projectAmount || 0) - totalPaid) * 100) / 100, 0);
+        const dueDay = new Date(contract.nextDueDate.getFullYear(), contract.nextDueDate.getMonth(), contract.nextDueDate.getDate());
+        return { contract, totalPaid, balance, dueDay };
+      })
+      .filter(({ contract, balance, dueDay }) => {
+        if (balance <= 0) return false;
+        const due = new Date(contract.nextDueDate);
+        const dueInSelectedPeriod = due >= periodStart && due <= periodEnd;
+        const stillOverdueCarriedIntoToday = periodIncludesToday && dueDay < todayDay;
+        return dueInSelectedPeriod || stillOverdueCarriedIntoToday;
+      })
+      .map(({ contract, totalPaid, balance, dueDay }) => {
+        let status;
+        if (dueDay.getTime() === todayDay.getTime()) status = "Due Today";
+        else if (dueDay < todayDay) status = "Overdue";
+        else status = "Upcoming";
+
+        return {
+          contractId: contract._id,
+          clientId: contract.clientId?._id || contract.clientId,
+          clientName: contract.clientId?.clientName || "—",
+          companyName: contract.clientId?.companyName || "",
+          projectName: contract.projectName,
+          contractAmount: contract.projectAmount || 0,
+          receivedAmount: totalPaid,
+          balance,
+          dueDate: contract.nextDueDate,
+          status,
+        };
+      })
+      .sort((a, b) => {
+        const rank = { Overdue: 0, "Due Today": 1, Upcoming: 2 };
+        if (rank[a.status] !== rank[b.status]) return rank[a.status] - rank[b.status];
+        return new Date(a.dueDate) - new Date(b.dueDate);
+      });
+
+    const totalBalanceDue = balanceDue.reduce((sum, b) => sum + b.balance, 0);
+    const overdueBalanceDueCount = balanceDue.filter((b) => b.status === "Overdue").length;
+
     // ── Renewal Cases ────────────────────────────────────────────────────────
     // One row per contract whose validUntil (the renewal date) falls in the
-    // selected range. Status is auto-derived from validUntil vs today unless
-    // an admin has already marked it "Completed" (renewed) via contract edit.
-    const renewalCases = renewalContracts
+    // selected range — PLUS any contract whose renewal date was in an earlier
+    // period but is still unrenewed, which keeps carrying forward into every
+    // later period's view (not just due-in-range) until an admin marks it
+    // "Completed". Unlike Balance Due, this isn't limited to just the actual
+    // current month — a missed renewal stays visible in every month you look
+    // at from its due date onward, since (unlike a payment) there's no
+    // natural point where it stops being relevant to flag.
+    const renewalCases = allContracts
+      .filter((contract) => contract.validUntil)
+      .filter((contract) => {
+        const validUntil = new Date(contract.validUntil);
+        const dueInSelectedPeriod = validUntil >= periodStart && validUntil <= periodEnd;
+        const stillUnrenewedFromEarlier = contract.renewalStatus !== "Completed" && validUntil < periodStart;
+        return dueInSelectedPeriod || stillUnrenewedFromEarlier;
+      })
       .map((contract) => {
         const validUntil = contract.validUntil ? new Date(contract.validUntil) : null;
         const status = contract.renewalStatus === "Completed"
@@ -1038,6 +1161,7 @@ exports.getDashboardStats = async (req, res) => {
           contractId: contract._id,
           clientId: contract.clientId?._id || contract.clientId,
           clientName: contract.clientId?.clientName || "—",
+          companyName: contract.clientId?.companyName || "",
           serviceName,
           renewalDate: contract.validUntil,
           renewalAmount: contract.projectAmount || 0,
@@ -1063,6 +1187,7 @@ exports.getDashboardStats = async (req, res) => {
         label: d.toLocaleDateString("en-US", { month: "short" }),
         collected: 0,
         outstanding: 0,
+        expenses: 0,
       });
     }
     const bucketFor = (date) => monthBuckets.find((b) => b.year === date.getFullYear() && b.month === date.getMonth());
@@ -1077,10 +1202,56 @@ exports.getDashboardStats = async (req, res) => {
       if (createdBucket) createdBucket.outstanding += contract.dueAmount || 0;
     });
 
-    const monthlyTrend = monthBuckets.map(({ label, year, collected, outstanding }) => ({ label, year, collected, outstanding }));
+    allExpenses.forEach((expense) => {
+      if (!expense.expenseDate) return;
+      const bucket = bucketFor(new Date(expense.expenseDate));
+      if (bucket) bucket.expenses += expense.amount || 0;
+    });
+
+    const monthlyTrend = monthBuckets.map(({ label, year, collected, outstanding, expenses }) => ({
+      label, year, collected, outstanding, expenses, profit: collected - expenses,
+    }));
     const trendTotalCollected = monthlyTrend.reduce((sum, b) => sum + b.collected, 0);
     const trendTotalOutstanding = monthlyTrend.reduce((sum, b) => sum + b.outstanding, 0);
-    const currentMonthBucket = monthlyTrend[monthlyTrend.length - 1] || { collected: 0, outstanding: 0 };
+    const currentMonthBucket = monthlyTrend[monthlyTrend.length - 1] || { collected: 0, outstanding: 0, expenses: 0, profit: 0 };
+    const previousMonthBucket = monthlyTrend[monthlyTrend.length - 2] || { collected: 0, expenses: 0, profit: 0 };
+
+    // "vs last month" — collections/profit read as good when up, expenses read
+    // as good when down, so the frontend inverts the color (not the sign) for
+    // the expenses figure.
+    const pctChange = (curr, prev) => {
+      if (prev > 0) return Math.round(((curr - prev) / prev) * 100);
+      return curr > 0 ? 100 : 0;
+    };
+    const collectionsChangePercent = pctChange(currentMonthBucket.collected, previousMonthBucket.collected);
+    const expensesChangePercent = pctChange(currentMonthBucket.expenses, previousMonthBucket.expenses);
+    const profitChangePercent = pctChange(currentMonthBucket.profit, previousMonthBucket.profit);
+
+    // ── Growth Overview ─────────────────────────────────────────────────────
+    // Monthly: this calendar month's profit vs the same month last year.
+    // Yearly: this calendar year's profit vs all of last year.
+    let priorYearMonthCollected = 0;
+    let priorYearMonthExpenses = 0;
+    const priorYearMonthYear = now.getFullYear() - 1;
+    const priorYearMonthMonth = now.getMonth();
+    allContracts.forEach((contract) => {
+      contract.payments.forEach((payment) => {
+        if (!payment.paymentDate) return;
+        const d = new Date(payment.paymentDate);
+        if (d.getFullYear() === priorYearMonthYear && d.getMonth() === priorYearMonthMonth) {
+          priorYearMonthCollected += payment.amount || 0;
+        }
+      });
+    });
+    allExpenses.forEach((expense) => {
+      if (!expense.expenseDate) return;
+      const d = new Date(expense.expenseDate);
+      if (d.getFullYear() === priorYearMonthYear && d.getMonth() === priorYearMonthMonth) {
+        priorYearMonthExpenses += expense.amount || 0;
+      }
+    });
+    const priorYearMonthProfit = priorYearMonthCollected - priorYearMonthExpenses;
+    const hasPriorYearMonthData = priorYearMonthCollected > 0 || priorYearMonthExpenses > 0;
 
     // Trailing 7-day collections trend, for the "Daily Collections" chart.
     const TREND_DAYS = 7;
@@ -1129,6 +1300,36 @@ exports.getDashboardStats = async (req, res) => {
       ? Math.round(((thisYearCollected - lastYearCollected) / lastYearCollected) * 100)
       : null;
 
+    // Expenses by calendar year, for the Growth Overview card's "Yearly" mode.
+    const yearExpenseTotals = new Map();
+    allExpenses.forEach((expense) => {
+      if (!expense.expenseDate) return;
+      const year = new Date(expense.expenseDate).getFullYear();
+      yearExpenseTotals.set(year, (yearExpenseTotals.get(year) || 0) + (expense.amount || 0));
+    });
+    const thisYearExpenses = yearExpenseTotals.get(currentYear) || 0;
+    const lastYearExpenses = yearExpenseTotals.get(currentYear - 1) || 0;
+    const thisYearProfit = thisYearCollected - thisYearExpenses;
+    const lastYearProfit = lastYearCollected - lastYearExpenses;
+    const hasPriorYearData = lastYearCollected > 0 || lastYearExpenses > 0;
+
+    const growthOverview = {
+      monthly: {
+        currentLabel: now.toLocaleDateString("en-US", { month: "short", year: "numeric" }),
+        currentProfit: currentMonthBucket.profit,
+        priorLabel: new Date(priorYearMonthYear, priorYearMonthMonth, 1).toLocaleDateString("en-US", { month: "short", year: "numeric" }),
+        priorProfit: priorYearMonthProfit,
+        hasPriorData: hasPriorYearMonthData,
+      },
+      yearly: {
+        currentLabel: String(currentYear),
+        currentProfit: thisYearProfit,
+        priorLabel: String(currentYear - 1),
+        priorProfit: lastYearProfit,
+        hasPriorData: hasPriorYearData,
+      },
+    };
+
     return res.json({
       totalClients,
       activeClients,
@@ -1145,6 +1346,12 @@ exports.getDashboardStats = async (req, res) => {
       outstandingPayments,
       overduePayments,
       collectedThisMonth,
+      totalExpenses,
+      netProfit,
+      collectionsChangePercent,
+      expensesChangePercent,
+      profitChangePercent,
+      growthOverview,
       serviceWiseActiveCases,
       totalActiveCases,
       totalActiveRevenue: Math.round(totalActiveRevenue * 100) / 100,
@@ -1156,6 +1363,9 @@ exports.getDashboardStats = async (req, res) => {
       renewalCases,
       totalRenewalCases,
       totalRenewalRevenue,
+      balanceDue,
+      totalBalanceDue,
+      overdueBalanceDueCount,
       recentClients: clients.slice(0, 5).map((c) => ({
         _id: c._id,
         clientName: c.clientName,

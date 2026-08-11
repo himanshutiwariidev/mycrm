@@ -24,8 +24,11 @@ function ContractBuilderInner({ clientId, contractId }) {
     try {
       const payload = buildContractPayload(state);
       const isEdit = !!state.meta.contractId;
+      // logEdit marks this as the deliberate, final save (vs. autosave's silent
+      // background PUTs on the same route) so the backend logs one activity
+      // entry — see updateContract in clientController.js.
       const response = isEdit
-        ? await updateContract(state.meta.contractId, payload)
+        ? await updateContract(state.meta.contractId, { ...payload, logEdit: true })
         : await createContract(payload);
 
       const savedContractId = response.data?.contract?._id || state.meta.contractId;

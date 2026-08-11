@@ -115,7 +115,7 @@ export default function Step1ClientDetails({ client }) {
         <CardHeader>
           <CardTitle>Contract Value</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <CardContent className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${isEdit ? "lg:grid-cols-5" : "lg:grid-cols-6"}`}>
           <div className="space-y-1.5">
             <Label>Contract Amount *</Label>
             <div className="relative">
@@ -143,39 +143,47 @@ export default function Step1ClientDetails({ client }) {
                 min="0"
                 className="pl-7"
                 value={state.meta.amountReceived}
-                disabled={isEdit}
                 onChange={(e) => setField("amountReceived", e.target.value)}
                 placeholder="0"
               />
             </div>
             {isEdit ? (
-              <p className="text-xs text-muted-foreground">Manage further payments from the Payments tab.</p>
+              <p className="text-xs text-muted-foreground">Directly overrides the received total — individual payments still live in the Payments tab.</p>
             ) : (
               fieldErrors.amountReceived && <p className="text-xs text-destructive">{fieldErrors.amountReceived[0]}</p>
             )}
           </div>
+          {!isEdit && (
+            <div className="space-y-1.5">
+              <Label>Payment Received On</Label>
+              <DateField
+                value={state.meta.paymentDate}
+                onChange={(value) => setField("paymentDate", value)}
+                placeholder="Select payment date"
+              />
+              <p className="text-xs text-muted-foreground">The actual date this amount was received — not today's date, if backdating.</p>
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label>Payment Method</Label>
             <Select
               value={state.meta.paymentMethod}
               onValueChange={(value) => setField("paymentMethod", value)}
-              disabled={isEdit}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select payment method" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="Cash">Cash</SelectItem>
+                <SelectItem value="NEFT">NEFT</SelectItem>
+                <SelectItem value="RTGS">RTGS</SelectItem>
+                <SelectItem value="Bank Draft">Bank Draft</SelectItem>
                 <SelectItem value="UPI">UPI</SelectItem>
-                <SelectItem value="Bank Transfer">Bank</SelectItem>
+                <SelectItem value="Cash">Cash</SelectItem>
                 <SelectItem value="Cheque">Cheque</SelectItem>
-                <SelectItem value="Card">Card</SelectItem>
+                <SelectItem value="Card Swap">Card Swap</SelectItem>
                 <SelectItem value="Other">Other</SelectItem>
               </SelectContent>
             </Select>
-            {isEdit && (
-              <p className="text-xs text-muted-foreground">Manage further payments from the Payments tab.</p>
-            )}
           </div>
           <div className="space-y-1.5">
             <Label>Balance</Label>
@@ -190,7 +198,7 @@ export default function Step1ClientDetails({ client }) {
             />
           </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:col-span-2 sm:grid-cols-2 lg:col-span-5">
+          <div className={`grid grid-cols-1 gap-4 sm:col-span-2 sm:grid-cols-2 ${isEdit ? "lg:col-span-5" : "lg:col-span-6"}`}>
             <div className="space-y-2 rounded-lg border border-input p-3">
               <div className="flex items-center gap-2">
                 <Checkbox
@@ -259,7 +267,7 @@ export default function Step1ClientDetails({ client }) {
           </div>
 
           {state.meta.gstEnabled && (
-            <div className="space-y-1.5 sm:col-span-2 lg:col-span-5">
+            <div className={`space-y-1.5 sm:col-span-2 ${isEdit ? "lg:col-span-5" : "lg:col-span-6"}`}>
               <div className="flex items-center justify-between rounded-lg bg-muted/50 px-4 py-3">
                 <span className="text-sm text-muted-foreground">
                   Final Amount ({formatCurrency(baseAmount, state.meta.currency)} + GST {formatCurrency(gstAmount, state.meta.currency)})
@@ -269,7 +277,7 @@ export default function Step1ClientDetails({ client }) {
             </div>
           )}
 
-          <div className="space-y-1.5 sm:col-span-2 lg:col-span-5">
+          <div className={`space-y-1.5 sm:col-span-2 ${isEdit ? "lg:col-span-5" : "lg:col-span-6"}`}>
             <Label>Upload PI (Proforma Invoice)</Label>
             {state.piFile ? (
               <div className="flex items-center justify-between gap-2 rounded-lg border border-input bg-muted/50 px-3 py-2 text-sm">

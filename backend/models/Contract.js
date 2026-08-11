@@ -81,6 +81,14 @@ const ContractSchema = new mongoose.Schema(
       type: String,
       default: "INR",
     },
+    // The contract's primary/last-known payment method — an editable summary
+    // field, distinct from the per-payment `payments[].method` ledger entries.
+    // Same canonical set used everywhere else in the app.
+    paymentMethod: {
+      type: String,
+      enum: ["NEFT", "RTGS", "Bank Draft", "UPI", "Cash", "Cheque", "Card Swap", "Other"],
+      default: "Cash",
+    },
     paymentTerms: {
       type: String,
       trim: true,
@@ -155,7 +163,11 @@ const ContractSchema = new mongoose.Schema(
         paymentDate: { type: Date, default: Date.now },
         method: {
           type: String,
-          enum: ["UPI", "Bank Transfer", "Cash", "Cheque", "Card", "Razorpay", "Other"],
+          // Canonical modes going forward: NEFT, RTGS, Bank Draft, UPI, Cash,
+          // Cheque, Card Swap, Other. "Bank Transfer", "Card", and "Razorpay"
+          // are kept in the enum only so older payment records already saved
+          // with those values still pass validation — the UI no longer offers them.
+          enum: ["NEFT", "RTGS", "Bank Draft", "UPI", "Cash", "Cheque", "Card Swap", "Other", "Bank Transfer", "Card", "Razorpay"],
           default: "Other",
         },
         notes: { type: String, trim: true },

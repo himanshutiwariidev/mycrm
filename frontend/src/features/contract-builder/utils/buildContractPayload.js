@@ -45,6 +45,7 @@ export function buildContractPayload(state) {
     tdsPercent,
     tdsAmount,
     currency: state.meta.currency || "INR",
+    paymentMethod: state.meta.paymentMethod || "Cash",
     paymentTerms: state.meta.paymentTerms,
     validUntil: state.meta.validUntil || undefined,
     nextDueDate: state.meta.dueDate || undefined,
@@ -53,8 +54,23 @@ export function buildContractPayload(state) {
     pricingSummary: state.pricingSummary,
     // Recorded as a real payment so the Payments tab / receivedAmount stay in
     // sync with what was entered here, instead of a separate untracked number.
+    // paymentDate defaults to today but is editable specifically so a
+    // backdated contract's initial payment lands in the month it was actually
+    // received (e.g. January), not the month the contract was entered into
+    // the system — otherwise Payment Overview would misattribute it.
     ...(isNewContract && amountReceived > 0
-      ? { payments: [{ amount: amountReceived, method: state.meta.paymentMethod || "Other", notes: "Recorded at contract creation" }] }
+      ? { payments: [{ amount: amountReceived, method: state.meta.paymentMethod || "Other", paymentDate: state.meta.paymentDate || undefined, notes: "Recorded at contract creation" }] }
+      : {}),
+    // Editing an existing contract's Amount Received is a direct, free-form
+    // override of the stored total — deliberately NOT a new payment record,
+    // since there's no way to know which individual payment (if any) the admin
+    // meant to correct. This can drift from the sum of the real payments
+    // listed in the Payments tab. updateContract's findByIdAndUpdate persists
+    // these as-is; only contract.save() (used by add/delete payment) recomputes
+    // them from the payments ledger, so a later payment change will still
+    // override this value back to the ledger's true total.
+    ...(!isNewContract
+      ? { receivedAmount: amountReceived, dueAmount: Math.max(finalAmount - amountReceived, 0) }
       : {}),
   };
 }

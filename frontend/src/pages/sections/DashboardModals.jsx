@@ -44,6 +44,12 @@ export default function DashboardModals({
   deleteProject,
   setDeleteProject,
   handleDeleteProject,
+  deleteExpense,
+  setDeleteExpense,
+  handleDeleteExpense,
+  deleteMeeting,
+  setDeleteMeeting,
+  handleDeleteMeeting,
 }) {
   return (
     <>
@@ -146,6 +152,8 @@ export default function DashboardModals({
       {deleteTask && <ConfirmModal title="Delete Task" message={`Are you sure you want to delete "${deleteTask.title}"? This action cannot be undone.`} onConfirm={handleDeleteTask} onClose={() => setDeleteTask(null)} />}
       {deleteUser && <ConfirmModal title="Delete User" message={`Are you sure you want to delete the account for "${deleteUser.name}"? All their task assignments may be affected.`} onConfirm={handleDeleteUser} onClose={() => setDeleteUser(null)} />}
       {deleteProject && <ConfirmModal title="Delete Project" message={`Are you sure you want to delete "${deleteProject.companyName}"? This action cannot be undone.`} onConfirm={handleDeleteProject} onClose={() => setDeleteProject(null)} />}
+      {deleteExpense && <ConfirmModal title="Delete Expense" message={`Are you sure you want to delete "${deleteExpense.title}"? This action cannot be undone.`} onConfirm={handleDeleteExpense} onClose={() => setDeleteExpense(null)} />}
+      {deleteMeeting && <ConfirmModal title="Delete Meeting" message={`Are you sure you want to delete "${deleteMeeting.title}"? This action cannot be undone.`} onConfirm={handleDeleteMeeting} onClose={() => setDeleteMeeting(null)} />}
     </>
   );
 }
