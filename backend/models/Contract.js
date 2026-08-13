@@ -155,6 +155,13 @@ const ContractSchema = new mongoose.Schema(
           enum: ["quantity", "status"],
           default: "quantity",
         },
+        // Service-specific measurement model (e.g. "pages" for Web
+        // Development, "campaigns" for Sponsored Ads, "screens" for Mobile
+        // App Development) so the UI can show the right unit instead of a
+        // one-size-fits-all quantity. Absent on legacy/generic deliverables,
+        // which fall back to plain quantity/frequency display.
+        unit: { type: String },
+        metadata: { type: mongoose.Schema.Types.Mixed },
       },
     ],
     payments: [

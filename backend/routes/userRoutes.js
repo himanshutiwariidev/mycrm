@@ -38,23 +38,23 @@ router.post("/register-admin", authMiddleware, requireRole("admin"), createUser)
 router.post(
   "/",
   authMiddleware,
-  requireRole("admin", "hr"),
+  requireRole("admin", "hr", "manager"),
   createUserValidator,
   createUser
 );
 
-router.get("/", authMiddleware, requireRole("admin", "hr"), getAllUsers);
+router.get("/", authMiddleware, requireRole("admin", "hr", "manager"), getAllUsers);
 
 // requireRole only gates entry here; the controller further restricts a
 // "sales" caller to role=sales lookups only (see getUsersByRole).
 router.get("/by-role/:role", authMiddleware, requireRole("admin", "sales"), getUsersByRole);
 
-router.delete("/:id", authMiddleware, requireRole("admin", "hr"), deleteUser);
+router.delete("/:id", authMiddleware, requireRole("admin", "hr", "manager"), deleteUser);
 
 router.put(
   "/:id",
   authMiddleware,
-  requireRole("admin", "hr"),
+  requireRole("admin", "hr", "manager"),
   updateUserValidator,
   updateUser
 );

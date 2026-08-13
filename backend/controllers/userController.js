@@ -20,10 +20,21 @@ const COOKIE_OPTIONS = {
 // passwords verified at 10 rounds continue to work without migration.
 const BCRYPT_ROUNDS = 12;
 
-// ── CREATE USER (admin / HR only) ───────────────────────────────────────────
+// ── CREATE USER (admin / HR / manager) ──────────────────────────────────────
 exports.createUser = asyncHandler(async (req, res) => {
   const { name, email, password, role } = req.body;
   const normalizedEmail = String(email || "").trim().toLowerCase();
+
+  // A manager's Users section is scoped to onboarding plain team members —
+  // never sales/hr/admin/another manager, regardless of what the request
+  // body asks for.
+  let resolvedRole = role;
+  if (req.user.role === "manager") {
+    resolvedRole = "user";
+  } else if (role === "manager" && req.user.role !== "admin") {
+    // Only an admin can grant the manager role itself (e.g. HR cannot).
+    return res.status(403).json({ message: "Only an admin can create a manager account" });
+  }
 
   const existingUser = await User.findOne({ email: normalizedEmail });
   if (existingUser) {
@@ -32,7 +43,7 @@ exports.createUser = asyncHandler(async (req, res) => {
 
   const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
-  await User.create({ name, email: normalizedEmail, password: hashedPassword, role });
+  await User.create({ name, email: normalizedEmail, password: hashedPassword, role: resolvedRole });
 
   return res.status(201).json({ message: "User created successfully" });
 });
@@ -62,6 +73,13 @@ exports.getUsersByRole = asyncHandler(async (req, res) => {
 
 // ── DELETE USER ─────────────────────────────────────────────────────────────
 exports.deleteUser = asyncHandler(async (req, res) => {
+  if (req.user.role === "manager") {
+    const target = await User.findById(req.params.id).select("role");
+    if (!target || target.role !== "user") {
+      return res.status(403).json({ message: "Managers can only manage accounts with the 'user' role" });
+    }
+  }
+
   await User.findByIdAndDelete(req.params.id);
   return res.json({ message: "User deleted successfully" });
 });
@@ -69,6 +87,17 @@ exports.deleteUser = asyncHandler(async (req, res) => {
 // ── UPDATE USER ─────────────────────────────────────────────────────────────
 exports.updateUser = asyncHandler(async (req, res) => {
   const updatePayload = { ...req.body };
+
+  if (req.user.role === "manager") {
+    const target = await User.findById(req.params.id).select("role");
+    if (!target || target.role !== "user") {
+      return res.status(403).json({ message: "Managers can only manage accounts with the 'user' role" });
+    }
+    // Never let a manager promote/demote a user's role out from under them.
+    if (updatePayload.role && updatePayload.role !== "user") {
+      return res.status(403).json({ message: "Managers cannot change a user's role" });
+    }
+  }
 
   if (updatePayload.email) {
     updatePayload.email = String(updatePayload.email).trim().toLowerCase();

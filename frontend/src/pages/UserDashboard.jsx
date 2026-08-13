@@ -15,6 +15,8 @@ import {
   PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from "recharts";
+import { resolveDeliverableVisual } from "../config/serviceVisuals";
+import { formatDeliverableAmount } from "../config/deliverableUnits";
 
 // ─── shared theme (identical to AdminDashboard) ───────────────────────────────
 const T = {
@@ -119,6 +121,48 @@ function CustomTooltip({ active, payload, label }) {
   );
 }
 
+// ─── DeliverableProgressRow ────────────────────────────────────────────────────
+// Lets the assignee record how much of a contract-generated deliverable they've
+// completed so far — updates persist to the same Task document the admin sees,
+// so progress made here shows up on the admin's Tasks page immediately.
+function DeliverableProgressRow({ taskId, d, busy, onUpdate }) {
+  const delivered = d.delivered || 0;
+  const quantity = d.quantity || 0;
+  const pct = quantity ? Math.min(100, Math.round((delivered / quantity) * 100)) : 0;
+  const stepBtn = (disabled) => ({
+    width: 26, height: 26, borderRadius: 7, border: `1.5px solid ${T.border}`,
+    background: "#fff", color: T.textSecondary, fontSize: 14, fontWeight: 700,
+    display: "grid", placeItems: "center", cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.4 : 1, fontFamily: "inherit",
+  });
+
+  const visual = resolveDeliverableVisual(d.title, d.categoryId);
+  const VisualIcon = visual.Icon;
+  const isGradient = visual.bg.startsWith("linear");
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", background: T.inputBg, borderRadius: 9 }}>
+      <div style={{ width: 28, height: 28, borderRadius: "50%", background: visual.bg, display: "grid", placeItems: "center", flexShrink: 0 }}>
+        <VisualIcon size={13} color="#fff" />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: T.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.title}</div>
+        <div style={{ fontSize: 10.5, color: T.textMuted, marginTop: 2 }}>
+          {formatDeliverableAmount(d)}
+        </div>
+        <div style={{ height: 5, background: "#e8eaf0", borderRadius: 99, marginTop: 6, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${pct}%`, background: isGradient ? T.brand : visual.bg, borderRadius: 99, transition: "width .2s" }} />
+        </div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, flexShrink: 0 }}>
+        <button disabled={busy || delivered <= 0} onClick={() => onUpdate(taskId, d._id, Math.max(0, delivered - 1))} style={stepBtn(busy || delivered <= 0)}>−</button>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, minWidth: 42, textAlign: "center" }}>{busy ? "…" : `${delivered}/${quantity}`}</span>
+        <button disabled={busy || delivered >= quantity} onClick={() => onUpdate(taskId, d._id, Math.min(quantity, delivered + 1))} style={stepBtn(busy || delivered >= quantity)}>+</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── StatusSelect ─────────────────────────────────────────────────────────────
 function StatusSelect({ value, onChange }) {
   const s = STATUS[value] || STATUS.pending;
@@ -155,6 +199,7 @@ export default function UserDashboard() {
   const [tab, setTab]       = useState("dashboard");
   const [toast, setToast]   = useState(null);
   const [updating, setUpdating] = useState(null); // taskId being updated
+  const [updatingDeliverable, setUpdatingDeliverable] = useState(null); // deliverableId being updated
   const [leaves, setLeaves] = useState([]);
   const [leaveForm, setLeaveForm] = useState({ fromDate: "", toDate: "", reason: "" });
   const [submittingLeave, setSubmittingLeave] = useState(false);
@@ -239,6 +284,22 @@ await API.patch(
       showToast("Failed to update status", false);
     } finally {
       setUpdating(null);
+    }
+  };
+
+  const handleDeliverableUpdate = async (taskId, deliverableId, delivered) => {
+    setUpdatingDeliverable(deliverableId);
+    try {
+      const { data } = await API.patch(`/tasks/${taskId}/deliverables/${deliverableId}`, { delivered });
+      // The PATCH response's task.clientId/contractId are raw (unpopulated)
+      // ObjectIds — merge in just the updated deliverables array so the
+      // already-populated client/contract name in local state survives.
+      setTasks(prev => prev.map(t => t._id === taskId ? { ...t, deliverables: data.task.deliverables } : t));
+      showToast("Progress updated");
+    } catch {
+      showToast("Failed to update progress", false);
+    } finally {
+      setUpdatingDeliverable(null);
     }
   };
 
@@ -571,9 +632,35 @@ await API.patch(
                                 )}
                               </div>
 
+                              {/* contract/client origin */}
+                              {task.contractId && (
+                                <div style={{ fontSize: 11.5, color: T.textMuted, marginBottom: 10 }}>
+                                  Contract: <span style={{ color: T.brand, fontWeight: 600 }}>{task.clientId?.clientName}</span>
+                                  {task.contractId?.projectName && <> &middot; <span style={{ color: T.brand, fontWeight: 600 }}>{task.contractId.projectName}</span></>}
+                                </div>
+                              )}
+
                               {/* description */}
-                              {task.description && (
+                              {!task.deliverables?.length && task.description && (
                                 <p style={{ fontSize: 13, color: T.textMuted, lineHeight: 1.65, marginBottom: 14 }}>{task.description}</p>
+                              )}
+
+                              {/* deliverables progress */}
+                              {task.deliverables?.length > 0 && (
+                                <div style={{ marginBottom: 14 }}>
+                                  <div style={{ fontSize: 11.5, fontWeight: 700, color: T.textSecondary, marginBottom: 7 }}>Deliverables Summary</div>
+                                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                    {task.deliverables.map((d) => (
+                                      <DeliverableProgressRow
+                                        key={d._id}
+                                        taskId={task._id}
+                                        d={d}
+                                        busy={updatingDeliverable === d._id}
+                                        onUpdate={handleDeliverableUpdate}
+                                      />
+                                    ))}
+                                  </div>
+                                </div>
                               )}
 
                               {/* meta + status row */}

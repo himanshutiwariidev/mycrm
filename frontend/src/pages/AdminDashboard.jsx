@@ -19,6 +19,16 @@ import useAdminDashboard from "./sections/useAdminDashboard";
 import { T } from "./sections/shared";
 import AttendanceSection from "./sections/AttendanceSection";
 
+// This component is shared by the admin/HR/manager routes (HrDashboard and
+// ManagerDashboard just re-render it), so the header must reflect whoever's
+// actually logged in rather than a hardcoded "Administrator".
+const ROLE_LABELS = {
+  admin: "Super Admin",
+  manager: "Manager",
+  hr: "HR",
+  sales: "Sales",
+};
+
 export default function AdminDashboard() {
   const {
     users, tasks, clients, projects, contracts, reminders, expenses, meetings, activityLog, dashboardStats, fetchDashboardStats,
@@ -164,7 +174,7 @@ export default function AdminDashboard() {
         .data-row:hover { background: ${T.brandLight} !important; }
 
         .nav-btn { border: none; cursor: pointer; font-family: inherit; background: transparent; transition: all .16s; }
-        .nav-btn:hover:not(.nav-active) { background: ${T.brandLight} !important; color: ${T.brand} !important; }
+        .nav-btn:hover:not(.nav-active):not(:disabled) { background: ${T.brandLight} !important; color: ${T.brand} !important; }
 
         .pri-btn { transition: filter .18s, transform .15s, box-shadow .18s; cursor: pointer; border: none; font-family: inherit; }
         .pri-btn:hover { filter: brightness(1.07); transform: translateY(-1px); box-shadow: 0 6px 20px rgba(247, 147, 30,.3); }
@@ -205,11 +215,18 @@ export default function AdminDashboard() {
             {["overview", "manage"].map(section => (
               <div key={section}>
                 <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: ".14em", textTransform: "uppercase", fontWeight: 700, padding: section === "manage" ? "18px 12px 8px" : "4px 12px 8px" }}>{section}</div>
-                {TABS.filter(t => t.section === section).map(({ id, label, Icon, color }) => {
+                {TABS.filter(t => t.section === section).map(({ id, label, Icon, color, disabled }) => {
                   const active = tab === id;
-                  const iconColor = color || T.brand;
+                  const iconColor = disabled ? T.textMuted : (color || T.brand);
                   return (
-                    <button key={id} className={`nav-btn${active ? " nav-active" : ""}`} onClick={() => (id === "createProject" ? openCreateProject() : setTab(id))} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 12px", borderRadius: 9, textAlign: "left", color: active ? T.brand : T.textPrimary, background: active ? T.brandLight : "transparent", fontWeight: active ? 600 : 500, fontSize: 13.5, borderLeft: `3px solid ${active ? T.brand : "transparent"}` }}>
+                    <button
+                      key={id}
+                      className={`nav-btn${active ? " nav-active" : ""}`}
+                      disabled={disabled}
+                      title={disabled ? "Not available for your role" : undefined}
+                      onClick={disabled ? undefined : () => (id === "createProject" ? openCreateProject() : setTab(id))}
+                      style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 12px", borderRadius: 9, textAlign: "left", color: disabled ? T.textMuted : (active ? T.brand : T.textPrimary), background: active ? T.brandLight : "transparent", fontWeight: active ? 600 : 500, fontSize: 13.5, borderLeft: `3px solid ${active ? T.brand : "transparent"}`, opacity: disabled ? 0.45 : 1, cursor: disabled ? "not-allowed" : "pointer" }}
+                    >
                       <div style={{ width: 26, height: 26, borderRadius: 8, flexShrink: 0, display: "grid", placeItems: "center", background: `${iconColor}1f` }}>
                         <Icon size={14} strokeWidth={2.2} color={iconColor} />
                       </div>
@@ -240,8 +257,8 @@ export default function AdminDashboard() {
                 <Shield size={15} color="#fff" strokeWidth={2} />
               </div>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary, lineHeight: 1 }}>Administrator</div>
-                <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>Super Admin</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary, lineHeight: 1 }}>{localStorage.getItem("userName") || "Administrator"}</div>
+                <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>{ROLE_LABELS[localStorage.getItem("role")] || "Super Admin"}</div>
               </div>
             </div>
           </header>

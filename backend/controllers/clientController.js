@@ -439,10 +439,16 @@ exports.deleteClient = async (req, res) => {
       return res.status(404).json({ message: "Client not found" });
     }
 
-    // Delete related contracts, reminders, activity log, and the linked client-login user
+    // Delete related contracts, reminders, activity log, auto-generated
+    // tasks, and the linked client-login user — without this, contract-
+    // generated Task documents (see createTasksFromDeliverables) would keep
+    // dangling clientId/contractId references forever, silently surviving
+    // as orphaned "zombie" tasks that the Tasks page's populate() can no
+    // longer resolve to a client/contract name.
     await Contract.deleteMany({ clientId: req.params.id });
     await PaymentReminder.deleteMany({ clientId: req.params.id });
     await ActivityLog.deleteMany({ clientId: req.params.id });
+    await Task.deleteMany({ clientId: req.params.id });
     await User.deleteOne({ clientId: req.params.id });
 
     return res.json({ message: "Client and related data deleted successfully" });
@@ -485,15 +491,40 @@ exports.getAllActivity = async (req, res) => {
 // Turns a freshly-created contract's deliverables into unassigned Task
 // records so they show up in the "All Tasks" section for an admin to assign
 // to a team member — replaces the old client-level "Assign Task" flow.
+//
+// One task per SERVICE CATEGORY (e.g. "Social Media"), not one per individual
+// deliverable — a contract with 3 Social Media deliverables (AI Creative, AI
+// Reels, Graphic Creatives) creates a single bundled task carrying all 3 as a
+// compact `deliverables` summary, instead of 3 separate tasks. Only called
+// from createContract (never from updateContract), so editing/re-saving a
+// contract can never generate duplicate tasks.
 async function createTasksFromDeliverables(contract, client, createdByUserId) {
   if (!contract.deliverables?.length) return;
-  const tasks = contract.deliverables.map((d) => ({
-    title: `${client.clientName}: ${d.title}`,
-    description: `Auto-created from contract "${contract.projectName}" (${contract.contractNumber})`,
-    createdBy: createdByUserId,
-    contractId: contract._id,
-    clientId: client._id,
-  }));
+
+  const groups = new Map(); // categoryId -> { label, items: [] }
+  contract.deliverables.forEach((d) => {
+    const categoryId = d.categoryId || "general";
+    const categoryLabel = SERVICE_CATEGORY_LABELS[d.categoryId] || d.categoryId || "General";
+    if (!groups.has(categoryId)) groups.set(categoryId, { label: categoryLabel, items: [] });
+    // Deliverable titles are built as "<Category Label> — <item>" — strip the
+    // redundant category prefix since the task title already carries it.
+    const prefix = `${categoryLabel} — `;
+    const itemTitle = d.title?.startsWith(prefix) ? d.title.slice(prefix.length) : d.title;
+    groups.get(categoryId).items.push({ title: itemTitle, quantity: d.quantity, frequency: d.frequency, unit: d.unit, metadata: d.metadata, categoryId: d.categoryId });
+  });
+
+  const tasks = Array.from(groups.values()).map((group) => {
+    const allMonthly = group.items.length > 0 && group.items.every((it) => it.frequency === "month");
+    const cadenceLabel = allMonthly ? "Monthly Deliverables" : "Deliverables";
+    return {
+      title: `${client.clientName}: ${group.label} — ${cadenceLabel}`,
+      description: `Auto-created from contract "${contract.projectName}" (${contract.contractNumber})`,
+      deliverables: group.items,
+      createdBy: createdByUserId,
+      contractId: contract._id,
+      clientId: client._id,
+    };
+  });
   await Task.insertMany(tasks);
 }
 
@@ -1047,6 +1078,52 @@ exports.getDashboardStats = async (req, res) => {
       });
     });
 
+    // ── Period-scoped trend (for the Collections/Expenses/Profit sparklines) ──
+    // Unlike monthlyTrend below (a fixed trailing-8-months view independent of
+    // the picker), this buckets the ACTUAL selected periodStart..periodEnd
+    // range — daily for a short range, weekly for a multi-month range, monthly
+    // for a multi-year range — so the sparkline visibly redraws whenever the
+    // admin changes the date-range picker instead of looking frozen.
+    const periodSpanDays = Math.max(1, Math.round((periodEnd - periodStart) / 86400000) + 1);
+    const periodGranularity = periodSpanDays <= 62 ? "day" : periodSpanDays <= 370 ? "week" : "month";
+
+    const startOfWeek = (d) => {
+      const copy = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      copy.setDate(copy.getDate() - ((copy.getDay() + 6) % 7)); // back to Monday
+      return copy;
+    };
+    const periodBucketKey = (date) => {
+      if (periodGranularity === "day") return date.toISOString().slice(0, 10);
+      if (periodGranularity === "week") return startOfWeek(date).toISOString().slice(0, 10);
+      return `${date.getFullYear()}-${date.getMonth()}`;
+    };
+
+    const periodBucketMap = new Map();
+    const periodBuckets = [];
+    {
+      const cursor = new Date(periodStart.getFullYear(), periodStart.getMonth(), periodStart.getDate());
+      const endDay = new Date(periodEnd.getFullYear(), periodEnd.getMonth(), periodEnd.getDate());
+      if (periodGranularity === "month") cursor.setDate(1);
+      else if (periodGranularity === "week") cursor.setTime(startOfWeek(cursor).getTime());
+      let guard = 0;
+      while (cursor <= endDay && guard < 400) {
+        guard += 1;
+        const key = periodBucketKey(cursor);
+        if (!periodBucketMap.has(key)) {
+          const label = periodGranularity === "month"
+            ? cursor.toLocaleDateString("en-US", { month: "short", year: "numeric" })
+            : cursor.toLocaleDateString("en-US", { day: "numeric", month: "short" });
+          const bucket = { label, collected: 0, expenses: 0 };
+          periodBucketMap.set(key, bucket);
+          periodBuckets.push(bucket);
+        }
+        if (periodGranularity === "day") cursor.setDate(cursor.getDate() + 1);
+        else if (periodGranularity === "week") cursor.setDate(cursor.getDate() + 7);
+        else cursor.setMonth(cursor.getMonth() + 1);
+      }
+    }
+    const periodBucketFor = (date) => periodBucketMap.get(periodBucketKey(date));
+
     // "Revenue" must reflect money actually collected within the selected range,
     // keyed off each payment's own paymentDate — same figure as collectedThisMonth
     // / revenueSummary above. It must NOT be the sum of receivedAmount on contracts
@@ -1061,6 +1138,26 @@ exports.getDashboardStats = async (req, res) => {
     const expensesInRange = await Expense.find({ expenseDate: { $gte: periodStart, $lte: periodEnd } });
     const totalExpenses = expensesInRange.reduce((sum, e) => sum + (e.amount || 0), 0);
     const netProfit = totalRevenue - totalExpenses;
+
+    // Populate the period-scoped trend buckets declared above.
+    allContracts.forEach((contract) => {
+      contract.payments.forEach((payment) => {
+        if (!payment.paymentDate) return;
+        const paidOn = new Date(payment.paymentDate);
+        if (paidOn >= periodStart && paidOn <= periodEnd) {
+          const pb = periodBucketFor(paidOn);
+          if (pb) pb.collected += payment.amount || 0;
+        }
+      });
+    });
+    expensesInRange.forEach((expense) => {
+      if (!expense.expenseDate) return;
+      const pb = periodBucketFor(new Date(expense.expenseDate));
+      if (pb) pb.expenses += expense.amount || 0;
+    });
+    const periodTrend = periodBuckets.map(({ label, collected, expenses }) => ({
+      label, collected, expenses, profit: collected - expenses,
+    }));
 
     const pendingDeliverables = totalDeliverables - completedDeliverables;
     const overallCompletionPercent = totalDue > 0 ? Math.round((totalDelivered / totalDue) * 100) : 0;
@@ -1373,6 +1470,7 @@ exports.getDashboardStats = async (req, res) => {
         status: c.status,
       })),
       monthlyTrend,
+      periodTrend,
       trendTotalCollected,
       trendTotalOutstanding,
       currentMonthCollected: currentMonthBucket.collected,

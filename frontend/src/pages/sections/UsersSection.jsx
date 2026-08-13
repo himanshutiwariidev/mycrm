@@ -7,6 +7,7 @@ import { IconBtn, STATUS, T } from "./shared";
 
 const ROLE_ACCENT = {
   admin: { color: "#f7931e", bg: "#fff4e6", border: "#fed7aa" },
+  manager: { color: "#7c3aed", bg: "#ede9fe", border: "#ddd6fe" },
   hr: { color: "#0d9488", bg: "#ccfbf1", border: "#99f6e4" },
   sales: { color: "#16a34a", bg: "#dcfce7", border: "#bbf7d0" },
   user: { color: "#d97706", bg: "#fffbeb", border: "#fde68a" },
@@ -16,6 +17,7 @@ const ROLE_ACCENT = {
 const ROLE_OPTIONS = [
   { value: "all", label: "All Roles" },
   { value: "admin", label: "Admin" },
+  { value: "manager", label: "Manager" },
   { value: "hr", label: "HR" },
   { value: "sales", label: "Sales" },
   { value: "user", label: "User" },
@@ -52,6 +54,11 @@ export default function UsersSection({ users, tasks, setTab, openEditUser, setDe
   const [roleFilter, setRoleFilter] = useState("all");
   const [view, setView] = useState("grid");
   const [page, setPage] = useState(1);
+  // A manager's edit/delete permission is limited to plain "user" accounts
+  // (enforced server-side too) — hiding the buttons for everyone else here
+  // avoids offering an action that would just come back as a 403.
+  const actingRole = localStorage.getItem("role");
+  const canManageUser = (user) => actingRole !== "manager" || user.role === "user";
 
   const resetAnd = (setter) => (val) => { setter(val); setPage(1); };
 
@@ -134,8 +141,12 @@ export default function UsersSection({ users, tasks, setTab, openEditUser, setDe
                   <button title="More" style={{ width: 30, height: 30, borderRadius: 7, border: "none", cursor: "pointer", display: "grid", placeItems: "center", background: "transparent", color: T.textMuted }}>
                     <MoreVertical size={15} strokeWidth={2} />
                   </button>
-                  <IconBtn icon={Pencil} color="#f7931e" bg="#fff4e6" hoverBg="#fed7aa" onClick={() => openEditUser(user)} title="Edit user" />
-                  <IconBtn icon={Trash2} color={T.red} bg={T.redBg} hoverBg={T.redBorder} onClick={() => setDeleteUser(user)} title="Delete user" />
+                  {canManageUser(user) && (
+                    <>
+                      <IconBtn icon={Pencil} color="#f7931e" bg="#fff4e6" hoverBg="#fed7aa" onClick={() => openEditUser(user)} title="Edit user" />
+                      <IconBtn icon={Trash2} color={T.red} bg={T.redBg} hoverBg={T.redBorder} onClick={() => setDeleteUser(user)} title="Delete user" />
+                    </>
+                  )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 13, marginBottom: 18, paddingRight: 104 }}>
                   <div style={{ width: 48, height: 48, borderRadius: "50%", flexShrink: 0, background: accent.bg, display: "grid", placeItems: "center", fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 16, color: accent.color, border: `1.5px solid ${accent.border}` }}>
@@ -223,8 +234,12 @@ export default function UsersSection({ users, tasks, setTab, openEditUser, setDe
                 </span>
                 <span style={{ fontSize: 12, color: T.textMuted, flexShrink: 0, minWidth: 100, textAlign: "right" }}>{fmtJoined(user.createdAt)}</span>
                 <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                  <IconBtn icon={Pencil} color="#f7931e" bg="#fff4e6" hoverBg="#fed7aa" onClick={() => openEditUser(user)} title="Edit user" />
-                  <IconBtn icon={Trash2} color={T.red} bg={T.redBg} hoverBg={T.redBorder} onClick={() => setDeleteUser(user)} title="Delete user" />
+                  {canManageUser(user) && (
+                    <>
+                      <IconBtn icon={Pencil} color="#f7931e" bg="#fff4e6" hoverBg="#fed7aa" onClick={() => openEditUser(user)} title="Edit user" />
+                      <IconBtn icon={Trash2} color={T.red} bg={T.redBg} hoverBg={T.redBorder} onClick={() => setDeleteUser(user)} title="Delete user" />
+                    </>
+                  )}
                 </div>
               </div>
             );

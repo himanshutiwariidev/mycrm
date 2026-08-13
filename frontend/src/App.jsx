@@ -8,6 +8,7 @@ import UserDashboard from "./pages/UserDashboard";
 import ClientsPage from "./pages/ClientsPage";
 import ClientDetailPage from "./pages/ClientDetailPage";
 import HrDashboard from "./pages/HrDashboard";
+import ManagerDashboard from "./pages/ManagerDashboard";
 import SalesDashboard from "./pages/SalesDashboard";
 import ClientDashboard from "./pages/ClientDashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -95,6 +96,15 @@ function App() {
           element={
             <ProtectedRoute role="hr">
               <HrDashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/manager"
+          element={
+            <ProtectedRoute role="manager">
+              <ManagerDashboard />
             </ProtectedRoute>
           }
         />

@@ -247,10 +247,14 @@ export default function DashboardSection({ dashboardStats, meetings, activityLog
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range.start, range.end]);
 
-  const monthlyTrend = stats.monthlyTrend || [];
-  const collectionsSparkline = monthlyTrend.map((m) => ({ label: m.label, value: m.collected }));
-  const expensesSparkline = monthlyTrend.map((m) => ({ label: m.label, value: m.expenses }));
-  const profitSparkline = monthlyTrend.map((m) => ({ label: m.label, value: m.profit }));
+  // periodTrend is bucketed across the currently-selected date range (see
+  // backend getDashboardStats) — unlike the old monthlyTrend (a fixed
+  // trailing-8-months view), this redraws whenever the date-range picker
+  // above changes, instead of looking frozen.
+  const periodTrend = stats.periodTrend || [];
+  const collectionsSparkline = periodTrend.map((m) => ({ label: m.label, value: m.collected }));
+  const expensesSparkline = periodTrend.map((m) => ({ label: m.label, value: m.expenses }));
+  const profitSparkline = periodTrend.map((m) => ({ label: m.label, value: m.profit }));
 
   return (
     <div className="fade-up">

@@ -42,7 +42,9 @@ export default function useAdminDashboard() {
     totalExpenses: 0,
     netProfit: 0,
   });
-  const [tab, setTab] = useState("dashboard");
+  // A manager's Dashboard tab is disabled (see ROLE_TABS/TABS below), so
+  // land them on Tasks instead of a section they can't click into.
+  const [tab, setTab] = useState(() => (localStorage.getItem("role") === "manager" ? "tasks" : "dashboard"));
   const [toast, setToast] = useState(null);
   const [showPw, setShowPw] = useState(false);
 
@@ -641,8 +643,10 @@ export default function useAdminDashboard() {
     ],
   };
 
-  const TABS = ROLE_TABS[role] || [
-    // fallback to admin-like access if role is missing/unknown
+  // The full admin-like tab set — also the base a manager's sidebar is built
+  // from (see below), since a manager must see every sidebar entry, just
+  // with everything besides Tasks/Users greyed out and unclickable.
+  const ALL_TABS = [
     { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard, section: "overview", color: "#7c3aed" },
     { id: "tasks", label: "All Tasks", Icon: ClipboardList, section: "overview", color: "#0891b2" },
     { id: "users", label: "All Users", Icon: Users, section: "overview", color: "#db2777" },
@@ -658,6 +662,17 @@ export default function useAdminDashboard() {
     { id: "createMeeting", label: "New Meeting", Icon: Plus, section: "manage", color: "#f7931e" },
     { id: "createUser", label: "New User", Icon: UserPlus, section: "manage", color: "#db2777" },
   ];
+
+  // Manager: sees every sidebar entry (per spec), but only the Task and
+  // User sections are actually clickable — everything else renders
+  // disabled. Keep this as an explicit branch rather than falling through
+  // to the "unknown role" fallback below, which grants full admin-like
+  // access and would otherwise silently over-privilege a manager.
+  const MANAGER_ENABLED_IDS = new Set(["tasks", "createTask", "users", "createUser"]);
+
+  const TABS = role === "manager"
+    ? ALL_TABS.map((t) => ({ ...t, disabled: !MANAGER_ENABLED_IDS.has(t.id) }))
+    : ROLE_TABS[role] || ALL_TABS; // fallback to admin-like access if role is missing/unknown
 
   const currentLabel = TABS.find(t => t.id === tab)?.label || "Dashboard";
 

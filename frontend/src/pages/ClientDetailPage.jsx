@@ -20,6 +20,9 @@ import ContractDetail from "./ContractDetail";
 import DeliverableDetailPanel from "../components/DeliverableDetailPanel";
 import { getLeafConfig } from "../features/contract-builder/utils/configLookup";
 import { findMatchingSelection } from "../features/contract-builder/utils/deliverableTracking";
+import { getCategoryMeta } from "../features/contract-builder/config/serviceCategories";
+import { resolveDeliverableVisual, resolveCategoryVisual } from "../config/serviceVisuals";
+import { unitNoun, formatDeliverableAmount } from "../config/deliverableUnits";
 import "./ClientDetailPage.css";
 
 const initials = (name = "") =>
@@ -336,6 +339,21 @@ export default function ClientDetailPage() {
   const allDeliverables = contracts.flatMap((p) =>
     (p.deliverables || []).map((d) => ({ ...d, _contractId: p._id, _contractName: p.projectName, _contract: p }))
   );
+  // One row per service category per contract (e.g. "Social Media" covering
+  // AI Creative/AI Reels/Graphic Creatives), not one row per deliverable —
+  // expanding a row reveals the individual items underneath.
+  const groupedDeliverables = Object.values(
+    allDeliverables.reduce((groups, d) => {
+      const categoryId = d.categoryId || "general";
+      const categoryLabel = getCategoryMeta(d.categoryId)?.label || d.categoryId || "General";
+      const key = `${d._contractId}-${categoryId}`;
+      if (!groups[key]) {
+        groups[key] = { key, categoryId, categoryLabel, _contractId: d._contractId, _contractName: d._contractName, _contract: d._contract, items: [] };
+      }
+      groups[key].items.push(d);
+      return groups;
+    }, {})
+  );
   const allPayments = contracts
     .flatMap((p) => (p.payments || []).map((pay) => ({ ...pay, _contractId: p._id, _contractName: p.projectName })))
     .sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate));
@@ -633,7 +651,7 @@ export default function ClientDetailPage() {
             <h2>Deliverables</h2>
             <span className="cd-panel-subtitle">Across all contracts — expand a row for service-specific details</span>
           </div>
-          {allDeliverables.length === 0 ? (
+          {groupedDeliverables.length === 0 ? (
             <EmptyState message="No deliverables defined yet" />
           ) : (
             <div className="table-container">
@@ -641,64 +659,64 @@ export default function ClientDetailPage() {
                 <thead>
                   <tr>
                     <th></th>
-                    <th>Title</th>
+                    <th>Service</th>
                     <th>Contract</th>
+                    <th>Items</th>
                     <th>Progress</th>
                     <th>Status</th>
                     <th>Manage</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {allDeliverables.map((d) => {
-                    const key = `${d._contractId}-${d._id}`;
-                    const isExpanded = expandedDeliverableKey === key;
-                    const isQuantityMode = d.trackingMode !== "status";
-                    const leafConfig = d.categoryId && d.path ? getLeafConfig(d.categoryId, d.path) : null;
-                    const selection = leafConfig ? findMatchingSelection(d._contract, d.categoryId, d.path) : null;
+                  {groupedDeliverables.map((group) => {
+                    const isExpanded = expandedDeliverableKey === group.key;
+                    const quantityItems = group.items.filter((d) => d.trackingMode !== "status");
+                    const totalDelivered = quantityItems.reduce((sum, d) => sum + (d.delivered || 0), 0);
+                    const totalDue = quantityItems.reduce((sum, d) => sum + (d.due ?? d.quantity ?? 0), 0);
+                    const statuses = new Set(group.items.map((d) => d.status || "Pending"));
+                    const groupStatus = statuses.size === 1 ? [...statuses][0] : "Mixed";
 
                     return (
-                      <React.Fragment key={key}>
+                      <React.Fragment key={group.key}>
                         <tr
                           className="data-row"
                           style={{ cursor: "pointer" }}
-                          onClick={() => setExpandedDeliverableKey(isExpanded ? null : key)}
+                          onClick={() => setExpandedDeliverableKey(isExpanded ? null : group.key)}
                         >
                           <td style={{ width: 24 }}>
                             {isExpanded ? <ChevronDown size={15} strokeWidth={2} /> : <ChevronRight size={15} strokeWidth={2} />}
                           </td>
-                          <td>{d.title}</td>
-                          <td>{d._contractName}</td>
                           <td>
-                            {isQuantityMode ? (
-                              <span>
-                                {d.delivered || 0}/{d.due ?? d.quantity}
-                                {d.frequency && d.frequency !== "one-time" ? ` per ${d.frequency}` : ""}
-                              </span>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              {(() => {
+                                const cv = resolveCategoryVisual(group.categoryId);
+                                const CvIcon = cv.Icon;
+                                return (
+                                  <div style={{ width: 24, height: 24, borderRadius: 7, background: `${cv.bg}22`, display: "grid", placeItems: "center", flexShrink: 0 }}>
+                                    <CvIcon size={13} color={cv.bg} />
+                                  </div>
+                                );
+                              })()}
+                              {group.categoryLabel}
+                            </div>
+                          </td>
+                          <td>{group._contractName}</td>
+                          <td>{group.items.length} item{group.items.length !== 1 ? "s" : ""}</td>
+                          <td>
+                            {quantityItems.length > 0 ? (
+                              <span>{totalDelivered}/{totalDue}</span>
                             ) : (
                               <span className="cd-pi-none">—</span>
                             )}
                           </td>
                           <td>
-                            {isQuantityMode ? (
-                              <span className={`status ${(d.status || "pending").toLowerCase().replace(" ", "-")}`}>{d.status || "Pending"}</span>
-                            ) : (
-                              <select
-                                value={d.status || "Pending"}
-                                disabled={deliverableStatusSaving === d._id}
-                                onClick={(e) => e.stopPropagation()}
-                                onChange={(e) => handleDeliverableStatusChange(d._contractId, d._id, e.target.value)}
-                              >
-                                <option value="Pending">Pending</option>
-                                <option value="In Progress">In Progress</option>
-                                <option value="Completed">Completed</option>
-                              </select>
-                            )}
+                            <span className={`status ${groupStatus.toLowerCase().replace(" ", "-")}`}>{groupStatus}</span>
                           </td>
                           <td>
                             <button
                               className="btn-small"
                               title="Manage Deliverables & Payments"
-                              onClick={(e) => { e.stopPropagation(); setManageContractId(d._contractId); setManageContractTab("deliverables"); }}
+                              onClick={(e) => { e.stopPropagation(); setManageContractId(group._contractId); setManageContractTab("deliverables"); }}
                             >
                               <Package size={15} strokeWidth={2.1} />
                             </button>
@@ -706,8 +724,63 @@ export default function ClientDetailPage() {
                         </tr>
                         {isExpanded && (
                           <tr>
-                            <td colSpan={6} style={{ padding: 0 }}>
-                              <DeliverableDetailPanel leafConfig={leafConfig} selection={selection} currency={d._contract?.currency} />
+                            <td colSpan={7} style={{ padding: 0 }}>
+                              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                <thead>
+                                  <tr>
+                                    {["", "Item", "Platform", "Quantity", "Progress", "Status"].map((h) => (
+                                      <th key={h} style={{ textAlign: "left", padding: "8px 14px", fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.4, background: "#f8f9fc" }}>{h}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {group.items.map((d) => {
+                                    const isQuantityMode = d.trackingMode !== "status";
+                                    const prefix = `${group.categoryLabel} — `;
+                                    const itemLabel = d.title?.startsWith(prefix) ? d.title.slice(prefix.length) : d.title;
+                                    const visual = resolveDeliverableVisual(d.title, d.categoryId || group.categoryId);
+                                    const VisualIcon = visual.Icon;
+                                    const amount = formatDeliverableAmount(d);
+                                    const noun = unitNoun(d.unit);
+                                    return (
+                                      <tr key={d._id} style={{ borderTop: "1px solid #f0f1f6" }}>
+                                        <td style={{ padding: "8px 14px 8px 46px" }}>
+                                          <div style={{ width: 22, height: 22, borderRadius: 6, background: `${visual.bg}`.startsWith("linear") ? visual.bg : `${visual.bg}22`, display: "grid", placeItems: "center" }}>
+                                            <VisualIcon size={11} color={visual.bg.startsWith("linear") ? "#fff" : visual.bg} />
+                                          </div>
+                                        </td>
+                                        <td style={{ padding: "8px 14px", fontSize: 13, color: "#0f172a" }}>{itemLabel}</td>
+                                        <td style={{ padding: "8px 14px" }}>
+                                          <div style={{ width: 22, height: 22, borderRadius: "50%", background: visual.bg, display: "grid", placeItems: "center" }}>
+                                            <VisualIcon size={11} color="#fff" />
+                                          </div>
+                                        </td>
+                                        <td style={{ padding: "8px 14px", fontSize: 13, color: "#64748b" }}>
+                                          {amount}
+                                        </td>
+                                        <td style={{ padding: "8px 14px", fontSize: 13, color: "#64748b" }}>
+                                          {isQuantityMode ? `${d.delivered || 0}/${d.due ?? d.quantity}${noun ? ` ${noun}` : ""}` : <span className="cd-pi-none">—</span>}
+                                        </td>
+                                        <td style={{ padding: "8px 14px" }}>
+                                          {isQuantityMode ? (
+                                            <span className={`status ${(d.status || "pending").toLowerCase().replace(" ", "-")}`}>{d.status || "Pending"}</span>
+                                          ) : (
+                                            <select
+                                              value={d.status || "Pending"}
+                                              disabled={deliverableStatusSaving === d._id}
+                                              onChange={(e) => handleDeliverableStatusChange(d._contractId, d._id, e.target.value)}
+                                            >
+                                              <option value="Pending">Pending</option>
+                                              <option value="In Progress">In Progress</option>
+                                              <option value="Completed">Completed</option>
+                                            </select>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
                             </td>
                           </tr>
                         )}

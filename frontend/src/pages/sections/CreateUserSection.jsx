@@ -9,6 +9,12 @@ export default function CreateUserSection({
   showPw,
   setShowPw,
 }) {
+  // A manager's Users section may only onboard plain team members — the
+  // dropdown is locked to "User" rather than just defaulting to it, since
+  // the backend also rejects any other role from a manager caller.
+  const actingRole = localStorage.getItem("role");
+  const isManager = actingRole === "manager";
+
   return (
     <div className="fade-up" style={{ maxWidth: 620 }}>
       <div style={{ marginBottom: 26 }}>
@@ -26,15 +32,24 @@ export default function CreateUserSection({
                 <FieldIcon icon={Shield} />
                 <select
                   className="inp"
-                  style={{ ...baseInp, appearance: "none" }}
-                  value={userForm.role}
+                  style={{ ...baseInp, appearance: "none", ...(isManager ? { opacity: 0.65, cursor: "not-allowed" } : {}) }}
+                  value={isManager ? "user" : userForm.role}
+                  disabled={isManager}
                   onChange={e => setUserForm({ ...userForm, role: e.target.value })}
                 >
                   <option value="user">User</option>
-                  <option value="admin">Admin</option>
-                  <option value="hr">HR</option>
-                  <option value="sales">Sales</option>
+                  {!isManager && (
+                    <>
+                      <option value="manager">Manager</option>
+                      <option value="admin">Admin</option>
+                      <option value="hr">HR</option>
+                      <option value="sales">Sales</option>
+                    </>
+                  )}
                 </select>
+                {isManager && (
+                  <p style={{ fontSize: 11.5, color: T.textMuted, marginTop: 6 }}>Managers can only create User accounts.</p>
+                )}
               </div>
             </FormField>
             <FormField label="Email Address" span2>

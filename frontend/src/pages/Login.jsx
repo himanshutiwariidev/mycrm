@@ -26,6 +26,7 @@ export default function Login() {
       localStorage.setItem("userEmail", data.user.email);
       const role = data.user.role;
       if (role === "admin") navigate("/admin");
+      else if (role === "manager") navigate("/manager");
       else if (role === "hr") navigate("/hr");
       else if (role === "sales") navigate("/sales");
       else if (role === "client") navigate("/client/dashboard");
