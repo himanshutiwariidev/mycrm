@@ -1,4 +1,8 @@
 const bcrypt = require("bcryptjs");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+const XLSX = require("xlsx");
 const Client = require("../models/Client");
 const Contract = require("../models/Contract");
 const PaymentReminder = require("../models/PaymentReminder");
@@ -595,6 +599,360 @@ exports.createContract = async (req, res) => {
   } catch (error) {
     console.error("Error creating contract:", error);
     return res.status(500).json({ message: error.message || "Failed to create contract" });
+  }
+};
+
+const IMPORT_HEADER_ALIASES = {
+  clientName: ["client name", "customer name", "customer", "name", "client", "party name"],
+  email: ["email", "email id", "e-mail", "mail", "mail id"],
+  phone: ["phone", "phone no", "phone number", "mobile", "mobile no", "mobile number", "contact no", "contact number", "customer contact no", "customer contact number"],
+  companyName: ["company", "company name", "company name as per gst", "business name", "firm name", "organisation", "organization"],
+  contactPerson: ["contact person", "person name", "concern person", "contact name"],
+  designation: ["designation", "role"],
+  gstNo: ["gst", "gst no", "gst number", "gstin", "gst no of the client"],
+  tanNo: ["tan", "tan no", "tan number"],
+  address: ["address", "billing address", "company address"],
+  city: ["city"],
+  state: ["state"],
+  country: ["country"],
+  zipCode: ["zip", "zip code", "pin", "pin code", "pincode"],
+  leadSource: ["lead source", "source"],
+  clientType: ["client type", "company type", "business type"],
+  projectType: ["project type"],
+  status: ["status", "client status"],
+  activeStatus: ["active status", "work status"],
+  notes: ["notes", "remark", "remarks"],
+  month: ["month"],
+  salesPerson: ["sales person", "salesperson", "sales executive", "sold by", "sales"],
+  projectName: ["project name", "contract name", "type of services", "service", "services", "package", "plan", "brand name"],
+  projectDescription: ["project description", "description", "scope description", "services brief"],
+  projectScope: ["project scope", "scope", "deliverables", "work", "services brief"],
+  timeline: ["timeline", "duration", "duration of contract", "payment cycle"],
+  contractStartDate: ["login date", "date of login", "start date", "contract start date", "contract start", "joining date"],
+  validUntil: ["end date", "contract end date", "valid until", "expiry date", "renewal date", "next renewal date"],
+  projectAmount: ["amount", "contract amount", "project amount", "total amount", "full contract value with gst", "package amount", "fees", "price"],
+  receivedAmount: ["received", "received amount", "amount released with gst", "paid", "paid amount", "advance", "advance amount"],
+  paymentMethod: ["payment method", "payment mode", "mode", "mode of payment"],
+  paymentDate: ["payment date", "paid date", "received date"],
+  nextDueDate: ["next due date", "due date", "balance payment date", "balance due date", "balance date"],
+};
+
+const CLIENT_ENUMS = {
+  leadSource: ["cold call", "visit", "self", "telecaller", "client reference", "company reference", "other"],
+  clientType: ["pvt ltd", "ltd", "llp", "huf", "proprietor", "other"],
+  projectType: ["service", "product"],
+  status: ["open", "converted", "cold", "ni"],
+  activeStatus: ["active", "inactive"],
+};
+
+const PAYMENT_METHODS = ["NEFT", "RTGS", "Bank Draft", "UPI", "Cash", "Cheque", "Card Swap", "3 Parts", "P Account", "Other"];
+
+const normalizeImportHeader = (value) =>
+  String(value || "")
+    .toLowerCase()
+    .replace(/\u00a0/g, " ")
+    .replace(/[_-]+/g, " ")
+    .replace(/[^a-z0-9 ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const normalizeImportText = (value) => {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+};
+
+const normalizeEnum = (value, allowed, fallback) => {
+  const text = normalizeImportText(value).toLowerCase();
+  if (!text) return fallback;
+  return allowed.includes(text) ? text : fallback;
+};
+
+const parseImportAmount = (value) => {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  const text = normalizeImportText(value).replace(/,/g, "").replace(/[^\d.-]/g, "");
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const MONTH_NAMES = {
+  january: 1,
+  jan: 1,
+  february: 2,
+  feb: 2,
+  march: 3,
+  mar: 3,
+  april: 4,
+  apr: 4,
+  may: 5,
+  june: 6,
+  jun: 6,
+  july: 7,
+  jul: 7,
+  august: 8,
+  aug: 8,
+  september: 9,
+  sep: 9,
+  october: 10,
+  oct: 10,
+  november: 11,
+  nov: 11,
+  december: 12,
+  dec: 12,
+};
+
+const parseImportDate = (value, preferredMonthValue) => {
+  if (!value) return undefined;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value === "number") {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (parsed) return new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d));
+  }
+
+  const text = normalizeImportText(value);
+  if (["na", "n/a", "nil", "-", "--"].includes(text.toLowerCase())) return undefined;
+
+  const monthYearParts = text.match(/^([a-zA-Z]{3,9})[-\s/](\d{2,4})$/);
+  if (monthYearParts) {
+    const [, monthText, yyyy] = monthYearParts;
+    const month = MONTH_NAMES[monthText.toLowerCase()];
+    const fullYear = yyyy.length === 2 ? `20${yyyy}` : yyyy;
+    if (month) {
+      const parsed = new Date(Number(fullYear), month - 1, 1);
+      if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+  }
+
+  const dateParts = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (dateParts) {
+    const [, first, second, yyyy] = dateParts;
+    const fullYear = yyyy.length === 2 ? `20${yyyy}` : yyyy;
+    const firstNumber = Number(first);
+    const secondNumber = Number(second);
+    const preferredMonth = MONTH_NAMES[normalizeImportText(preferredMonthValue).toLowerCase()];
+    const [day, month] = preferredMonth && firstNumber === preferredMonth
+      ? [secondNumber, firstNumber]
+      : secondNumber > 12 && firstNumber <= 12
+        ? [secondNumber, firstNumber]
+        : firstNumber > 12 && secondNumber <= 12
+          ? [firstNumber, secondNumber]
+          : [secondNumber, firstNumber];
+    const parsed = new Date(Number(fullYear), month - 1, day);
+    if (
+      !Number.isNaN(parsed.getTime()) &&
+      parsed.getFullYear() === Number(fullYear) &&
+      parsed.getMonth() === month - 1 &&
+      parsed.getDate() === day
+    ) {
+      return parsed;
+    }
+  }
+
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+};
+
+const getImportValue = (row, field) => {
+  for (const alias of IMPORT_HEADER_ALIASES[field] || []) {
+    const value = row[alias];
+    if (value !== undefined && value !== null && String(value).trim() !== "") return value;
+  }
+  return undefined;
+};
+
+const buildImportDetails = (row) =>
+  Object.fromEntries(
+    Object.entries(row)
+      .filter(([key, value]) => !key.startsWith("__") && normalizeImportText(value))
+      .map(([key, value]) => [key, normalizeImportText(value)])
+  );
+
+const readImportRows = (file) => {
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (ext === ".numbers") {
+    const error = new Error("Numbers files cannot be parsed on the server. Please export the sheet as Excel (.xlsx) or CSV and import again.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const workbook = XLSX.read(file.buffer, { type: "buffer", cellDates: true });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return [];
+
+  const matrix = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "", raw: false });
+  const knownHeaders = new Set(Object.values(IMPORT_HEADER_ALIASES).flat());
+  const headerRowIndex = matrix.reduce((bestIndex, cells, index) => {
+    const score = cells.reduce((sum, cell) => sum + (knownHeaders.has(normalizeImportHeader(cell)) ? 1 : 0), 0);
+    const bestScore = matrix[bestIndex]?.reduce((sum, cell) => sum + (knownHeaders.has(normalizeImportHeader(cell)) ? 1 : 0), 0) || 0;
+    return score > bestScore ? index : bestIndex;
+  }, 0);
+  const headers = (matrix[headerRowIndex] || []).map(normalizeImportHeader);
+
+  return matrix.slice(headerRowIndex + 1).map((raw, index) => {
+    const normalized = {};
+    raw.forEach((value, cellIndex) => {
+      const header = headers[cellIndex];
+      if (header) normalized[header] = value;
+    });
+    normalized.__rowNumber = headerRowIndex + index + 2;
+    return normalized;
+  });
+};
+
+const resolveImportSalesPerson = async (value, currentUser) => {
+  if (currentUser.role === "sales") return currentUser.id;
+  const text = normalizeImportText(value);
+  if (!text) return undefined;
+  const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const user = await User.findOne({
+    role: "sales",
+    $or: [
+      { email: text.toLowerCase() },
+      { name: new RegExp(`^${escaped}$`, "i") },
+    ],
+  }).select("_id");
+  return user?._id;
+};
+
+exports.importClientsMiddleware = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = /\.(csv|xls|xlsx|numbers)$/i;
+    if (allowed.test(path.extname(file.originalname))) return cb(null, true);
+    return cb(new Error("Only CSV, XLS, XLSX, or Numbers files are allowed"));
+  },
+}).single("file");
+
+exports.importClients = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+
+    const rows = readImportRows(req.file).filter((row) =>
+      Object.entries(row).some(([key, value]) => !key.startsWith("__") && normalizeImportText(value))
+    );
+
+    if (!rows.length) {
+      return res.status(400).json({ message: "Import file has no data rows" });
+    }
+
+    const summary = {
+      totalRows: rows.length,
+      clientsCreated: 0,
+      existingClientsUsed: 0,
+      contractsCreated: 0,
+      skippedRows: 0,
+      errors: [],
+    };
+
+    for (const row of rows) {
+      const rowNumber = row.__rowNumber || 0;
+      try {
+        const clientName = normalizeImportText(getImportValue(row, "clientName"));
+        const email = normalizeImportText(getImportValue(row, "email")).toLowerCase();
+        const phone = normalizeImportText(getImportValue(row, "phone"));
+        const companyName = normalizeImportText(getImportValue(row, "companyName"));
+        const projectAmount = parseImportAmount(getImportValue(row, "projectAmount"));
+
+        if (!clientName && !companyName) throw new Error("Client name or company name is required");
+        if (!email) throw new Error("Email is required for import");
+        if (!phone) throw new Error("Phone is required for import");
+
+        let client = await Client.findOne({ $or: [{ email }, { phone }] });
+        const salesPerson = await resolveImportSalesPerson(getImportValue(row, "salesPerson"), req.user);
+
+        if (!client) {
+          client = await Client.create({
+            clientName: clientName || companyName,
+            email,
+            phone,
+            companyName,
+            gstNo: normalizeImportText(getImportValue(row, "gstNo")),
+            tanNo: normalizeImportText(getImportValue(row, "tanNo")),
+            salesPerson,
+            leadSource: normalizeEnum(getImportValue(row, "leadSource"), CLIENT_ENUMS.leadSource, "other"),
+            clientType: normalizeEnum(getImportValue(row, "clientType"), CLIENT_ENUMS.clientType, "other"),
+            projectType: normalizeEnum(getImportValue(row, "projectType"), CLIENT_ENUMS.projectType, "service"),
+            projectName: normalizeImportText(getImportValue(row, "projectName")),
+            address: normalizeImportText(getImportValue(row, "address")),
+            city: normalizeImportText(getImportValue(row, "city")),
+            state: normalizeImportText(getImportValue(row, "state")),
+            country: normalizeImportText(getImportValue(row, "country")),
+            zipCode: normalizeImportText(getImportValue(row, "zipCode")),
+            contactPerson: normalizeImportText(getImportValue(row, "contactPerson")),
+            designation: normalizeImportText(getImportValue(row, "designation")),
+            status: normalizeEnum(getImportValue(row, "status"), CLIENT_ENUMS.status, "converted"),
+            activeStatus: normalizeEnum(getImportValue(row, "activeStatus"), CLIENT_ENUMS.activeStatus, "active"),
+            notes: normalizeImportText(getImportValue(row, "notes")),
+            onboardedAt: new Date(),
+          });
+          summary.clientsCreated += 1;
+          await logActivity(client._id, "client_imported", `Client "${client.clientName}" imported from file`);
+        } else {
+          summary.existingClientsUsed += 1;
+        }
+
+        const projectName =
+          normalizeImportText(getImportValue(row, "projectName")) ||
+          normalizeImportText(getImportValue(row, "projectScope")) ||
+          client.projectName ||
+          "Imported Contract";
+        const projectDescription =
+          normalizeImportText(getImportValue(row, "projectDescription")) ||
+          normalizeImportText(getImportValue(row, "projectScope")) ||
+          projectName;
+        const projectScope = normalizeImportText(getImportValue(row, "projectScope"));
+        const receivedAmount = Math.min(parseImportAmount(getImportValue(row, "receivedAmount")), projectAmount);
+        const paymentMethodRaw = normalizeImportText(getImportValue(row, "paymentMethod"));
+        const paymentMethod = PAYMENT_METHODS.find((method) => method.toLowerCase() === paymentMethodRaw.toLowerCase()) || "Other";
+        const contractStartDate = parseImportDate(getImportValue(row, "contractStartDate"), getImportValue(row, "month"));
+        const payments = receivedAmount > 0
+          ? [{
+              amount: receivedAmount,
+              paymentDate: parseImportDate(getImportValue(row, "paymentDate")) || contractStartDate || new Date(),
+              method: paymentMethod,
+              notes: "Imported payment",
+            }]
+          : [];
+
+        const contract = await Contract.create({
+          contractNumber: clientService.buildContractNumber(),
+          clientId: client._id,
+          projectName,
+          projectDescription,
+          projectScope,
+          timeline: normalizeImportText(getImportValue(row, "timeline")),
+          contractStartDate,
+          projectAmount,
+          preTaxAmount: projectAmount,
+          currency: "INR",
+          paymentMethod,
+          validUntil: parseImportDate(getImportValue(row, "validUntil")),
+          notes: normalizeImportText(getImportValue(row, "notes")),
+          deliverables: projectScope ? [{ title: projectScope, quantity: 1, frequency: "one-time" }] : [],
+          nextDueDate: parseImportDate(getImportValue(row, "nextDueDate")),
+          payments,
+          importDetails: buildImportDetails(row),
+          contractStatus: "draft",
+        });
+
+        try {
+          await createTasksFromDeliverables(contract, client, req.user.id);
+        } catch (taskError) {
+          console.error("Error auto-creating tasks from imported deliverables:", taskError);
+        }
+
+        summary.contractsCreated += 1;
+        await logActivity(client._id, "contract_imported", `Contract "${projectName}" imported`, { contractId: contract._id, projectAmount });
+      } catch (rowError) {
+        summary.skippedRows += 1;
+        summary.errors.push({ row: rowNumber, message: rowError.message || "Failed to import row" });
+      }
+    }
+
+    return res.status(201).json({ message: "Import completed", summary });
+  } catch (error) {
+    console.error("Error importing clients:", error);
+    return res.status(error.statusCode || 500).json({ message: error.message || "Failed to import clients" });
   }
 };
 
@@ -1643,10 +2001,6 @@ exports.deletePaymentReminder = async (req, res) => {
 };
 
 // ============= PI ATTACHMENT OPERATIONS =============
-
-const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
 
 const _uploadStorage = multer.diskStorage({
   destination: (req, file, cb) => {

@@ -18,6 +18,14 @@ API.interceptors.request.use((req) => {
 export const createClient = (clientData) =>
   API.post("/clients", clientData);
 
+export const importClients = (file) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  return API.post("/clients/import", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+};
+
 export const getAllClients = () =>
   API.get("/clients");
 

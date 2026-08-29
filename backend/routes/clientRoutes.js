@@ -21,6 +21,7 @@ router.get("/my-project", authMiddleware, requireRole("client"), clientControlle
 // Client Routes (Protected)
 router.post("/", authMiddleware, clientAccess, clientController.createClient);
 router.get("/", authMiddleware, clientViewAccess, clientController.getAllClients);
+router.post("/import", authMiddleware, clientAccess, clientController.importClientsMiddleware, clientController.importClients);
 router.get("/:id", authMiddleware, clientViewAccess, clientController.getClientById);
 router.put("/:id", authMiddleware, clientAccess, clientController.updateClient);
 router.delete("/:id", authMiddleware, clientAccess, clientController.deleteClient);

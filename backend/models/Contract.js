@@ -83,10 +83,10 @@ const ContractSchema = new mongoose.Schema(
     },
     // The contract's primary/last-known payment method — an editable summary
     // field, distinct from the per-payment `payments[].method` ledger entries.
-    // Same canonical set used everywhere else in the app.
+    // Includes legacy spreadsheet values so imports can preserve source data.
     paymentMethod: {
       type: String,
-      enum: ["NEFT", "RTGS", "Bank Draft", "UPI", "Cash", "Cheque", "Card Swap", "Other"],
+      enum: ["NEFT", "RTGS", "Bank Draft", "UPI", "Cash", "Cheque", "Card Swap", "3 Parts", "P Account", "Other"],
       default: "Cash",
     },
     paymentTerms: {
@@ -170,11 +170,10 @@ const ContractSchema = new mongoose.Schema(
         paymentDate: { type: Date, default: Date.now },
         method: {
           type: String,
-          // Canonical modes going forward: NEFT, RTGS, Bank Draft, UPI, Cash,
-          // Cheque, Card Swap, Other. "Bank Transfer", "Card", and "Razorpay"
-          // are kept in the enum only so older payment records already saved
-          // with those values still pass validation — the UI no longer offers them.
-          enum: ["NEFT", "RTGS", "Bank Draft", "UPI", "Cash", "Cheque", "Card Swap", "Other", "Bank Transfer", "Card", "Razorpay"],
+          // "Bank Transfer", "Card", and "Razorpay" are kept in the enum only
+          // so older payment records already saved with those values still pass
+          // validation — the UI no longer offers them.
+          enum: ["NEFT", "RTGS", "Bank Draft", "UPI", "Cash", "Cheque", "Card Swap", "3 Parts", "P Account", "Other", "Bank Transfer", "Card", "Razorpay"],
           default: "Other",
         },
         notes: { type: String, trim: true },
@@ -204,6 +203,10 @@ const ContractSchema = new mongoose.Schema(
       uploadedAt: { type: Date },
     },
     pricingSummary: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+    importDetails: {
       type: mongoose.Schema.Types.Mixed,
       default: {},
     },

@@ -181,6 +181,8 @@ export default function Step1ClientDetails({ client }) {
                 <SelectItem value="Cash">Cash</SelectItem>
                 <SelectItem value="Cheque">Cheque</SelectItem>
                 <SelectItem value="Card Swap">Card Swap</SelectItem>
+                <SelectItem value="3 Parts">3 Parts</SelectItem>
+                <SelectItem value="P Account">P Account</SelectItem>
                 <SelectItem value="Other">Other</SelectItem>
               </SelectContent>
             </Select>

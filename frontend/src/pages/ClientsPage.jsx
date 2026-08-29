@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Users, FileText, Wallet, Plus, Search,
@@ -11,6 +11,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import {
   getAllClients,
   getAllContracts,
+  importClients,
   deleteContract,
   getAllReminders,
   deletePaymentReminder,
@@ -80,6 +81,7 @@ const exportClientsToCsv = (clients) => {
 
 const ClientsPage = () => {
   const navigate = useNavigate();
+  const importInputRef = useRef(null);
   const [activeTab, setActiveTab] = useState("clients");
   const [showForm, setShowForm] = useState(false);
   const [formType, setFormType] = useState(null);
@@ -100,6 +102,8 @@ const ClientsPage = () => {
   const [dateRange, setDateRange] = useState({ ...computeRangeForPreset("thisMonth"), presetKey: "thisMonth" });
   const [viewMode, setViewMode] = useState("grid");
   const [showAllSalesPersons, setShowAllSalesPersons] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
 
   useEffect(() => {
     if (activeTab === "clients") {
@@ -151,6 +155,27 @@ const ClientsPage = () => {
     setSelectedClient(null);
     setFormType("client");
     setShowForm(true);
+  };
+
+  const handleImportFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const response = await importClients(file);
+      setImportResult({ ok: true, ...response.data.summary });
+      await Promise.all([loadClients(), loadContracts()]);
+    } catch (error) {
+      setImportResult({
+        ok: false,
+        message: error.response?.data?.message || "Import failed",
+      });
+    } finally {
+      setImporting(false);
+      event.target.value = "";
+    }
   };
 
 
@@ -392,7 +417,44 @@ const ClientsPage = () => {
               <button className="btn-primary" onClick={handleAddClient}>
                 <Plus size={15} strokeWidth={2.4} /> Add New Client
               </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".csv,.xls,.xlsx,.numbers"
+                onChange={handleImportFile}
+                style={{ display: "none" }}
+              />
+              <button className="btn-secondary import-clients-btn" onClick={() => importInputRef.current?.click()} disabled={importing}>
+                <Upload size={15} strokeWidth={2.4} /> {importing ? "Importing..." : "Import"}
+              </button>
             </div>
+
+            {importResult && (
+              <div className={`import-result ${importResult.ok ? "success" : "error"}`}>
+                {importResult.ok ? (
+                  <>
+                    <div className="import-result-title">Import completed</div>
+                    <div className="import-result-grid">
+                      <span>Total rows: <strong>{importResult.totalRows}</strong></span>
+                      <span>Clients created: <strong>{importResult.clientsCreated}</strong></span>
+                      <span>Existing used: <strong>{importResult.existingClientsUsed}</strong></span>
+                      <span>Contracts created: <strong>{importResult.contractsCreated}</strong></span>
+                      <span>Skipped: <strong>{importResult.skippedRows}</strong></span>
+                    </div>
+                    {importResult.errors?.length > 0 && (
+                      <div className="import-errors">
+                        {importResult.errors.slice(0, 5).map((error) => (
+                          <div key={`${error.row}-${error.message}`}>Row {error.row}: {error.message}</div>
+                        ))}
+                        {importResult.errors.length > 5 && <div>+{importResult.errors.length - 5} more rows skipped</div>}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div>{importResult.message}</div>
+                )}
+              </div>
+            )}
 
             <div className="filter-bar">
               <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>

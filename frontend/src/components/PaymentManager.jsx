@@ -3,7 +3,7 @@ import { Trash2 } from "lucide-react";
 import { addPayment, deletePayment } from "../services/clientApi";
 import "./PaymentManager.css";
 
-const PAYMENT_METHODS = ["NEFT", "RTGS", "Bank Draft", "UPI", "Cash", "Cheque", "Card Swap", "Other"];
+const PAYMENT_METHODS = ["NEFT", "RTGS", "Bank Draft", "UPI", "Cash", "Cheque", "Card Swap", "3 Parts", "P Account", "Other"];
 
 // new Date().toISOString() reports the UTC calendar date, which lags a day behind
 // local time (e.g. IST) for several hours after midnight — always build the

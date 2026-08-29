@@ -20,6 +20,13 @@ const DetailField = ({ label, value }) => (
   </div>
 );
 
+const formatImportLabel = (key) =>
+  String(key || "")
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+
 // onlyTab ("deliverables" | "payments") restricts the modal to a single tab — no
 // switcher shown — for contexts that already know which one the user wants
 // (e.g. clicking a row in the Deliverables-only or Payments-only list elsewhere).
@@ -55,6 +62,8 @@ const ContractDetail = ({ contractId, onClose, onlyTab, defaultTab }) => {
   if (!contract) {
     return <div className="empty-state">Contract not found.</div>;
   }
+
+  const importDetailEntries = Object.entries(contract.importDetails || {}).filter(([, value]) => value !== null && value !== undefined && value !== "");
 
   return (
     <div className="contract-detail">
@@ -144,6 +153,17 @@ const ContractDetail = ({ contractId, onClose, onlyTab, defaultTab }) => {
                       {d.delivered || 0}/{d.quantity} {d.frequency && d.frequency !== "one-time" ? `per ${d.frequency}` : ""} · {d.status || "Pending"}
                     </span>
                   </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {importDetailEntries.length > 0 && (
+            <>
+              <h3 style={{ marginTop: 20 }}>Import Details</h3>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px 24px" }}>
+                {importDetailEntries.map(([key, value]) => (
+                  <DetailField key={key} label={formatImportLabel(key)} value={typeof value === "object" ? JSON.stringify(value) : String(value)} />
                 ))}
               </div>
             </>
