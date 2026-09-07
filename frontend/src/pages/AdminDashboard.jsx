@@ -3,7 +3,7 @@ import { CheckCircle2, AlertCircle, LogOut, Shield, X } from "lucide-react";
 import logo from "../assets/logo.png";
 import DashboardSection from "./sections/DashboardSection";
 import TasksSection from "./sections/TasksSection";
-import ClientsSection from "./sections/ClientsSection";
+import ClientsPage from "./ClientsPage";
 import ProjectsSection from "./sections/ProjectsSection";
 import UsersSection from "./sections/UsersSection";
 import SalarySection from "./sections/SalarySection";
@@ -28,6 +28,31 @@ const ROLE_LABELS = {
   hr: "HR",
   sales: "Sales",
 };
+
+// The sidebar is a dark panel against an otherwise light dashboard, so it
+// needs its own text/border/hover tokens rather than reusing shared.jsx's T
+// (whose textPrimary/borderLight/brandLight are tuned for light backgrounds
+// and would be unreadable here). T.brand (orange) still pops fine on dark
+// and is kept as-is for the active/accent color.
+const SB = {
+  bg: "#020f32",
+  border: "rgba(255,255,255,0.07)",
+  text: "#ffffff",
+  muted: "#7b8496",
+  hoverBg: "rgba(247,147,30,0.12)",
+  activeBg: "rgba(247,147,30,0.16)",
+};
+
+// Each nav item's accent color (e.g. #7c3aed) is tuned for a light
+// background; on the dark sidebar it reads as dim. Blending it partway
+// toward white keeps the same hue but lifts it enough to pop.
+function brighten(hex, amount = 0.35) {
+  const n = parseInt(hex.replace("#", ""), 16);
+  const r = Math.round(((n >> 16) & 255) + (255 - ((n >> 16) & 255)) * amount);
+  const g = Math.round(((n >> 8) & 255) + (255 - ((n >> 8) & 255)) * amount);
+  const b = Math.round((n & 255) + (255 - (n & 255)) * amount);
+  return `rgb(${r}, ${g}, ${b})`;
+}
 
 export default function AdminDashboard() {
   const {
@@ -96,7 +121,7 @@ export default function AdminDashboard() {
       case "tasks":
         return <TasksSection tasks={tasks} setTab={setTab} openEditTask={openEditTask} setDeleteTask={setDeleteTask} />;
       case "clients":
-        return <ClientsSection clients={clients} contracts={contracts} reminders={reminders} dashboardStats={dashboardStats} fetchDashboardStats={fetchDashboardStats} />;
+        return <ClientsPage embedded />;
       case "projects":
         return (
           <ProjectsSection
@@ -173,15 +198,17 @@ export default function AdminDashboard() {
         .data-row { transition: background .15s; }
         .data-row:hover { background: ${T.brandLight} !important; }
 
+        .sidebar-nav { scrollbar-width: none; -ms-overflow-style: none; }
+        .sidebar-nav::-webkit-scrollbar { display: none; }
         .nav-btn { border: none; cursor: pointer; font-family: inherit; background: transparent; transition: all .16s; }
-        .nav-btn:hover:not(.nav-active):not(:disabled) { background: ${T.brandLight} !important; color: ${T.brand} !important; }
+        .nav-btn:hover:not(.nav-active):not(:disabled) { background: ${SB.hoverBg} !important; color: ${T.brand} !important; }
 
         .pri-btn { transition: filter .18s, transform .15s, box-shadow .18s; cursor: pointer; border: none; font-family: inherit; }
         .pri-btn:hover { filter: brightness(1.07); transform: translateY(-1px); box-shadow: 0 6px 20px rgba(247, 147, 30,.3); }
         .pri-btn:active { transform: translateY(0); filter: brightness(.97); }
 
         .logout-btn { transition: background .16s, color .16s; cursor: pointer; border: none; font-family: inherit; }
-        .logout-btn:hover { background: ${T.redBg} !important; color: ${T.red} !important; }
+        .logout-btn:hover { background: rgba(220,38,38,0.15) !important; color: #f87171 !important; }
 
         @keyframes fadeUp  { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes cardIn  { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
@@ -206,18 +233,19 @@ export default function AdminDashboard() {
       <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Inter', sans-serif", color: T.textSecondary }}>
 
         {/* ── SIDEBAR ─────────────────────────────────────────────────────── */}
-        <aside style={{ position: "fixed", left: 0, top: 0, bottom: 0, width: 238, background: T.sidebar, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", zIndex: 100, boxShadow: "1px 0 0 0 #e8eaf0" }}>
-          <div style={{ padding: "24px 22px 22px", borderBottom: `1px solid ${T.borderLight}` }}>
+        <aside style={{ position: "fixed", left: 0, top: 0, bottom: 0, width: 238, background: SB.bg, borderRight: `1px solid ${SB.border}`, display: "flex", flexDirection: "column", zIndex: 100, boxShadow: "2px 0 16px rgba(0,0,0,.18)" }}>
+          <div style={{ padding: "24px 22px 22px", borderBottom: `1px solid ${SB.border}` }}>
             <img src={logo} alt="Bharat Bizmart" style={{ height: 34, width: "auto", display: "block" }} />
-            <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: ".1em", marginTop: 9, textTransform: "uppercase", fontWeight: 600 }}>Control Center</div>
+           {/*  <div style={{ fontSize: 10, color: SB.muted, letterSpacing: ".1em", marginTop: 9, textTransform: "uppercase", fontWeight: 600 }}>Control Center</div> */}
           </div>
-          <nav style={{ flex: 1, padding: "18px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
+          <nav className="sidebar-nav" style={{ flex: "1 1 0%", minHeight: 0, overflowY: "auto", padding: "18px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
             {["overview", "manage"].map(section => (
               <div key={section}>
-                <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: ".14em", textTransform: "uppercase", fontWeight: 700, padding: section === "manage" ? "18px 12px 8px" : "4px 12px 8px" }}>{section}</div>
+                <div style={{ fontSize: 10, color: SB.muted, letterSpacing: ".14em", textTransform: "uppercase", fontWeight: 700, padding: section === "manage" ? "18px 12px 8px" : "4px 12px 8px" }}>{section}</div>
                 {TABS.filter(t => t.section === section).map(({ id, label, Icon, color, disabled }) => {
                   const active = tab === id;
-                  const iconColor = disabled ? T.textMuted : (color || T.brand);
+                  const iconColor = disabled ? SB.muted : (color || T.brand);
+                  const iconGlyphColor = disabled ? SB.muted : brighten(iconColor);
                   return (
                     <button
                       key={id}
@@ -225,10 +253,10 @@ export default function AdminDashboard() {
                       disabled={disabled}
                       title={disabled ? "Not available for your role" : undefined}
                       onClick={disabled ? undefined : () => (id === "createProject" ? openCreateProject() : setTab(id))}
-                      style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 12px", borderRadius: 9, textAlign: "left", color: disabled ? T.textMuted : (active ? T.brand : T.textPrimary), background: active ? T.brandLight : "transparent", fontWeight: active ? 600 : 500, fontSize: 13.5, borderLeft: `3px solid ${active ? T.brand : "transparent"}`, opacity: disabled ? 0.45 : 1, cursor: disabled ? "not-allowed" : "pointer" }}
+                      style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 12px", borderRadius: 9, textAlign: "left", color: disabled ? SB.muted : (active ? T.brand : SB.text), background: active ? SB.activeBg : "transparent", fontWeight: active ? 600 : 500, fontSize: 13.5, borderLeft: `3px solid ${active ? T.brand : "transparent"}`, opacity: disabled ? 0.45 : 1, cursor: disabled ? "not-allowed" : "pointer" }}
                     >
-                      <div style={{ width: 26, height: 26, borderRadius: 8, flexShrink: 0, display: "grid", placeItems: "center", background: `${iconColor}1f` }}>
-                        <Icon size={14} strokeWidth={2.2} color={iconColor} />
+                      <div style={{ width: 26, height: 26, borderRadius: 8, flexShrink: 0, display: "grid", placeItems: "center", background: disabled ? `${iconColor}1f` : `${iconColor}33` }}>
+                        <Icon size={14} strokeWidth={2.4} color={iconGlyphColor} />
                       </div>
                       {label}
                       {active && <div style={{ marginLeft: "auto", width: 6, height: 6, borderRadius: "50%", background: T.brand, flexShrink: 0 }} />}
@@ -238,8 +266,8 @@ export default function AdminDashboard() {
               </div>
             ))}
           </nav>
-          <div style={{ padding: "14px 12px", borderTop: `1px solid ${T.borderLight}` }}>
-            <button className="logout-btn" onClick={handleLogout} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px", borderRadius: 9, color: T.textSecondary, background: "transparent", fontSize: 13.5, fontWeight: 500 }}>
+          <div style={{ padding: "14px 12px", borderTop: `1px solid ${SB.border}` }}>
+            <button className="logout-btn" onClick={handleLogout} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px", borderRadius: 9, color: SB.text, background: "transparent", fontSize: 13.5, fontWeight: 500 }}>
               <LogOut size={15} strokeWidth={1.8} /> Sign Out
             </button>
           </div>

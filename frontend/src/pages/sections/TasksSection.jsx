@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
   ArrowRight, Briefcase, Calendar, CheckCircle2, ChevronDown, ClipboardList,
-  FileText, Filter, MoreVertical, Pencil, Plus, Trash2, User,
+  FileText, Filter, MoreVertical, Pencil, Plus, Search, Trash2, User,
 } from "lucide-react";
 import { PRIORITY, STATUS, T } from "./shared";
 import { resolveDeliverableVisual } from "../../config/serviceVisuals";
@@ -229,11 +229,12 @@ function TaskCard({ task, openEditTask, setDeleteTask }) {
   const sm = statusStyle(task.status);
   const StatusIcon = sm.Icon;
   const isContractTask = !!task.contractId;
-  const clientName = task.clientId?.clientName || "";
+  const contactName = task.clientId?.clientName || "";
+  const clientName = task.clientId?.companyName || contactName;
   const contractName = task.contractId?.projectName || "";
   const avatarLabel = isContractTask ? (clientName || task.title) : task.title;
   const color = hashColor(avatarLabel);
-  const displayTitle = clientName && task.title?.startsWith(`${clientName}: `) ? task.title.slice(clientName.length + 2) : task.title;
+  const displayTitle = contactName && task.title?.startsWith(`${contactName}: `) ? task.title.slice(contactName.length + 2) : task.title;
   const { count, label: totalsLabel, amount: totalsAmount } = summarizeTaskDeliverables(task.deliverables);
   const pm = PRIORITY[task.priority] || PRIORITY.medium;
 
@@ -350,8 +351,18 @@ function TaskGroup({ icon: Icon, iconColor, iconBg, title, subtitle, tasks, open
 
 export default function TasksSection({ tasks, setTab, openEditTask, setDeleteTask }) {
   const [statusFilter, setStatusFilter] = useState("all");
+  const [searchTerm, setSearchTerm] = useState("");
 
-  const filtered = statusFilter === "all" ? tasks : tasks.filter((t) => (t.status || "pending") === statusFilter);
+  const byStatus = statusFilter === "all" ? tasks : tasks.filter((t) => (t.status || "pending") === statusFilter);
+  const search = searchTerm.trim().toLowerCase();
+  const filtered = !search
+    ? byStatus
+    : byStatus.filter((t) => {
+        const company = (t.clientId?.companyName || "").toLowerCase();
+        const contact = (t.clientId?.clientName || "").toLowerCase();
+        const title = (t.title || "").toLowerCase();
+        return company.includes(search) || contact.includes(search) || title.includes(search);
+      });
   const contractTasks = filtered.filter((t) => t.contractId);
   const manualTasks = filtered.filter((t) => !t.contractId);
 
@@ -372,7 +383,17 @@ export default function TasksSection({ tasks, setTab, openEditTask, setDeleteTas
           <h2 style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 21, color: T.textPrimary }}>All Tasks</h2>
           <p style={{ fontSize: 12.5, color: T.textMuted, marginTop: 3 }}>Track and manage all your tasks in one place</p>
         </div>
-        <div style={{ display: "flex", gap: 10 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <div style={{ position: "relative" }}>
+            <Search size={14} strokeWidth={2} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: T.textMuted, pointerEvents: "none" }} />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search by company name..."
+              style={{ width: 220, padding: "9px 12px 9px 34px", border: `1.5px solid ${T.border}`, borderRadius: 10, fontSize: 13, fontFamily: "inherit", color: T.textPrimary, background: "#fff" }}
+            />
+          </div>
           <FilterMenu value={statusFilter} onChange={setStatusFilter} />
           <button className="pri-btn" onClick={() => setTab("createTask")} style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 18px", background: "linear-gradient(135deg, #f7931e, #e8590c)", color: "#fff", borderRadius: 10, fontSize: 13, fontWeight: 600 }}>
             <Plus size={15} strokeWidth={2.5} /> New Task

@@ -4,12 +4,19 @@ import "./SearchableSelect.css";
 
 // Lightweight searchable dropdown — no autocomplete library exists in this project.
 // `options` is [{ value, label }]. `value` is the selected option's value (or "").
-const SearchableSelect = ({ options, value, onChange, placeholder = "Select...", emptyLabel = "No options found", disabled }) => {
+// When `creatable` is set, typing a name that doesn't match any option offers
+// a "+ Use <name>" row that calls onChange with the raw typed text instead of
+// an option's value — for fields (like Sales Person) that accept either an
+// existing record's id or a plain name that doesn't exist as a record yet.
+const SearchableSelect = ({ options, value, onChange, placeholder = "Select...", emptyLabel = "No options found", disabled, creatable = false }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const containerRef = useRef(null);
 
   const selected = options.find((o) => o.value === value);
+  // In creatable mode, `value` may be free text with no matching option —
+  // still show it in the trigger instead of falling back to the placeholder.
+  const triggerLabel = selected ? selected.label : (creatable && value ? value : "");
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -32,8 +39,8 @@ const SearchableSelect = ({ options, value, onChange, placeholder = "Select...",
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
       >
-        <span className={selected ? "" : "searchable-select-placeholder"}>
-          {selected ? selected.label : placeholder}
+        <span className={triggerLabel ? "" : "searchable-select-placeholder"}>
+          {triggerLabel || placeholder}
         </span>
         <ChevronDown size={16} />
       </button>
@@ -45,14 +52,26 @@ const SearchableSelect = ({ options, value, onChange, placeholder = "Select...",
             <input
               type="text"
               autoFocus
-              placeholder="Search..."
+              placeholder={creatable ? "Search or type a new name..." : "Search..."}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
           <div className="searchable-select-list">
+            {creatable && query.trim() && !options.some((o) => o.label.toLowerCase() === query.trim().toLowerCase()) && (
+              <div
+                className="searchable-select-option searchable-select-create"
+                onClick={() => {
+                  onChange(query.trim());
+                  setOpen(false);
+                  setQuery("");
+                }}
+              >
+                + Use "{query.trim()}"
+              </div>
+            )}
             {filtered.length === 0 ? (
-              <div className="searchable-select-empty">{emptyLabel}</div>
+              !creatable && <div className="searchable-select-empty">{emptyLabel}</div>
             ) : (
               filtered.map((o) => (
                 <div

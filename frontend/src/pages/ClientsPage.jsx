@@ -3,9 +3,9 @@ import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Users, FileText, Wallet, Plus, Search,
   Package, Pencil, Trash2, X, CheckCircle2, UserCheck, BellRing,
-  Inbox, Activity, XCircle, Calendar, ChevronRight,
+  Inbox, Activity, XCircle, Calendar, ChevronRight, ChevronLeft,
   TrendingUp, TrendingDown, LayoutGrid, List, Download, Upload,
-  BarChart3,
+  BarChart3, MoreHorizontal, Mail, Phone, User, Trophy, Zap,
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import {
@@ -15,6 +15,7 @@ import {
   deleteContract,
   getAllReminders,
   deletePaymentReminder,
+  bulkDeleteClients,
 } from "../services/clientApi";
 import ClientForm from "../components/ClientForm";
 import PaymentReminderForm from "../components/PaymentReminderForm";
@@ -33,6 +34,34 @@ const fmtDate = (value) => {
 };
 
 const CLIENT_TYPE_OPTIONS = ["pvt ltd", "ltd", "llp", "huf", "proprietor", "other"];
+
+// Rotating accent per client card — a deterministic hash of the client's id
+// so the same client always gets the same color, without every card in the
+// grid looking identical.
+const CARD_ACCENTS = ["#f7931e", "#2563eb", "#7c3aed", "#16a34a", "#db2777", "#0891b2"];
+function accentFor(id = "") {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash);
+  return CARD_ACCENTS[Math.abs(hash) % CARD_ACCENTS.length];
+}
+
+// Purely decorative trend swoosh — not tied to real per-day figures (we
+// don't have that granularity client-side), so it carries no axis, labels,
+// or numbers that could be mistaken for actual data.
+function Sparkline({ id, color }) {
+  return (
+    <svg className="kpi-sparkline" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <linearGradient id={`spark-fill-${id}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.32" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d="M0,30 C10,32 16,14 26,18 C36,22 40,8 52,12 C64,16 68,26 80,20 C88,16 92,6 100,10 L100,36 L0,36 Z" fill={`url(#spark-fill-${id})`} />
+      <path d="M0,30 C10,32 16,14 26,18 C36,22 40,8 52,12 C64,16 68,26 80,20 C88,16 92,6 100,10" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 const STATUS_DONUT_META = {
   converted: { label: "Converted", color: "#16a34a" },
@@ -63,7 +92,7 @@ const exportClientsToCsv = (clients) => {
   const headers = ["Client Name", "Company", "Email", "Phone", "Status", "Sales Person", "Onboarded"];
   const rows = clients.map((c) => [
     c.clientName, c.companyName || "", c.email, c.phone, c.status,
-    c.salesPerson?.name || "", c.onboardedAt || c.createdAt || "",
+    c.salesPerson?.name || c.salesPersonName || "", c.onboardedAt || c.createdAt || "",
   ]);
   const csv = [headers, ...rows]
     .map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","))
@@ -79,7 +108,11 @@ const exportClientsToCsv = (clients) => {
   window.URL.revokeObjectURL(url);
 };
 
-const ClientsPage = () => {
+// `embedded`: rendered as the "Clients" tab inside AdminDashboard's own
+// sidebar/topbar shell, instead of as its own standalone routed page — so
+// it skips the page's own padding/background and "Back to Dashboard" link
+// (redundant when the dashboard sidebar is already on screen).
+const ClientsPage = ({ embedded = false } = {}) => {
   const navigate = useNavigate();
   const importInputRef = useRef(null);
   const [activeTab, setActiveTab] = useState("clients");
@@ -104,6 +137,12 @@ const ClientsPage = () => {
   const [showAllSalesPersons, setShowAllSalesPersons] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  const [selectedClientIds, setSelectedClientIds] = useState(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [clientsPage, setClientsPage] = useState(1);
+  const CLIENTS_PAGE_SIZE = 24;
+  const [donutRange, setDonutRange] = useState("month");
+  const [openKpiMenu, setOpenKpiMenu] = useState(null);
 
   useEffect(() => {
     if (activeTab === "clients") {
@@ -114,6 +153,13 @@ const ClientsPage = () => {
       loadReminders();
     }
   }, [activeTab]);
+
+  // Any filter/search change re-slices the result set, so a page number
+  // that made sense before may now be out of range (or just confusing) —
+  // jump back to page 1 whenever the filters themselves change.
+  useEffect(() => {
+    setClientsPage(1);
+  }, [searchTerm, statusFilter, clientTypeFilter, salesPersonFilter, dateFilterActive, dateRange]);
 
   const loadClients = async () => {
     setLoading(true);
@@ -226,6 +272,64 @@ const ClientsPage = () => {
     }
   };
 
+  const toggleClientSelected = (id) => {
+    setSelectedClientIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // "Select all" is scoped to the current page, not every filtered result —
+  // with lists running into the hundreds, a single checkbox silently
+  // queuing all of them for deletion would be an easy way to nuke far more
+  // than intended.
+  const toggleSelectAllVisible = () => {
+    setSelectedClientIds((prev) => {
+      const allVisibleSelected = paginatedClients.length > 0 && paginatedClients.every((c) => prev.has(c._id));
+      if (allVisibleSelected) return new Set();
+      return new Set(paginatedClients.map((c) => c._id));
+    });
+  };
+
+  // Explicit opt-in (a separate click after the page is fully selected) to
+  // select every client matching the current filters, not just this page.
+  const selectAllFilteredClients = () => {
+    setSelectedClientIds(new Set(filteredClients.map((c) => c._id)));
+  };
+
+  const handleBulkDeleteClients = async () => {
+    const count = selectedClientIds.size;
+    if (count === 0) return;
+    if (!window.confirm(`Delete ${count} selected client${count === 1 ? "" : "s"}? This also removes their contracts, reminders, and activity history. This cannot be undone.`)) {
+      return;
+    }
+    setBulkDeleting(true);
+    try {
+      // The backend caps a single request at 200 ids (so a bulk-select-all
+      // UI can't fire one unbounded, slow, all-or-nothing delete) — chunk
+      // larger selections into sequential batches instead of raising that cap.
+      const allIds = Array.from(selectedClientIds);
+      const BATCH_SIZE = 200;
+      let deletedCount = 0;
+      const failedIds = [];
+      for (let i = 0; i < allIds.length; i += BATCH_SIZE) {
+        const batch = allIds.slice(i, i + BATCH_SIZE);
+        const { data } = await bulkDeleteClients(batch);
+        deletedCount += data.deletedCount || 0;
+        if (data.failedIds?.length) failedIds.push(...data.failedIds);
+      }
+      alert(`${deletedCount} client${deletedCount === 1 ? "" : "s"} deleted${failedIds.length ? `, ${failedIds.length} failed` : ""}`);
+      setSelectedClientIds(new Set());
+      await loadClients();
+    } catch (error) {
+      alert(error.response?.data?.message || "Error deleting clients");
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   const handleFormSuccess = () => {
     setShowForm(false);
     if (formType === "client") {
@@ -235,27 +339,45 @@ const ClientsPage = () => {
     }
   };
 
+  // Sales person can be a real User (keyed by _id) or a free-text name typed
+  // for someone not added as a User yet (keyed by "name:<name>" so it can't
+  // collide with an ObjectId) — both need to show up as filterable options.
   const salesPersonOptions = Array.from(
     new Map(
       clients
-        .map((c) => c.salesPerson)
+        .map((c) => (c.salesPerson ? [c.salesPerson._id, c.salesPerson.name] : c.salesPersonName ? [`name:${c.salesPersonName}`, c.salesPersonName] : null))
         .filter(Boolean)
-        .map((sp) => [sp._id, sp.name])
     ).entries()
   );
 
   const filteredClients = clients.filter((client) => {
     const q = searchTerm.toLowerCase();
-    const matchesSearch = client.clientName.toLowerCase().includes(q) || client.email.toLowerCase().includes(q);
+    const matchesSearch = !q
+      || client.clientName.toLowerCase().includes(q)
+      || client.email.toLowerCase().includes(q)
+      || (client.companyName || "").toLowerCase().includes(q)
+      || (client.phone || "").toLowerCase().includes(q);
     const matchesStatus = statusFilter === "all" || client.status === statusFilter;
     const matchesClientType = clientTypeFilter === "all" || client.clientType === clientTypeFilter;
-    const matchesSalesPerson = salesPersonFilter === "all" || client.salesPerson?._id === salesPersonFilter;
+    const matchesSalesPerson = salesPersonFilter === "all"
+      || client.salesPerson?._id === salesPersonFilter
+      || `name:${client.salesPersonName}` === salesPersonFilter;
     const matchesDate = !dateFilterActive || (() => {
       const onboarded = new Date(client.onboardedAt || client.createdAt);
       return onboarded >= dateRange.start && onboarded <= dateRange.end;
     })();
     return matchesSearch && matchesStatus && matchesClientType && matchesSalesPerson && matchesDate;
   });
+
+  // Rendering all matching clients at once (this list can run into the
+  // hundreds) made the page one long unbroken scroll — page it instead.
+  const clientsTotalPages = Math.max(1, Math.ceil(filteredClients.length / CLIENTS_PAGE_SIZE));
+  const paginatedClients = filteredClients.slice(
+    (clientsPage - 1) * CLIENTS_PAGE_SIZE,
+    clientsPage * CLIENTS_PAGE_SIZE
+  );
+  const allPageSelected = paginatedClients.length > 0 && paginatedClients.every((c) => selectedClientIds.has(c._id));
+  const allFilteredSelected = filteredClients.length > 0 && filteredClients.every((c) => selectedClientIds.has(c._id));
 
   const openLeadsCount = clients.filter((c) => c.status === "open").length;
   const convertedClientsCount = clients.filter((c) => c.status === "converted").length;
@@ -270,26 +392,38 @@ const ClientsPage = () => {
   const convertedTrend = monthOverMonthTrend(clients, (c) => c.status === "converted");
   const coldTrend = monthOverMonthTrend(clients, (c) => c.status === "cold");
 
+  // "This Month" / "This Year" / "All Time" narrows the donut to clients
+  // onboarded in that window — a real filter, not a decorative label.
+  const donutScopedClients = clients.filter((c) => {
+    if (donutRange === "all") return true;
+    const d = clientDate(c);
+    const now = new Date();
+    if (donutRange === "year") return d.getFullYear() === now.getFullYear();
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  });
   const statusBreakdown = Object.keys(STATUS_DONUT_META)
     .map((key) => ({
       key,
       ...STATUS_DONUT_META[key],
-      count: clients.filter((c) => c.status === key).length,
+      count: donutScopedClients.filter((c) => c.status === key).length,
     }))
     .filter((s) => s.count > 0);
   const statusBreakdownTotal = statusBreakdown.reduce((sum, s) => sum + s.count, 0);
 
   const salesPersonLeaderboard = Array.from(
     clients.reduce((map, c) => {
-      if (!c.salesPerson) return map;
-      const key = c.salesPerson._id;
-      map.set(key, { name: c.salesPerson.name, count: (map.get(key)?.count || 0) + 1 });
+      const key = c.salesPerson?._id || (c.salesPersonName ? `name:${c.salesPersonName}` : null);
+      const name = c.salesPerson?.name || c.salesPersonName;
+      if (!key || !name) return map;
+      map.set(key, { name, count: (map.get(key)?.count || 0) + 1 });
       return map;
     }, new Map())
   )
     .map(([id, v]) => ({ id, ...v }))
     .sort((a, b) => b.count - a.count);
+  const salesPersonLeaderboardTotal = salesPersonLeaderboard.reduce((sum, sp) => sum + sp.count, 0);
   const visibleSalesPersons = showAllSalesPersons ? salesPersonLeaderboard : salesPersonLeaderboard.slice(0, 3);
+  const LEADERBOARD_BAR_COLORS = ["#16a34a", "#2563eb", "#7c3aed", "#db2777", "#0891b2", "#f7931e"];
 
   const filteredContracts = contracts.filter(
     (contract) =>
@@ -304,54 +438,60 @@ const ClientsPage = () => {
   );
 
   return (
-    <div className="clients-page">
+    <div className={embedded ? "clients-page clients-page-embedded" : "clients-page"}>
       <div className="page-header">
-        <Link to="/admin" className="back-link">
-          <ArrowLeft size={15} strokeWidth={2.2} /> Back to Dashboard
-        </Link>
-        <h1>Clients Overview</h1>
-        <p>Manage your clients, send contracts, and track payments</p>
+        {!embedded && (
+          <Link to="/admin" className="back-link">
+            <ArrowLeft size={15} strokeWidth={2.2} /> Back to Dashboard
+          </Link>
+        )}
+        <div className="page-header-row">
+          <div>
+            <div className="page-eyebrow">Client Management</div>
+            <h1>Clients Overview</h1>
+            <p>Manage your clients, send contracts, and track payments — all in one place.</p>
+          </div>
+        </div>
       </div>
 
       <div className="overview-layout">
         <div className="overview-main">
           <div className="kpi-grid kpi-trend-grid">
-            <div className="kpi-card kpi-orange">
-              <div className="kpi-icon"><Users size={20} strokeWidth={2} /></div>
-              <div className="kpi-value">{clients.length}</div>
-              <div className="kpi-label">Total Clients</div>
-              <div className={`kpi-trend ${totalTrend.up ? "trend-up" : "trend-down"}`}>
-                {totalTrend.up ? <TrendingUp size={12} strokeWidth={2.4} /> : <TrendingDown size={12} strokeWidth={2.4} />}
-                {totalTrend.percent}% from last month
+            {[
+              { key: "orange", Icon: Users, label: "Total Clients", value: clients.length, trend: totalTrend },
+              { key: "blue", Icon: Inbox, label: "Open Leads", value: openLeadsCount, trend: openTrend },
+              { key: "green", Icon: UserCheck, label: "Converted Clients", value: convertedClientsCount, trend: convertedTrend },
+              { key: "pink", Icon: Activity, label: "Cold Clients", value: coldLeadsCount, trend: coldTrend },
+            ].map(({ key, Icon, label, value, trend }) => (
+              <div key={key} className={`kpi-card kpi-${key}`}>
+                <div className="kpi-card-top">
+                  <div className="kpi-icon"><Icon size={19} strokeWidth={2} /></div>
+                  <div className="kpi-menu-wrap">
+                    <button
+                      type="button"
+                      className="kpi-menu-btn"
+                      onClick={() => setOpenKpiMenu((m) => (m === key ? null : key))}
+                    >
+                      <MoreHorizontal size={15} strokeWidth={2.2} />
+                    </button>
+                    {openKpiMenu === key && (
+                      <div className="kpi-menu-dropdown" onMouseLeave={() => setOpenKpiMenu(null)}>
+                        <button type="button" onClick={() => { exportClientsToCsv(clients); setOpenKpiMenu(null); }}>
+                          <Download size={13} strokeWidth={2.2} /> Export list
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="kpi-value">{value}</div>
+                <div className="kpi-label">{label}</div>
+                <div className={`kpi-trend ${trend.up ? "trend-up" : "trend-down"}`}>
+                  {trend.up ? <TrendingUp size={12} strokeWidth={2.4} /> : <TrendingDown size={12} strokeWidth={2.4} />}
+                  {trend.percent}% from last month
+                </div>
+                <Sparkline id={key} color={{ orange: "#f7931e", blue: "#2563eb", green: "#16a34a", pink: "#db2777" }[key]} />
               </div>
-            </div>
-            <div className="kpi-card kpi-blue">
-              <div className="kpi-icon"><Inbox size={20} strokeWidth={2} /></div>
-              <div className="kpi-value">{openLeadsCount}</div>
-              <div className="kpi-label">Open Leads</div>
-              <div className={`kpi-trend ${openTrend.up ? "trend-up" : "trend-down"}`}>
-                {openTrend.up ? <TrendingUp size={12} strokeWidth={2.4} /> : <TrendingDown size={12} strokeWidth={2.4} />}
-                {openTrend.percent}% from last month
-              </div>
-            </div>
-            <div className="kpi-card kpi-green">
-              <div className="kpi-icon"><UserCheck size={20} strokeWidth={2} /></div>
-              <div className="kpi-value">{convertedClientsCount}</div>
-              <div className="kpi-label">Converted Clients</div>
-              <div className={`kpi-trend ${convertedTrend.up ? "trend-up" : "trend-down"}`}>
-                {convertedTrend.up ? <TrendingUp size={12} strokeWidth={2.4} /> : <TrendingDown size={12} strokeWidth={2.4} />}
-                {convertedTrend.percent}% from last month
-              </div>
-            </div>
-            <div className="kpi-card kpi-pink">
-              <div className="kpi-icon"><Activity size={20} strokeWidth={2} /></div>
-              <div className="kpi-value">{coldLeadsCount}</div>
-              <div className="kpi-label">Cold Clients</div>
-              <div className={`kpi-trend ${coldTrend.up ? "trend-up" : "trend-down"}`}>
-                {coldTrend.up ? <TrendingUp size={12} strokeWidth={2.4} /> : <TrendingDown size={12} strokeWidth={2.4} />}
-                {coldTrend.percent}% from last month
-              </div>
-            </div>
+            ))}
           </div>
 
       {showForm && (
@@ -390,14 +530,21 @@ const ClientsPage = () => {
         </div>
       )}
 
-      <div className="tabs">
-        <button
-          className={`tab ${activeTab === "clients" ? "active" : ""}`}
-          onClick={() => setActiveTab("clients")}
-        >
-          <Users size={15} strokeWidth={2.2} /> Clients <span className="tab-count">{clients.length}</span>
-        </button>
-
+      <div className="status-pills">
+        {[
+          { key: "all", label: "All Clients", count: clients.length },
+          { key: "converted", label: "Converted", count: convertedClientsCount },
+          { key: "open", label: "Open Leads", count: openLeadsCount },
+          { key: "cold", label: "Cold Clients", count: coldLeadsCount },
+        ].map((p) => (
+          <button
+            key={p.key}
+            className={`status-pill ${statusFilter === p.key ? "active" : ""}`}
+            onClick={() => setStatusFilter(p.key)}
+          >
+            {p.label} <span className="status-pill-count">{p.count}</span>
+          </button>
+        ))}
       </div>
 
       <div className="tab-content">
@@ -498,6 +645,45 @@ const ClientsPage = () => {
               </div>
             </div>
 
+            {paginatedClients.length > 0 && (
+              <label className="select-all-row">
+                <input
+                  type="checkbox"
+                  checked={paginatedClients.length > 0 && paginatedClients.every((c) => selectedClientIds.has(c._id))}
+                  onChange={toggleSelectAllVisible}
+                />
+                Select all {paginatedClients.length} on this page
+                {allPageSelected && filteredClients.length > paginatedClients.length && (
+                  allFilteredSelected ? (
+                    <button type="button" className="select-all-expand" onClick={() => setSelectedClientIds(new Set())}>
+                      All {filteredClients.length} selected — Clear
+                    </button>
+                  ) : (
+                    <button type="button" className="select-all-expand" onClick={selectAllFilteredClients}>
+                      Select all {filteredClients.length} matching clients
+                    </button>
+                  )
+                )}
+              </label>
+            )}
+
+            {selectedClientIds.size > 0 && (
+              <div className="bulk-action-bar">
+                <span className="bulk-action-bar-count">
+                  <CheckCircle2 size={16} strokeWidth={2.2} />
+                  {selectedClientIds.size} client{selectedClientIds.size === 1 ? "" : "s"} selected
+                </span>
+                <div className="bulk-action-bar-actions">
+                  <button className="bulk-action-bar-clear" onClick={() => setSelectedClientIds(new Set())}>
+                    Clear selection
+                  </button>
+                  <button className="btn-danger" onClick={handleBulkDeleteClients} disabled={bulkDeleting}>
+                    <Trash2 size={14} strokeWidth={2.2} /> {bulkDeleting ? "Deleting..." : "Delete Selected"}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {loading ? (
               <div className="loading">Loading clients...</div>
             ) : filteredClients.length === 0 ? (
@@ -506,30 +692,39 @@ const ClientsPage = () => {
               </div>
             ) : viewMode === "grid" ? (
               <div className="clients-grid">
-                {filteredClients.map((client) => (
-                  <div key={client._id} className="client-card client-card-clickable" style={{backgroundColor:"white"}} onClick={() => navigate(`/clients/${client._id}`)}>
+                {paginatedClients.map((client) => (
+                  <div
+                    key={client._id}
+                    className="client-card client-card-clickable"
+                    style={{ "--card-accent": accentFor(client._id) }}
+                    onClick={() => navigate(`/clients/${client._id}`)}
+                  >
                     <div className="card-header">
                       <div className="client-identity">
                         <div className="client-avatar">{initials(client.clientName)}</div>
                         <div>
                           <h3>{client.companyName || client.clientName}</h3>
                           {client.companyName && <div className="client-company">{client.clientName}</div>}
+                          {client.clientType && <div className="client-type">{client.clientType.replace(/\b\w/g, (c) => c.toUpperCase())}</div>}
                         </div>
                       </div>
-                      <span className={`status ${client.status}`}>{client.status}</span>
+                      <div className="card-header-actions">
+                        <span className={`status ${client.status}`}><i className="status-dot" />{client.status}</span>
+                        <input
+                          type="checkbox"
+                          className="client-select-checkbox"
+                          checked={selectedClientIds.has(client._id)}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => toggleClientSelected(client._id)}
+                        />
+                      </div>
                     </div>
                     <div className="card-body">
                       {client.contactPerson && (
-                        <p>
-                          <strong>Contact:</strong> {client.contactPerson}
-                        </p>
+                        <p><User size={13} strokeWidth={2} /> {client.contactPerson}</p>
                       )}
-                      <p>
-                        <strong>Email:</strong> {client.email}
-                      </p>
-                      <p>
-                        <strong>Phone:</strong> {client.phone}
-                      </p>
+                      <p><Mail size={13} strokeWidth={2} /> {client.email}</p>
+                      <p><Phone size={13} strokeWidth={2} /> {client.phone}</p>
                       {client.hasLoginAccess && (
                         <p className="login-access-badge">
                           <CheckCircle2 size={13} strokeWidth={2.4} /> Portal access enabled
@@ -537,7 +732,7 @@ const ClientsPage = () => {
                       )}
                     </div>
                     <div className="card-footer card-footer-meta">
-                      <span className="last-updated">Updated {fmtDate(client.updatedAt)}</span>
+                      <span className="last-updated"><Calendar size={12} strokeWidth={2} /> Updated {fmtDate(client.updatedAt)}</span>
                       <span className="card-arrow">
                         View details <ChevronRight size={13} strokeWidth={2.4} />
                       </span>
@@ -550,6 +745,14 @@ const ClientsPage = () => {
                 <table className="data-table">
                   <thead>
                     <tr>
+                      <th className="checkbox-col">
+                        <input
+                          type="checkbox"
+                          className="list-select-checkbox"
+                          checked={paginatedClients.length > 0 && paginatedClients.every((c) => selectedClientIds.has(c._id))}
+                          onChange={toggleSelectAllVisible}
+                        />
+                      </th>
                       <th>Client</th>
                       <th>Contact</th>
                       <th>Email</th>
@@ -561,8 +764,16 @@ const ClientsPage = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredClients.map((client) => (
+                    {paginatedClients.map((client) => (
                       <tr key={client._id} className="data-row" onClick={() => navigate(`/clients/${client._id}`)} style={{ cursor: "pointer" }}>
+                        <td className="checkbox-col" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            className="list-select-checkbox"
+                            checked={selectedClientIds.has(client._id)}
+                            onChange={() => toggleClientSelected(client._id)}
+                          />
+                        </td>
                         <td>
                           <div className="client-identity">
                             <div className="client-avatar" style={{ width: 32, height: 32, fontSize: 12 }}>{initials(client.clientName)}</div>
@@ -583,6 +794,31 @@ const ClientsPage = () => {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {!loading && filteredClients.length > CLIENTS_PAGE_SIZE && (
+              <div className="clients-pagination">
+                <span className="clients-pagination-summary">
+                  Showing {(clientsPage - 1) * CLIENTS_PAGE_SIZE + 1}–{Math.min(clientsPage * CLIENTS_PAGE_SIZE, filteredClients.length)} of {filteredClients.length}
+                </span>
+                <div className="clients-pagination-controls">
+                  <button
+                    className="pagination-btn"
+                    disabled={clientsPage === 1}
+                    onClick={() => setClientsPage((p) => Math.max(1, p - 1))}
+                  >
+                    <ChevronLeft size={14} strokeWidth={2.4} /> Previous
+                  </button>
+                  <span className="clients-pagination-page">Page {clientsPage} of {clientsTotalPages}</span>
+                  <button
+                    className="pagination-btn"
+                    disabled={clientsPage === clientsTotalPages}
+                    onClick={() => setClientsPage((p) => Math.min(clientsTotalPages, p + 1))}
+                  >
+                    Next <ChevronRight size={14} strokeWidth={2.4} />
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -773,7 +1009,14 @@ const ClientsPage = () => {
 
         <aside className="overview-sidebar">
           <div className="sidebar-panel">
-            <h3 className="sidebar-panel-title">Clients by Status</h3>
+            <div className="sidebar-panel-header">
+              <h3 className="sidebar-panel-title">Clients by Status</h3>
+              <select className="donut-range-select" value={donutRange} onChange={(e) => setDonutRange(e.target.value)}>
+                <option value="month">This Month</option>
+                <option value="year">This Year</option>
+                <option value="all">All Time</option>
+              </select>
+            </div>
             {statusBreakdownTotal === 0 ? (
               <div className="empty-state" style={{ padding: "28px 14px" }}>
                 <p>No client data yet</p>
@@ -824,9 +1067,9 @@ const ClientsPage = () => {
                 <span className="quick-action-icon quick-action-orange"><Users size={16} strokeWidth={2.1} /></span>
                 Add New Client
               </button>
-              <button className="quick-action-btn" onClick={() => alert("Import Clients is coming soon")}>
+              <button className="quick-action-btn" onClick={() => importInputRef.current?.click()} disabled={importing}>
                 <span className="quick-action-icon quick-action-green"><Upload size={16} strokeWidth={2.1} /></span>
-                Import Clients
+                {importing ? "Importing..." : "Import Clients"}
               </button>
               <button className="quick-action-btn" onClick={() => exportClientsToCsv(clients)}>
                 <span className="quick-action-icon quick-action-green"><Download size={16} strokeWidth={2.1} /></span>

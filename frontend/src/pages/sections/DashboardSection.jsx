@@ -81,7 +81,7 @@ function StatCard({ Icon, iconBg, label, value, changePercent, changeIsGood, spa
           <div style={{ fontSize: 12, fontWeight: 700, color: changeIsGood ? T.green : T.red, display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
             {isUp ? <TrendingUp size={12} strokeWidth={2.4} /> : <TrendingDown size={12} strokeWidth={2.4} />}
             {Math.abs(changePercent || 0)}%
-            <span style={{ color: T.textMuted, fontWeight: 500 }}>vs last month</span>
+            <span style={{ color: T.textMuted, fontWeight: 500 }}>vs previous period</span>
           </div>
         </div>
       </div>
@@ -251,10 +251,34 @@ export default function DashboardSection({ dashboardStats, meetings, activityLog
   // backend getDashboardStats) — unlike the old monthlyTrend (a fixed
   // trailing-8-months view), this redraws whenever the date-range picker
   // above changes, instead of looking frozen.
+  // A day-by-day view of real collections legitimately swings from ~0 to
+  // several lakh depending on which days happen to have payments logged
+  // against them, which reads as a meaningless jagged zig-zag at the tiny
+  // (48px, no axis) size this sparkline renders at — so for a long range,
+  // coarsen it down to a handful of points by summing consecutive buckets
+  // together. (A running cumulative total was tried instead, but that's
+  // always flat-or-rising for a metric that only ever adds non-negative
+  // amounts — it'll show an "increasing" line even in a period whose total
+  // is DOWN vs the previous one, contradicting the "vs previous period" %
+  // right next to it. Summing raw per-bucket totals keeps the line's actual
+  // up/down direction intact, just smoother.)
   const periodTrend = stats.periodTrend || [];
-  const collectionsSparkline = periodTrend.map((m) => ({ label: m.label, value: m.collected }));
-  const expensesSparkline = periodTrend.map((m) => ({ label: m.label, value: m.expenses }));
-  const profitSparkline = periodTrend.map((m) => ({ label: m.label, value: m.profit }));
+  const MAX_SPARKLINE_POINTS = 10;
+  const resample = (key) => {
+    if (periodTrend.length <= MAX_SPARKLINE_POINTS) {
+      return periodTrend.map((m) => ({ label: m.label, value: m[key] || 0 }));
+    }
+    const chunkSize = Math.ceil(periodTrend.length / MAX_SPARKLINE_POINTS);
+    const out = [];
+    for (let i = 0; i < periodTrend.length; i += chunkSize) {
+      const chunk = periodTrend.slice(i, i + chunkSize);
+      out.push({ label: chunk[0].label, value: chunk.reduce((sum, m) => sum + (m[key] || 0), 0) });
+    }
+    return out;
+  };
+  const collectionsSparkline = resample("collected");
+  const expensesSparkline = resample("expenses");
+  const profitSparkline = resample("profit");
 
   return (
     <div className="fade-up">
@@ -315,12 +339,12 @@ export default function DashboardSection({ dashboardStats, meetings, activityLog
             <CheckCircle2 size={24} strokeWidth={1.6} color={T.green} /> All contracts due this period are fully paid
           </div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: 440 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${T.border}` }}>
                   {["Client", "Contract", "Contract Amount", "Received", "Balance", "Due Date", "Status"].map((h) => (
-                    <th key={h} style={{ textAlign: h === "Contract Amount" || h === "Received" || h === "Balance" ? "right" : "left", padding: "8px 10px", fontSize: 11, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>{h}</th>
+                    <th key={h} style={{ textAlign: h === "Contract Amount" || h === "Received" || h === "Balance" ? "right" : "left", padding: "8px 10px", fontSize: 11, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.4, position: "sticky", top: 0, background: T.card, zIndex: 1 }}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -386,25 +410,27 @@ export default function DashboardSection({ dashboardStats, meetings, activityLog
                       </div>
                       {isExpanded && (
                         <div style={{ padding: "0 12px 12px 34px" }}>
-                          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
-                            <thead>
-                              <tr>
-                                {["Client", "Project", "Status", "Amount"].map((h) => (
-                                  <th key={h} style={{ textAlign: h === "Amount" ? "right" : "left", padding: "4px 8px", fontSize: 10.5, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.3 }}>{h}</th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {(s.cases || []).map((c) => (
-                                <tr key={c.contractId} style={{ borderTop: `1px solid ${T.borderLight}` }}>
-                                  <td style={{ padding: "6px 8px", color: T.textPrimary, fontWeight: 600 }}>{c.companyName || c.clientName}</td>
-                                  <td style={{ padding: "6px 8px", color: T.textSecondary }}>{c.projectName}</td>
-                                  <td style={{ padding: "6px 8px", color: T.textSecondary, textTransform: "capitalize" }}>{c.contractStatus}</td>
-                                  <td style={{ padding: "6px 8px", color: T.textPrimary, fontWeight: 600, textAlign: "right" }}>{fmtINR(c.amount)}</td>
+                          <div style={{ maxHeight: 260, overflowY: "auto" }}>
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                              <thead style={{ position: "sticky", top: 0, background: T.inputBg }}>
+                                <tr>
+                                  {["Client", "Project", "Status", "Amount"].map((h) => (
+                                    <th key={h} style={{ textAlign: h === "Amount" ? "right" : "left", padding: "4px 8px", fontSize: 10.5, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.3 }}>{h}</th>
+                                  ))}
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                              </thead>
+                              <tbody>
+                                {(s.cases || []).map((c) => (
+                                  <tr key={c.contractId} style={{ borderTop: `1px solid ${T.borderLight}` }}>
+                                    <td style={{ padding: "6px 8px", color: T.textPrimary, fontWeight: 600 }}>{c.companyName || c.clientName}</td>
+                                    <td style={{ padding: "6px 8px", color: T.textSecondary }}>{c.projectName}</td>
+                                    <td style={{ padding: "6px 8px", color: T.textSecondary, textTransform: "capitalize" }}>{c.contractStatus}</td>
+                                    <td style={{ padding: "6px 8px", color: T.textPrimary, fontWeight: 600, textAlign: "right" }}>{fmtINR(c.amount)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -493,12 +519,12 @@ export default function DashboardSection({ dashboardStats, meetings, activityLog
             <Inbox size={24} strokeWidth={1.6} color={T.textMuted} /> No renewals due in this period
           </div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: 440 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${T.border}` }}>
                   {["Client Name", "Service Name", "Renewal Date", "Renewal Amount", "Salesperson", "Status"].map((h) => (
-                    <th key={h} style={{ textAlign: "left", padding: "8px 10px", fontSize: 11, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>{h}</th>
+                    <th key={h} style={{ textAlign: "left", padding: "8px 10px", fontSize: 11, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.4, position: "sticky", top: 0, background: T.card, zIndex: 1 }}>{h}</th>
                   ))}
                 </tr>
               </thead>

@@ -22,6 +22,9 @@ router.get("/my-project", authMiddleware, requireRole("client"), clientControlle
 router.post("/", authMiddleware, clientAccess, clientController.createClient);
 router.get("/", authMiddleware, clientViewAccess, clientController.getAllClients);
 router.post("/import", authMiddleware, clientAccess, clientController.importClientsMiddleware, clientController.importClients);
+// Must come before "/:id" below — otherwise Express would match this DELETE
+// as "/:id" with id="bulk-delete".
+router.delete("/bulk-delete", authMiddleware, clientAccess, clientController.bulkDeleteClients);
 router.get("/:id", authMiddleware, clientViewAccess, clientController.getClientById);
 router.put("/:id", authMiddleware, clientAccess, clientController.updateClient);
 router.delete("/:id", authMiddleware, clientAccess, clientController.deleteClient);

@@ -1,4 +1,5 @@
 const bcrypt = require("bcryptjs");
+const mongoose = require("mongoose");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
@@ -16,6 +17,22 @@ const ActivityLog = require("../models/ActivityLog");
 const { computeLeafFinalPrice, SERVICE_CATEGORY_LABELS } = require("../utils/pricingHelpers");
 
 // ============= CLIENT OPERATIONS =============
+
+// The "Sales Person" field accepts either an existing User's ObjectId
+// (picked from the dropdown) or a plain typed name for someone not added as
+// a User yet — resolve which one it is so a free-text name never hits the
+// ObjectId-ref `salesPerson` field (which would throw a cast error) and
+// isn't silently dropped either. The two output fields are mutually
+// exclusive on the Client document.
+const resolveSalesPersonFields = async (value) => {
+  const text = typeof value === "string" ? value.trim() : value;
+  if (!text) return { salesPerson: null, salesPersonName: null };
+  if (mongoose.Types.ObjectId.isValid(text)) {
+    const user = await User.findById(text).select("_id");
+    if (user) return { salesPerson: text, salesPersonName: null };
+  }
+  return { salesPerson: null, salesPersonName: String(text).trim() };
+};
 
 exports.createClient = async (req, res) => {
   try {
@@ -51,6 +68,7 @@ exports.createClient = async (req, res) => {
     //    under their own name, so this also closes off the client showing up
     //    with no owner — or the wrong owner — on their own Sales Dashboard.
     const assignedSalesPerson = req.user.role === "sales" ? req.user.id : salesPerson;
+    const resolvedSalesPerson = await resolveSalesPersonFields(assignedSalesPerson);
 
     const client = await Client.create({
       clientName,
@@ -59,7 +77,8 @@ exports.createClient = async (req, res) => {
       companyName,
       gstNo,
       tanNo,
-      salesPerson: assignedSalesPerson,
+      salesPerson: resolvedSalesPerson.salesPerson,
+      salesPersonName: resolvedSalesPerson.salesPersonName,
       leadSource,
       clientType,
       projectType,
@@ -382,6 +401,12 @@ exports.updateClient = async (req, res) => {
       }
     }
 
+    if (updatePayload.salesPerson !== undefined) {
+      const resolved = await resolveSalesPersonFields(updatePayload.salesPerson);
+      updatePayload.salesPerson = resolved.salesPerson;
+      updatePayload.salesPersonName = resolved.salesPersonName;
+    }
+
     const previousClient = await Client.findById(req.params.id).select("status activeStatus");
 
     const client = await Client.findByIdAndUpdate(req.params.id, updatePayload, {
@@ -436,29 +461,77 @@ exports.updateClient = async (req, res) => {
   }
 };
 
+// Shared by both the single-client and bulk-delete endpoints below — deletes
+// the client plus everything that references it: contracts, reminders,
+// activity log, auto-generated tasks, and the linked client-login user.
+// Without this, contract-generated Task documents (see
+// createTasksFromDeliverables) would keep dangling clientId/contractId
+// references forever, silently surviving as orphaned "zombie" tasks that
+// the Tasks page's populate() can no longer resolve to a client/contract name.
+async function deleteClientCascade(clientId) {
+  const client = await Client.findByIdAndDelete(clientId);
+  if (!client) return false;
+
+  await Contract.deleteMany({ clientId });
+  await PaymentReminder.deleteMany({ clientId });
+  await ActivityLog.deleteMany({ clientId });
+  await Task.deleteMany({ clientId });
+  await User.deleteOne({ clientId });
+
+  return true;
+}
+
 exports.deleteClient = async (req, res) => {
   try {
-    const client = await Client.findByIdAndDelete(req.params.id);
-    if (!client) {
+    const deleted = await deleteClientCascade(req.params.id);
+    if (!deleted) {
       return res.status(404).json({ message: "Client not found" });
     }
-
-    // Delete related contracts, reminders, activity log, auto-generated
-    // tasks, and the linked client-login user — without this, contract-
-    // generated Task documents (see createTasksFromDeliverables) would keep
-    // dangling clientId/contractId references forever, silently surviving
-    // as orphaned "zombie" tasks that the Tasks page's populate() can no
-    // longer resolve to a client/contract name.
-    await Contract.deleteMany({ clientId: req.params.id });
-    await PaymentReminder.deleteMany({ clientId: req.params.id });
-    await ActivityLog.deleteMany({ clientId: req.params.id });
-    await Task.deleteMany({ clientId: req.params.id });
-    await User.deleteOne({ clientId: req.params.id });
 
     return res.json({ message: "Client and related data deleted successfully" });
   } catch (error) {
     console.error("Error deleting client:", error);
     return res.status(500).json({ message: error.message || "Failed to delete client" });
+  }
+};
+
+// Bulk delete — same cascade as the single-client route above, run once per
+// id. A partial failure (one bad id) doesn't abort the rest; the response
+// reports what actually got deleted so the frontend can refresh accurately
+// and flag anything that didn't go through.
+exports.bulkDeleteClients = async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ message: "ids must be a non-empty array of client IDs" });
+    }
+    // Caps a single request so a bulk-select-all UI can't fire an unbounded,
+    // slow, all-or-nothing delete against the database.
+    if (ids.length > 200) {
+      return res.status(400).json({ message: "Cannot delete more than 200 clients in a single request" });
+    }
+
+    let deletedCount = 0;
+    const failedIds = [];
+    for (const id of ids) {
+      try {
+        const deleted = await deleteClientCascade(id);
+        if (deleted) deletedCount += 1;
+        else failedIds.push(id);
+      } catch (error) {
+        console.error(`Error deleting client ${id}:`, error);
+        failedIds.push(id);
+      }
+    }
+
+    return res.json({
+      message: `${deletedCount} client${deletedCount === 1 ? "" : "s"} deleted${failedIds.length ? `, ${failedIds.length} failed` : ""}`,
+      deletedCount,
+      failedIds,
+    });
+  } catch (error) {
+    console.error("Error bulk deleting clients:", error);
+    return res.status(500).json({ message: error.message || "Failed to delete clients" });
   }
 };
 
@@ -798,10 +871,44 @@ const readImportRows = (file) => {
   });
 };
 
+// Imported rows only ever carry a free-text service description (e.g. "Type
+// of Services"), not the structured selectedServices tree a manually-built
+// contract has — so without this, an imported contract has no
+// selectedServices at all and silently never shows up on the "Service Wise
+// Active Cases" / renewal-service-name dashboard widgets. Best-effort keyword
+// match onto the 13 known categories; anything unrecognized still lands
+// somewhere via the "otherServices" catch-all instead of vanishing.
+const SERVICE_CATEGORY_KEYWORDS = {
+  socialMedia: ["social media", "smm", "social"],
+  rankingOptimization: ["seo", "aeo", "geo", "ranking", "local seo", "optimization"],
+  sponsoredAds: ["ads", "ppc", "google ads", "meta ads", "ott", "advertising", "sponsored"],
+  googleMyBusiness: ["gmb", "google my business", "google business"],
+  webDevelopment: ["web development", "website", "web design", "landing page", "ecommerce", "e-commerce"],
+  mobileAppDevelopment: ["app development", "mobile app", "android", "ios app"],
+  telecast: ["telecast", "tv channel", "tv ad"],
+  broadcast: ["broadcast", "radio"],
+  filmProduction: ["film production", "tvc", "corporate film", "music album", "short film"],
+  aiServices: ["ai service", "ai reel", "chatbot", "ai film", "robot calling", "artificial intelligence"],
+  influencerMarketing: ["influencer"],
+  celebrityManagement: ["celebrity"],
+  eventManagement: ["event management", "event"],
+};
+
+const matchServiceCategory = (text) => {
+  const t = (text || "").toLowerCase();
+  for (const [categoryId, keywords] of Object.entries(SERVICE_CATEGORY_KEYWORDS)) {
+    if (keywords.some((kw) => t.includes(kw))) return categoryId;
+  }
+  return "otherServices";
+};
+
+// Returns { salesPerson, salesPersonName } — a matched User's id, or (when
+// the sheet names someone who isn't a User yet) their name as free text,
+// same as a name typed directly into the Add Client form.
 const resolveImportSalesPerson = async (value, currentUser) => {
-  if (currentUser.role === "sales") return currentUser.id;
+  if (currentUser.role === "sales") return { salesPerson: currentUser.id, salesPersonName: undefined };
   const text = normalizeImportText(value);
-  if (!text) return undefined;
+  if (!text) return { salesPerson: undefined, salesPersonName: undefined };
   const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const user = await User.findOne({
     role: "sales",
@@ -810,7 +917,7 @@ const resolveImportSalesPerson = async (value, currentUser) => {
       { name: new RegExp(`^${escaped}$`, "i") },
     ],
   }).select("_id");
-  return user?._id;
+  return user ? { salesPerson: user._id, salesPersonName: undefined } : { salesPerson: undefined, salesPersonName: text };
 };
 
 exports.importClientsMiddleware = multer({
@@ -858,7 +965,7 @@ exports.importClients = async (req, res) => {
         if (!phone) throw new Error("Phone is required for import");
 
         let client = await Client.findOne({ $or: [{ email }, { phone }] });
-        const salesPerson = await resolveImportSalesPerson(getImportValue(row, "salesPerson"), req.user);
+        const { salesPerson, salesPersonName } = await resolveImportSalesPerson(getImportValue(row, "salesPerson"), req.user);
 
         if (!client) {
           client = await Client.create({
@@ -869,6 +976,7 @@ exports.importClients = async (req, res) => {
             gstNo: normalizeImportText(getImportValue(row, "gstNo")),
             tanNo: normalizeImportText(getImportValue(row, "tanNo")),
             salesPerson,
+            salesPersonName,
             leadSource: normalizeEnum(getImportValue(row, "leadSource"), CLIENT_ENUMS.leadSource, "other"),
             clientType: normalizeEnum(getImportValue(row, "clientType"), CLIENT_ENUMS.clientType, "other"),
             projectType: normalizeEnum(getImportValue(row, "projectType"), CLIENT_ENUMS.projectType, "service"),
@@ -913,6 +1021,17 @@ exports.importClients = async (req, res) => {
               notes: "Imported payment",
             }]
           : [];
+        // Best-effort category so imported contracts show up on the "Service
+        // Wise Active Cases" / renewal-service-name dashboard widgets, which
+        // read off selectedServices — a structured field a plain CSV row has
+        // no equivalent of.
+        const selectedServices = projectAmount > 0
+          ? [{
+              categoryId: matchServiceCategory(`${projectName} ${projectScope}`),
+              enabled: true,
+              selections: [{ advanced: { sellingPrice: projectAmount, discount: 0, gst: 0 } }],
+            }]
+          : [];
 
         const contract = await Contract.create({
           contractNumber: clientService.buildContractNumber(),
@@ -929,6 +1048,7 @@ exports.importClients = async (req, res) => {
           validUntil: parseImportDate(getImportValue(row, "validUntil")),
           notes: normalizeImportText(getImportValue(row, "notes")),
           deliverables: projectScope ? [{ title: projectScope, quantity: 1, frequency: "one-time" }] : [],
+          selectedServices,
           nextDueDate: parseImportDate(getImportValue(row, "nextDueDate")),
           payments,
           importDetails: buildImportDetails(row),
@@ -1314,7 +1434,7 @@ exports.getDashboardStats = async (req, res) => {
       // be able to carry a still-unrenewed contract into later months too).
       Contract.find().populate({
         path: "clientId",
-        select: "clientName companyName salesPerson",
+        select: "clientName companyName salesPerson salesPersonName",
         populate: { path: "salesPerson", select: "name" },
       }),
       Expense.find(), // unfiltered — needed for the trailing monthly expense/profit trend below
@@ -1367,39 +1487,48 @@ exports.getDashboardStats = async (req, res) => {
       if (contract.nextDueDate && contract.dueAmount > 0 && new Date(contract.nextDueDate) < now) {
         overduePayments += 1;
       }
+    });
 
-      // "Active" = a real, ongoing contract — everything except one that was
-      // explicitly rejected or has expired. Contracts now stay in "draft"
-      // indefinitely unless an admin manually emails them (no more auto-send
-      // on creation), so draft must count as active or every newly created
-      // contract would silently vanish from this section.
-      const isActive = contract.contractStatus !== "rejected" && contract.contractStatus !== "expired";
-      if (isActive) {
-        (contract.selectedServices || []).forEach((cat) => {
-          if (!cat?.enabled || !(cat.selections || []).length) return;
-          if (serviceFilter && cat.categoryId !== serviceFilter) return;
+    // "Active" here means both: a real, ongoing contract (not explicitly
+    // rejected or expired — draft counts, since contracts now stay in draft
+    // indefinitely unless an admin manually emails them) AND actually running
+    // during the selected period, i.e. [contractStartDate, validUntil]
+    // overlaps [periodStart, periodEnd] — not merely "created" in that
+    // window. A contract created today (e.g. via import) but covering
+    // Jan-Dec must still show up when the date picker is set to any month
+    // inside that span, so this scans allContracts (unfiltered by createdAt)
+    // rather than the createdAt-scoped `contracts` above.
+    allContracts.forEach((contract) => {
+      const isActiveStatus = contract.contractStatus !== "rejected" && contract.contractStatus !== "expired";
+      if (!isActiveStatus) return;
+      const startedByPeriodEnd = !contract.contractStartDate || new Date(contract.contractStartDate) <= periodEnd;
+      const notEndedBeforePeriodStart = !contract.validUntil || new Date(contract.validUntil) >= periodStart;
+      if (!startedByPeriodEnd || !notEndedBeforePeriodStart) return;
 
-          const categoryAmount = cat.selections.reduce(
-            (sum, sel) => sum + computeLeafFinalPrice(sel.advanced),
-            0
-          );
-          const bucket = serviceWiseMap.get(cat.categoryId) || { activeCases: 0, totalAmount: 0, cases: [] };
-          bucket.activeCases += 1;
-          bucket.totalAmount += categoryAmount;
-          bucket.cases.push({
-            contractId: contract._id,
-            clientName: contract.clientId?.clientName || "—",
-            companyName: contract.clientId?.companyName || "",
-            projectName: contract.projectName,
-            contractStatus: contract.contractStatus,
-            amount: Math.round(categoryAmount * 100) / 100,
-          });
-          serviceWiseMap.set(cat.categoryId, bucket);
+      (contract.selectedServices || []).forEach((cat) => {
+        if (!cat?.enabled || !(cat.selections || []).length) return;
+        if (serviceFilter && cat.categoryId !== serviceFilter) return;
 
-          totalActiveCases += 1;
-          totalActiveRevenue += categoryAmount;
+        const categoryAmount = cat.selections.reduce(
+          (sum, sel) => sum + computeLeafFinalPrice(sel.advanced),
+          0
+        );
+        const bucket = serviceWiseMap.get(cat.categoryId) || { activeCases: 0, totalAmount: 0, cases: [] };
+        bucket.activeCases += 1;
+        bucket.totalAmount += categoryAmount;
+        bucket.cases.push({
+          contractId: contract._id,
+          clientName: contract.clientId?.clientName || "—",
+          companyName: contract.clientId?.companyName || "",
+          projectName: contract.projectName,
+          contractStatus: contract.contractStatus,
+          amount: Math.round(categoryAmount * 100) / 100,
         });
-      }
+        serviceWiseMap.set(cat.categoryId, bucket);
+
+        totalActiveCases += 1;
+        totalActiveRevenue += categoryAmount;
+      });
     });
 
     const serviceWiseActiveCases = Array.from(serviceWiseMap.entries())
@@ -1496,6 +1625,37 @@ exports.getDashboardStats = async (req, res) => {
     const expensesInRange = await Expense.find({ expenseDate: { $gte: periodStart, $lte: periodEnd } });
     const totalExpenses = expensesInRange.reduce((sum, e) => sum + (e.amount || 0), 0);
     const netProfit = totalRevenue - totalExpenses;
+
+    // "vs last month" on the three stat cards must compare against whatever
+    // period is actually selected — an immediately-preceding window of the
+    // same length — not always real-calendar this-month-vs-last-month
+    // (that fixed comparison stayed pinned to "55%" no matter what the admin
+    // picked in the date-range filter, since it never looked at periodStart/
+    // periodEnd at all). Scans the already-fetched allContracts/allExpenses
+    // (unfiltered) rather than issuing new queries.
+    const periodLengthMs = periodEnd.getTime() - periodStart.getTime() + 1;
+    const previousPeriodEnd = new Date(periodStart.getTime() - 1);
+    const previousPeriodStart = new Date(previousPeriodEnd.getTime() - periodLengthMs + 1);
+
+    let previousPeriodCollected = 0;
+    allContracts.forEach((contract) => {
+      contract.payments.forEach((payment) => {
+        if (!payment.paymentDate) return;
+        const paidOn = new Date(payment.paymentDate);
+        if (paidOn >= previousPeriodStart && paidOn <= previousPeriodEnd) {
+          previousPeriodCollected += payment.amount || 0;
+        }
+      });
+    });
+    let previousPeriodExpenses = 0;
+    allExpenses.forEach((expense) => {
+      if (!expense.expenseDate) return;
+      const paidOn = new Date(expense.expenseDate);
+      if (paidOn >= previousPeriodStart && paidOn <= previousPeriodEnd) {
+        previousPeriodExpenses += expense.amount || 0;
+      }
+    });
+    const previousPeriodProfit = previousPeriodCollected - previousPeriodExpenses;
 
     // Populate the period-scoped trend buckets declared above.
     allContracts.forEach((contract) => {
@@ -1620,7 +1780,7 @@ exports.getDashboardStats = async (req, res) => {
           serviceName,
           renewalDate: contract.validUntil,
           renewalAmount: contract.projectAmount || 0,
-          salesPerson: contract.clientId?.salesPerson?.name || "—",
+          salesPerson: contract.clientId?.salesPerson?.name || contract.clientId?.salesPersonName || "—",
           status,
         };
       })
@@ -1678,9 +1838,9 @@ exports.getDashboardStats = async (req, res) => {
       if (prev > 0) return Math.round(((curr - prev) / prev) * 100);
       return curr > 0 ? 100 : 0;
     };
-    const collectionsChangePercent = pctChange(currentMonthBucket.collected, previousMonthBucket.collected);
-    const expensesChangePercent = pctChange(currentMonthBucket.expenses, previousMonthBucket.expenses);
-    const profitChangePercent = pctChange(currentMonthBucket.profit, previousMonthBucket.profit);
+    const collectionsChangePercent = pctChange(totalRevenue, previousPeriodCollected);
+    const expensesChangePercent = pctChange(totalExpenses, previousPeriodExpenses);
+    const profitChangePercent = pctChange(netProfit, previousPeriodProfit);
 
     // ── Growth Overview ─────────────────────────────────────────────────────
     // Monthly: this calendar month's profit vs the same month last year.

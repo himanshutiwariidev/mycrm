@@ -90,6 +90,12 @@
   font-weight: 600;
 }
 
+.searchable-select-create {
+  color: #e8590c;
+  font-weight: 600;
+  border-bottom: 1px solid #f0f1f6;
+}
+
 .searchable-select-empty {
   padding: 14px 12px;
   font-size: 13px;

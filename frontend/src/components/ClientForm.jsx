@@ -49,7 +49,7 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     if (client) {
       setFormData({
         ...client,
-        salesPerson: client.salesPerson?._id || client.salesPerson || "",
+        salesPerson: client.salesPerson?._id || client.salesPerson || client.salesPersonName || "",
         password: "",
       });
     } else if (isSalesUser) {
@@ -201,9 +201,10 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
                 options={salesUsers.map((u) => ({ value: u._id, label: u.name }))}
                 value={formData.salesPerson}
                 onChange={(value) => setFormData((prev) => ({ ...prev, salesPerson: value }))}
-                placeholder={salesUsersLoading ? "Loading sales users..." : "Select sales person"}
+                placeholder={salesUsersLoading ? "Loading sales users..." : "Select or type a sales person"}
                 emptyLabel="No Sales User Found"
                 disabled={salesUsersLoading}
+                creatable
               />
             )}
           </div>

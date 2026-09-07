@@ -6,6 +6,13 @@ const ClientSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
+    // Free-text fallback for when the sales person doesn't exist as a User
+    // yet — set only when `salesPerson` above isn't (mutually exclusive; see
+    // resolveSalesPersonFields in clientController.js).
+    salesPersonName: {
+      type: String,
+      trim: true,
+    },
     assignedUser: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

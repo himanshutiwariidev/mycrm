@@ -25,6 +25,10 @@ const SERVICE_CATEGORY_LABELS = {
   influencerMarketing: "Influencer Marketing",
   celebrityManagement: "Celebrity Enrollment / Management",
   eventManagement: "Event Management",
+  // Synthetic bucket for imported contracts whose sheet didn't name a
+  // service that maps to one of the 13 categories above — see
+  // matchServiceCategory in clientController.js.
+  otherServices: "Other Services",
 };
 
 module.exports = { computeLeafFinalPrice, SERVICE_CATEGORY_LABELS };

@@ -40,6 +40,29 @@ const T = {
   slate:  "#64748b",  slateBg:  "#f8fafc",  slateBorder: "#e2e8f0",
 };
 
+// The sidebar is a dark panel against an otherwise light dashboard (matches
+// AdminDashboard), so it needs its own text/border/hover tokens rather than
+// reusing the light-tuned T above. T.brand (orange) still pops fine on dark.
+const SB = {
+  bg: "#161a24",
+  border: "rgba(255,255,255,0.07)",
+  text: "#ffffff",
+  muted: "#7b8496",
+  hoverBg: "rgba(247,147,30,0.12)",
+  activeBg: "rgba(247,147,30,0.16)",
+};
+
+// Each nav item's accent color is tuned for a light background; on the dark
+// sidebar it reads as dim. Blending it partway toward white keeps the same
+// hue but lifts it enough to pop.
+function brighten(hex, amount = 0.35) {
+  const n = parseInt(hex.replace("#", ""), 16);
+  const r = Math.round(((n >> 16) & 255) + (255 - ((n >> 16) & 255)) * amount);
+  const g = Math.round(((n >> 8) & 255) + (255 - ((n >> 8) & 255)) * amount);
+  const b = Math.round((n & 255) + (255 - (n & 255)) * amount);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
 const PRIORITY = {
   low:    { label: "Low",    color: T.green,  bg: T.greenBg,  border: T.greenBorder  },
   medium: { label: "Medium", color: T.yellow, bg: T.yellowBg, border: T.yellowBorder },
@@ -366,11 +389,13 @@ await API.patch(
           transform: translateY(-1px);
         }
 
+        .sidebar-nav { scrollbar-width: none; -ms-overflow-style: none; }
+        .sidebar-nav::-webkit-scrollbar { display: none; }
         .nav-btn { border: none; cursor: pointer; font-family: inherit; background: transparent; transition: all .16s; }
-        .nav-btn:hover:not(.nav-active) { background: ${T.brandLight} !important; color: ${T.brand} !important; }
+        .nav-btn:hover:not(.nav-active) { background: ${SB.hoverBg} !important; color: ${T.brand} !important; }
 
         .logout-btn { transition: background .16s, color .16s; cursor: pointer; border: none; font-family: inherit; }
-        .logout-btn:hover { background: ${T.redBg} !important; color: ${T.red} !important; }
+        .logout-btn:hover { background: rgba(220,38,38,0.15) !important; color: #f87171 !important; }
 
         .status-select:focus { border-color: ${T.brand}; box-shadow: 0 0 0 3px rgba(247, 147, 30,.1); outline: none; }
 
@@ -390,19 +415,19 @@ await API.patch(
         {/* ── SIDEBAR ─────────────────────────────────────────────────────── */}
         <aside style={{
           position: "fixed", left: 0, top: 0, bottom: 0, width: 238,
-          background: T.sidebar, borderRight: `1px solid ${T.border}`,
+          background: SB.bg, borderRight: `1px solid ${SB.border}`,
           display: "flex", flexDirection: "column", zIndex: 100,
-          boxShadow: "1px 0 0 0 #e8eaf0",
+          boxShadow: "2px 0 16px rgba(0,0,0,.18)",
         }}>
           {/* brand */}
-          <div style={{ padding: "24px 22px 22px", borderBottom: `1px solid ${T.borderLight}` }}>
+          <div style={{ padding: "24px 22px 22px", borderBottom: `1px solid ${SB.border}` }}>
             <img src={logo} alt="Bharat Bizmart" style={{ height: 34, width: "auto", display: "block" }} />
-            <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: ".1em", marginTop: 9, textTransform: "uppercase", fontWeight: 600 }}>Task Portal</div>
+            <div style={{ fontSize: 10, color: SB.muted, letterSpacing: ".1em", marginTop: 9, textTransform: "uppercase", fontWeight: 600 }}>Task Portal</div>
           </div>
 
           {/* nav */}
-          <nav style={{ flex: 1, padding: "18px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
-            <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: ".14em", textTransform: "uppercase", fontWeight: 700, padding: "4px 12px 10px" }}>
+          <nav className="sidebar-nav" style={{ flex: "1 1 0%", minHeight: 0, overflowY: "auto", padding: "18px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
+            <div style={{ fontSize: 10, color: SB.muted, letterSpacing: ".14em", textTransform: "uppercase", fontWeight: 700, padding: "4px 12px 10px" }}>
               NAVIGATION
             </div>
             {TABS.map(({ id, label, Icon }) => {
@@ -411,12 +436,12 @@ await API.patch(
                 <button key={id} className={`nav-btn${active ? " nav-active" : ""}`} onClick={() => setTab(id)} style={{
                   display: "flex", alignItems: "center", gap: 10, width: "100%",
                   padding: "10px 12px", borderRadius: 9, textAlign: "left",
-                  color: active ? T.brand : T.textSecondary,
-                  background: active ? T.brandLight : "transparent",
+                  color: active ? T.brand : SB.text,
+                  background: active ? SB.activeBg : "transparent",
                   fontWeight: active ? 600 : 400, fontSize: 13.5,
                   borderLeft: `3px solid ${active ? T.brand : "transparent"}`,
                 }}>
-                  <Icon size={16} strokeWidth={active ? 2.2 : 1.8} color={active ? T.brand : T.textMuted} />
+                  <Icon size={16} strokeWidth={active ? 2.4 : 2} color={active ? brighten(T.brand) : brighten("#94a3b8")} />
                   {label}
                   {active && <div style={{ marginLeft: "auto", width: 6, height: 6, borderRadius: "50%", background: T.brand, flexShrink: 0 }} />}
                 </button>
@@ -425,25 +450,25 @@ await API.patch(
 
             {/* quick stats in sidebar */}
             <div style={{ marginTop: 24, padding: "0 4px" }}>
-              <div style={{ fontSize: 10, color: T.textMuted, letterSpacing: ".14em", textTransform: "uppercase", fontWeight: 700, padding: "4px 8px 12px" }}>QUICK STATS</div>
+              <div style={{ fontSize: 10, color: SB.muted, letterSpacing: ".14em", textTransform: "uppercase", fontWeight: 700, padding: "4px 8px 12px" }}>QUICK STATS</div>
               {[
-                { label: "Total Tasks",  value: total,  color: T.brand  },
-                { label: "Completed",    value: done,   color: T.green  },
-                { label: "In Progress",  value: inProg, color: T.yellow },
-                { label: "Pending",      value: pend,   color: T.slate  },
+                { label: "Total Tasks",  value: total,  color: brighten(T.brand)  },
+                { label: "Completed",    value: done,   color: brighten(T.green)  },
+                { label: "In Progress",  value: inProg, color: brighten(T.yellow) },
+                { label: "Pending",      value: pend,   color: SB.text  },
               ].map(({ label, value, color }) => (
                 <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 8px", borderRadius: 8 }}>
-                  <span style={{ fontSize: 13, color: T.textSecondary }}>{label}</span>
+                  <span style={{ fontSize: 13, color: SB.text }}>{label}</span>
                   <span style={{ fontSize: 13, fontWeight: 700, color }}>{value}</span>
                 </div>
               ))}
               {/* progress bar */}
               <div style={{ margin: "14px 8px 0" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 11, color: T.textMuted }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 11, color: SB.muted }}>
                   <span>Completion</span>
-                  <span style={{ fontWeight: 700, color: T.green }}>{completionRate}%</span>
+                  <span style={{ fontWeight: 700, color: brighten(T.green) }}>{completionRate}%</span>
                 </div>
-                <div style={{ height: 6, background: T.borderLight, borderRadius: 99, overflow: "hidden" }}>
+                <div style={{ height: 6, background: "rgba(255,255,255,0.08)", borderRadius: 99, overflow: "hidden" }}>
                   <div style={{ height: "100%", width: `${completionRate}%`, borderRadius: 99, background: "linear-gradient(90deg, #f7931e, #16a34a)", transition: "width .6s cubic-bezier(.22,1,.36,1)" }} />
                 </div>
               </div>
@@ -451,8 +476,8 @@ await API.patch(
           </nav>
 
           {/* logout */}
-          <div style={{ padding: "14px 12px", borderTop: `1px solid ${T.borderLight}` }}>
-            <button className="logout-btn" onClick={handleLogout} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px", borderRadius: 9, color: T.textSecondary, background: "transparent", fontSize: 13.5, fontWeight: 500 }}>
+          <div style={{ padding: "14px 12px", borderTop: `1px solid ${SB.border}` }}>
+            <button className="logout-btn" onClick={handleLogout} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px", borderRadius: 9, color: SB.text, background: "transparent", fontSize: 13.5, fontWeight: 500 }}>
               <LogOut size={15} strokeWidth={1.8} /> Sign Out
             </button>
           </div>

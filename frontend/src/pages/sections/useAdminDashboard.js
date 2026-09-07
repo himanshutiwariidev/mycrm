@@ -654,7 +654,7 @@ export default function useAdminDashboard() {
     { id: "clients", label: "Clients", Icon: Building2, section: "overview", color: "#2563eb" },
     { id: "projects", label: "Projects", Icon: Briefcase, section: "overview", color: "#0f766e" },
     { id: "expenses", label: "Expenses", Icon: Receipt, section: "overview", color: "#16a34a" },
-    { id: "meetings", label: "Meeting Scheduler", Icon: CalendarClock, section: "overview", color: "#f7931e" },
+    { id: "meetings", label: "Meetings", Icon: CalendarClock, section: "overview", color: "#f7931e" },
     { id: "salary", label: "Salary", Icon: Briefcase, section: "manage", color: "#9333ea" },
     { id: "createTask", label: "New Task", Icon: Plus, section: "manage", color: "#0891b2" },
     { id: "createProject", label: "New Project", Icon: Plus, section: "manage", color: "#0f766e" },

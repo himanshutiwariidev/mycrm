@@ -391,7 +391,7 @@ const generateContractPdf = async ({ client, contract }) => {
         .font("Helvetica-Bold")
         .fontSize(8)
         .fillColor(colors.orangeDark)
-        .text("visit us:himanshutiwari.vercel.app", page.width - 222, y + 16, { width: 170, align: "right" });
+        .text("visit us:cybertricksmedia.com", page.width - 222, y + 16, { width: 170, align: "right" });
     };
 
     const drawCard = (x, y, width, height, fill = colors.white) => {

@@ -38,6 +38,11 @@ export const updateClient = (clientId, updateData) =>
 export const deleteClient = (clientId) =>
   API.delete(`/clients/${clientId}`);
 
+// axios sends a DELETE body via the `data` config key, not a third
+// positional argument like POST/PUT.
+export const bulkDeleteClients = (ids) =>
+  API.delete("/clients/bulk-delete", { data: { ids } });
+
 export const getClientActivity = (clientId) =>
   API.get(`/clients/${clientId}/activity`);
 

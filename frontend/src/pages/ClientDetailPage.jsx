@@ -387,7 +387,7 @@ export default function ClientDetailPage() {
               <h1>{client.companyName || client.clientName}</h1>
               {client.companyName && <p className="cd-company"><User size={13} strokeWidth={2} /> {client.clientName}</p>}
               <div className="cd-meta-row">
-                <span>Sales Person: <strong>{client.salesPerson?.name || "Unassigned"}</strong></span>
+                <span>Sales Person: <strong>{client.salesPerson?.name || client.salesPersonName || "Unassigned"}</strong></span>
                 <span>Created: {fmtDate(client.createdAt)}</span>
                 <span>Updated: {fmtDate(client.updatedAt)}</span>
               </div>
@@ -468,7 +468,7 @@ export default function ClientDetailPage() {
 
           <Section title="Lead Information">
             <Field label="Lead Source" value={client.leadSource} />
-            <Field label="Sales Person" value={client.salesPerson?.name} />
+            <Field label="Sales Person" value={client.salesPerson?.name || client.salesPersonName} />
             <Field label="Status" value={client.status} />
           </Section>
 
