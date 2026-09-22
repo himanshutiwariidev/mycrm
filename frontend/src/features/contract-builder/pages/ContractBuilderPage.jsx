@@ -1,5 +1,5 @@
 import React from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { createContract, updateContract, uploadContractPi } from "@/services/clientApi";
@@ -11,10 +11,10 @@ import { useBeforeUnloadWarning } from "../hooks/useBeforeUnloadWarning";
 import { buildContractPayload } from "../utils/buildContractPayload";
 import WizardShell from "../components/WizardShell";
 
-function ContractBuilderInner({ clientId, contractId }) {
+function ContractBuilderInner({ clientId, contractId, renewFromContractId }) {
   const navigate = useNavigate();
   const { state, dispatch, ACTIONS } = useContractWizard();
-  const { loading, loadError, client } = useContractDraft({ clientId, contractId, dispatch });
+  const { loading, loadError, client } = useContractDraft({ clientId, contractId, renewFromContractId, dispatch });
 
   useAutosave({ state, dispatch });
   useBeforeUnloadWarning(state.status.isDirty);
@@ -41,6 +41,18 @@ function ContractBuilderInner({ clientId, contractId }) {
         }
       }
 
+      // This wizard session started from "Renew Contract" — the new contract
+      // is saved above; now close the loop by marking the OLD one renewed so
+      // it stops showing up as an open renewal case on the dashboard. Doesn't
+      // block success if it fails — the new contract is already safely saved.
+      if (!isEdit && state.meta.renewedFromContractId) {
+        try {
+          await updateContract(state.meta.renewedFromContractId, { renewalStatus: "Completed" });
+        } catch (renewErr) {
+          toast.error("Contract renewed, but the original contract's renewal status couldn't be updated");
+        }
+      }
+
       localStorage.removeItem(draftKey(clientId, contractId));
       dispatch({ type: ACTIONS.SUBMIT_SUCCESS, payload: { contractId: savedContractId } });
       toast.success(isEdit ? "Contract updated successfully" : "Contract created — visible to the client in their portal");
@@ -60,7 +72,7 @@ function ContractBuilderInner({ clientId, contractId }) {
     );
   }
 
-  if (loadError && contractId) {
+  if (loadError && (contractId || renewFromContractId)) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background text-foreground">
         <p className="text-sm text-destructive">{loadError}</p>
@@ -76,10 +88,12 @@ function ContractBuilderInner({ clientId, contractId }) {
 
 export default function ContractBuilderPage() {
   const { clientId, contractId } = useParams();
+  const [searchParams] = useSearchParams();
+  const renewFromContractId = searchParams.get("renewFrom") || undefined;
 
   return (
     <ContractWizardProvider clientId={clientId}>
-      <ContractBuilderInner clientId={clientId} contractId={contractId} />
+      <ContractBuilderInner clientId={clientId} contractId={contractId} renewFromContractId={renewFromContractId} />
     </ContractWizardProvider>
   );
 }

@@ -110,6 +110,15 @@ const ContractSchema = new mongoose.Schema(
       enum: ["Upcoming", "Overdue", "Completed"],
       default: "Upcoming",
     },
+    // Set on the NEW contract when it was created via "Renew Contract" (picking
+    // an existing contract as a starting template) — the OLD contract this one
+    // continues from. That old contract's own renewalStatus is separately set
+    // to "Completed" at the same time, so it stops surfacing as an open
+    // renewal case once it's actually been renewed.
+    renewedFromContractId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Contract",
+    },
     sentAt: {
       type: Date,
     },

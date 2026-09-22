@@ -151,6 +151,7 @@ export default function ClientDetailPage() {
   const [statusSaving, setStatusSaving] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
+  const [showRenewPicker, setShowRenewPicker] = useState(false);
   const [formType, setFormType] = useState(null);
   const [selectedReminder, setSelectedReminder] = useState(null);
   const [manageContractId, setManageContractId] = useState(null);
@@ -505,9 +506,16 @@ export default function ClientDetailPage() {
         <div className="cd-panel">
           <div className="cd-panel-header">
             <h2>Contracts</h2>
-            <button className="btn-primary" onClick={() => navigate(`/clients/${clientId}/contracts/new`)}>
-              <Plus size={14} strokeWidth={2.4} /> Add New Contract
-            </button>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {contracts.length > 0 && (
+                <button className="btn-secondary" onClick={() => setShowRenewPicker(true)}>
+                  <RefreshCw size={14} strokeWidth={2.4} /> Renew Contract
+                </button>
+              )}
+              <button className="btn-primary" onClick={() => navigate(`/clients/${clientId}/contracts/new`)}>
+                <Plus size={14} strokeWidth={2.4} /> Add New Contract
+              </button>
+            </div>
           </div>
           {contracts.length === 0 ? (
             <EmptyState message="No contracts yet" />
@@ -1064,6 +1072,48 @@ export default function ClientDetailPage() {
             {formType === "reminder" && (
               <PaymentReminderForm clientId={clientId} reminder={selectedReminder} onSuccess={handleFormSuccess} onCancel={() => setShowForm(false)} />
             )}
+          </div>
+        </div>
+      )}
+
+      {showRenewPicker && (
+        <div className="modal-overlay" onClick={() => setShowRenewPicker(false)}>
+          <div className="modal-content" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+            <button className="close-btn" onClick={() => setShowRenewPicker(false)}>
+              <X size={18} strokeWidth={2} />
+            </button>
+            <h2 style={{ margin: "0 0 4px", fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 17, color: "#0f172a" }}>
+              Renew Contract
+            </h2>
+            <p style={{ margin: "0 0 18px", fontSize: 13, color: "#64748b" }}>
+              Pick which contract to renew — its services and pricing carry over into a new contract, and this one gets marked as renewed.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 360, overflowY: "auto" }}>
+              {contracts.map((contract) => (
+                <div
+                  key={contract._id}
+                  style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+                    padding: "12px 14px", border: "1px solid #e8eaf0", borderRadius: 10,
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13.5, color: "#0f172a" }}>{contract.projectName}</div>
+                    <div style={{ fontSize: 11.5, color: "#94a3b8", marginTop: 2 }}>
+                      {contract.contractNumber} · Ends {fmtDate(contract.validUntil)}
+                      {contract.renewalStatus === "Completed" && " · Already renewed"}
+                    </div>
+                  </div>
+                  <button
+                    className="btn-primary"
+                    style={{ flexShrink: 0, padding: "7px 14px", fontSize: 12.5 }}
+                    onClick={() => navigate(`/clients/${clientId}/contracts/new?renewFrom=${contract._id}`)}
+                  >
+                    Renew
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}

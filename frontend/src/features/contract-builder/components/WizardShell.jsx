@@ -62,8 +62,15 @@ export default function WizardShell({ client, onSubmit }) {
           <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-3 sm:px-6">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h1 className="text-lg font-semibold">{state.meta.contractId ? "Edit Contract" : "New Contract"}</h1>
-                {client && <p className="text-xs text-muted-foreground">for {client.clientName}</p>}
+                <h1 className="text-lg font-semibold">
+                  {state.meta.contractId ? "Edit Contract" : state.meta.renewedFromContractId ? "Renew Contract" : "New Contract"}
+                </h1>
+                {client && (
+                  <p className="text-xs text-muted-foreground">
+                    for {client.clientName}
+                    {state.meta.renewedFromContractId && " — the original contract will be marked as renewed once this is saved"}
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 {state.status.isAutosaving && (

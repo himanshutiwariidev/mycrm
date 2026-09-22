@@ -37,6 +37,9 @@ export function createInitialState({ clientId }) {
     meta: {
       clientId: clientId || "",
       contractId: null,
+      // Set only when this wizard session was started via "Renew Contract" —
+      // the existing contract this new one is renewing. See useContractDraft.js.
+      renewedFromContractId: null,
       clientName: "",
       clientEmail: "",
       projectName: "",

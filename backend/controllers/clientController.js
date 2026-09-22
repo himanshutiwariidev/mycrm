@@ -618,7 +618,7 @@ async function createTasksFromDeliverables(contract, client, createdByUserId) {
 
 exports.createContract = async (req, res) => {
   try {
-    const { clientId, projectName, projectDescription, projectScope, timeline, contractStartDate, projectAmount, preTaxAmount, gstEnabled, gstPercent, gstAmount, tdsEnabled, tdsPercent, tdsAmount, currency, paymentMethod, paymentTerms, validUntil, notes, deliverables, nextDueDate, selectedServices, pricingSummary, payments } = req.body;
+    const { clientId, projectName, projectDescription, projectScope, timeline, contractStartDate, projectAmount, preTaxAmount, gstEnabled, gstPercent, gstAmount, tdsEnabled, tdsPercent, tdsAmount, currency, paymentMethod, paymentTerms, validUntil, notes, deliverables, nextDueDate, selectedServices, pricingSummary, payments, renewedFromContractId } = req.body;
 
     if (!clientId || !projectName || !projectDescription || !projectAmount) {
       return res.status(400).json({ message: "Missing required fields: clientId, projectName, projectDescription, projectAmount" });
@@ -658,6 +658,7 @@ exports.createContract = async (req, res) => {
       pricingSummary: pricingSummary || {},
       payments: payments || [],
       contractStatus: "draft",
+      renewedFromContractId: renewedFromContractId || undefined,
     });
 
     // Auto-create one unassigned Task per deliverable so they show up in
@@ -1516,14 +1517,26 @@ exports.getDashboardStats = async (req, res) => {
       const notEndedBeforePeriodStart = !contract.validUntil || new Date(contract.validUntil) >= periodStart;
       if (!startedByPeriodEnd || !notEndedBeforePeriodStart) return;
 
-      (contract.selectedServices || []).forEach((cat) => {
-        if (!cat?.enabled || !(cat.selections || []).length) return;
+      const enabledCategories = (contract.selectedServices || []).filter((cat) => cat?.enabled && (cat.selections || []).length);
+      // Per-service "Selling Price" (Step 3 → Advanced) is what this amount is
+      // normally built from — but a contract entered quickly with only the
+      // top-level Contract Amount filled in (Step 1) and no itemized pricing
+      // sums to ₹0 here despite having a real, fully-paid amount. When that's
+      // true for every enabled category on the contract, fall back to
+      // splitting the contract's actual amount across them instead of
+      // showing a flatly wrong ₹0.
+      const rawContractTotal = enabledCategories.reduce(
+        (sum, cat) => sum + cat.selections.reduce((s, sel) => s + computeLeafFinalPrice(sel.advanced), 0),
+        0
+      );
+      const useContractAmountFallback = rawContractTotal <= 0 && (contract.projectAmount || 0) > 0;
+
+      enabledCategories.forEach((cat) => {
         if (serviceFilter && cat.categoryId !== serviceFilter) return;
 
-        const categoryAmount = cat.selections.reduce(
-          (sum, sel) => sum + computeLeafFinalPrice(sel.advanced),
-          0
-        );
+        const categoryAmount = useContractAmountFallback
+          ? contract.projectAmount / enabledCategories.length
+          : cat.selections.reduce((sum, sel) => sum + computeLeafFinalPrice(sel.advanced), 0);
         const bucket = serviceWiseMap.get(cat.categoryId) || { activeCases: 0, totalAmount: 0, cases: [] };
         bucket.activeCases += 1;
         bucket.totalAmount += categoryAmount;

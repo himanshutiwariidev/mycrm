@@ -52,6 +52,9 @@ export function buildContractPayload(state) {
     notes: state.meta.notes,
     selectedServices: enabledCategories,
     pricingSummary: state.pricingSummary,
+    ...(isNewContract && state.meta.renewedFromContractId
+      ? { renewedFromContractId: state.meta.renewedFromContractId }
+      : {}),
     // Recorded as a real payment so the Payments tab / receivedAmount stay in
     // sync with what was entered here, instead of a separate untracked number.
     // paymentDate defaults to today but is editable specifically so a
