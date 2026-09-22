@@ -549,6 +549,7 @@
   background: white;
   border-radius: 18px;
   padding: 28px;
+  width: 100%;
   max-width: 800px;
   max-height: 90vh;
   overflow-y: auto;

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import { createClient, updateClient, getUsersByRole } from "../services/clientApi";
-import SearchableSelect from "./SearchableSelect";
 import "./ClientForm.css";
 
 const ClientForm = ({ client, onSuccess, onCancel }) => {
@@ -35,6 +34,9 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
   const [error, setError] = useState("");
   const [salesUsers, setSalesUsers] = useState([]);
   const [salesUsersLoading, setSalesUsersLoading] = useState(true);
+  // "Other" lets a name that isn't in the sales-user list be typed directly
+  // instead of picked from the dropdown.
+  const [useOtherSalesPerson, setUseOtherSalesPerson] = useState(false);
 
   // A logged-in Sales Person is always force-assigned to their own new
   // clients on the backend (see createClient), regardless of what this form
@@ -69,7 +71,18 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     let isMounted = true;
     getUsersByRole("sales")
       .then((res) => {
-        if (isMounted) setSalesUsers(res.data || []);
+        if (!isMounted) return;
+        const users = res.data || [];
+        setSalesUsers(users);
+        // Editing a client whose sales person is a typed name (not one of
+        // these users) — switch straight to the "Other" text input instead
+        // of silently showing an empty dropdown.
+        setFormData((prev) => {
+          if (prev.salesPerson && !users.some((u) => u._id === prev.salesPerson)) {
+            setUseOtherSalesPerson(true);
+          }
+          return prev;
+        });
       })
       .catch(() => {
         if (isMounted) setSalesUsers([]);
@@ -88,6 +101,10 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     setFormData((prev) => ({
       ...prev,
       [name]: value,
+      // Clearing email disables the password field below — clear any
+      // already-typed password too, so a disabled input never shows a
+      // stale value that isn't actually going to be submitted.
+      ...(name === "email" && !value ? { password: "" } : {}),
     }));
   };
 
@@ -102,6 +119,14 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     if (!payload.leadSource) delete payload.leadSource;
     if (!payload.clientType) delete payload.clientType;
     if (!payload.salesPerson) delete payload.salesPerson;
+    // Email is optional — an empty string would fail the backend's email
+    // format validator (which only runs when the field is actually present),
+    // so omit it entirely rather than sending "".
+    if (!payload.email) delete payload.email;
+    // Portal login is keyed on email — the password field is disabled in the
+    // UI while email is blank, but guard here too in case a password was
+    // typed before the email field was cleared.
+    if (!formData.email) delete payload.password;
     // These are populated/relational/computed fields carried on `client` for display —
     // never echo them back on submit, or a populated object (e.g. assignedUser:{_id,name})
     // would get cast into its own ObjectId field and fail.
@@ -196,16 +221,46 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
             <label>Sales Person *</label>
             {isSalesUser ? (
               <input type="text" value={userName || "You"} disabled readOnly />
+            ) : useOtherSalesPerson ? (
+              <>
+                <input
+                  type="text"
+                  name="salesPerson"
+                  value={formData.salesPerson}
+                  onChange={handleChange}
+                  placeholder="Other"
+                  autoFocus
+                />
+                <small
+                  style={{ color: "#f7931e", fontSize: 12, cursor: "pointer", display: "inline-block", marginTop: 4 }}
+                  onClick={() => {
+                    setUseOtherSalesPerson(false);
+                    setFormData((prev) => ({ ...prev, salesPerson: "" }));
+                  }}
+                >
+                  ← Choose from list instead
+                </small>
+              </>
             ) : (
-              <SearchableSelect
-                options={salesUsers.map((u) => ({ value: u._id, label: u.name }))}
+              <select
                 value={formData.salesPerson}
-                onChange={(value) => setFormData((prev) => ({ ...prev, salesPerson: value }))}
-                placeholder={salesUsersLoading ? "Loading sales users..." : "Select or type a sales person"}
-                emptyLabel="No Sales User Found"
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (value === "__other__") {
+                    setUseOtherSalesPerson(true);
+                    setFormData((prev) => ({ ...prev, salesPerson: "" }));
+                  } else {
+                    setFormData((prev) => ({ ...prev, salesPerson: value }));
+                  }
+                }}
                 disabled={salesUsersLoading}
-                creatable
-              />
+              >
+                <option value="">{salesUsersLoading ? "Loading sales users..." : "Select sales person"}</option>
+                {salesUsers.map((u) => (
+                  <option key={u._id} value={u._id}>{u.name}</option>
+                ))}
+                <option value="__other__">Other</option>
+              </select>
             )}
           </div>
           <div className="form-group">
@@ -379,12 +434,19 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
             value={formData.password}
             onChange={handleChange}
             minLength={6}
-            placeholder={client?.hasLoginAccess ? "Set a new password to reset" : "Set a password so this client can log in and view their project"}
+            disabled={!formData.email}
+            placeholder={
+              !formData.email
+                ? "Add an email above to enable portal login"
+                : client?.hasLoginAccess
+                ? "Set a new password to reset"
+                : "Set a password so this client can log in and view their project"
+            }
           />
           <small style={{ color: "#6b7280", fontSize: 12 }}>
-            Must be at least 6 characters. Setting a password creates a login account for this client
-            (role: client) so they can sign in on the main login page and see only their own project,
-            deliverables, and payments.
+            {!formData.email
+              ? "Portal login is tied to the client's email — add one to set a password."
+              : "Must be at least 6 characters. Setting a password creates a login account for this client (role: client) so they can sign in on the main login page and see only their own project, deliverables, and payments."}
           </small>
         </div>
 

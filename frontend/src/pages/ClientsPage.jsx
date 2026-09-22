@@ -670,7 +670,7 @@ const ClientsPage = ({ embedded = false } = {}) => {
             {selectedClientIds.size > 0 && (
               <div className="bulk-action-bar">
                 <span className="bulk-action-bar-count">
-                  <CheckCircle2 size={16} strokeWidth={2.2} />
+                  
                   {selectedClientIds.size} client{selectedClientIds.size === 1 ? "" : "s"} selected
                 </span>
                 <div className="bulk-action-bar-actions">

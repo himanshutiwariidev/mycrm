@@ -38,19 +38,26 @@ exports.createClient = async (req, res) => {
   try {
     const { clientName, email, phone, companyName, gstNo,tanNo,salesPerson,leadSource,clientType,projectType, projectName, address, city, state, country, zipCode, contactPerson, designation, status, activeStatus, notes, password } = req.body;
 
-    if (!clientName || !email || !phone) {
-      return res.status(400).json({ message: "Client name, email, and phone are required" });
+    if (!clientName || !phone) {
+      return res.status(400).json({ message: "Client name and phone are required" });
     }
 
     if (password && password.length < 6) {
       return res.status(400).json({ message: "Login password must be at least 6 characters" });
     }
 
-    const normalizedEmail = email.toLowerCase().trim();
+    // Email is optional on a client — but portal login is keyed on it, so a
+    // client with no email can't be given one.
+    const normalizedEmail = email ? email.toLowerCase().trim() : undefined;
+    if (password && !normalizedEmail) {
+      return res.status(400).json({ message: "Email is required to enable portal login access" });
+    }
 
-    const existingClient = await Client.findOne({ email: normalizedEmail });
-    if (existingClient) {
-      return res.status(400).json({ message: "Client with this email already exists" });
+    if (normalizedEmail) {
+      const existingClient = await Client.findOne({ email: normalizedEmail });
+      if (existingClient) {
+        return res.status(400).json({ message: "Client with this email already exists" });
+      }
     }
 
     if (password) {
@@ -426,6 +433,10 @@ exports.updateClient = async (req, res) => {
     }
     if (!updatePayload.status && !updatePayload.activeStatus) {
       await logActivity(client._id, "client_updated", "Client details were updated");
+    }
+
+    if (password && !client.email) {
+      return res.status(400).json({ message: "Email is required to enable portal login access" });
     }
 
     if (password) {

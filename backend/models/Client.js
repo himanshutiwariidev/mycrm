@@ -6,9 +6,7 @@ const ClientSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
-    // Free-text fallback for when the sales person doesn't exist as a User
-    // yet — set only when `salesPerson` above isn't (mutually exclusive; see
-    // resolveSalesPersonFields in clientController.js).
+    
     salesPersonName: {
       type: String,
       trim: true,
@@ -37,6 +35,11 @@ const ClientSchema = new mongoose.Schema(
     email: {
       type: String,
       unique: true,
+      // Email is optional — sparse keeps the unique index from treating every
+      // client that has no email as colliding with every other one (a plain
+      // unique index treats a missing field as null for all of them, so the
+      // second client saved without an email would otherwise fail to insert).
+      sparse: true,
       lowercase: true,
       trim: true,
       match: [/^\S+@\S+\.\S+$/, "Invalid email format"],
