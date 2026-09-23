@@ -1215,6 +1215,17 @@ exports.deleteContract = async (req, res) => {
       return res.status(404).json({ message: "Contract not found" });
     }
 
+    // This contract was itself a renewal (see "Renew Contract") — deleting it
+    // undoes that renewal, so the original contract it renewed must stop
+    // being marked "Completed", or it silently vanishes from Renewal Cases
+    // forever even though it's unrenewed again. Reset to the schema default;
+    // the dashboard's own date-based logic re-derives Upcoming/Overdue from
+    // validUntil on every request, same as any contract that was never
+    // renewed at all.
+    if (contract.renewedFromContractId) {
+      await Contract.findByIdAndUpdate(contract.renewedFromContractId, { renewalStatus: "Upcoming" });
+    }
+
     return res.json({ message: "Contract deleted successfully" });
   } catch (error) {
     console.error("Error deleting contract:", error);
