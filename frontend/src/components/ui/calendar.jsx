@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { DayPicker } from "react-day-picker";
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
@@ -19,10 +19,17 @@ function Calendar({ className, classNames, showOutsideDays = true, fixedWeeks = 
         months: "flex flex-col sm:flex-row gap-2",
         month: "flex flex-col gap-4",
         month_caption: "flex justify-center pt-1 relative items-center w-full",
-        caption_label: "text-sm font-medium",
-        nav: "flex items-center justify-between absolute inset-x-1 top-1 z-10",
-        button_previous: cn(buttonVariants({ variant: "outline" }), "h-7 w-7 bg-transparent p-0 opacity-70 hover:opacity-100"),
-        button_next: cn(buttonVariants({ variant: "outline" }), "h-7 w-7 bg-transparent p-0 opacity-70 hover:opacity-100"),
+        caption_label: "flex items-center gap-1 text-sm font-medium",
+        // Month/year dropdowns (captionLayout="dropdown"): the native <select>
+        // sits invisibly on top of the styled label so it stays fully clickable.
+        dropdowns: "flex items-center gap-2",
+        dropdown_root: "relative inline-flex h-7 items-center rounded-md border border-input px-2 hover:bg-accent",
+        dropdown: "absolute inset-0 w-full cursor-pointer opacity-0",
+        // The nav bar spans the full width above the caption; let clicks pass
+        // through its empty middle so the month/year dropdowns stay clickable.
+        nav: "pointer-events-none flex items-center justify-between absolute inset-x-1 top-1 z-10",
+        button_previous: cn(buttonVariants({ variant: "outline" }), "pointer-events-auto h-7 w-7 bg-transparent p-0 opacity-70 hover:opacity-100"),
+        button_next: cn(buttonVariants({ variant: "outline" }), "pointer-events-auto h-7 w-7 bg-transparent p-0 opacity-70 hover:opacity-100"),
         month_grid: "w-full border-collapse space-x-1",
         weekdays: "flex",
         weekday: "text-muted-foreground rounded-md w-8 font-normal text-[0.8rem]",
@@ -37,8 +44,11 @@ function Calendar({ className, classNames, showOutsideDays = true, fixedWeeks = 
         ...classNames,
       }}
       components={{
-        Chevron: ({ orientation }) =>
-          orientation === "left" ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />,
+        Chevron: ({ orientation }) => {
+          if (orientation === "left") return <ChevronLeft className="h-4 w-4" />;
+          if (orientation === "down") return <ChevronDown className="h-3.5 w-3.5 opacity-60" />;
+          return <ChevronRight className="h-4 w-4" />;
+        },
       }}
       {...props}
     />

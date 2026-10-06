@@ -4,7 +4,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -12,7 +11,7 @@ import DateField from "../engine/DateField";
 import { useContractWizard } from "../context/useContractWizard";
 import { formatCurrency, computeContractTaxSummary } from "../config/pricing";
 
-export default function Step1ClientDetails({ client }) {
+export default function Step1ClientDetails() {
   const { state, dispatch, ACTIONS } = useContractWizard();
   const errors = state.validation.errorsByStep[1];
   const fieldErrors = errors?.error?.flatten?.().fieldErrors || {};
@@ -33,23 +32,6 @@ export default function Step1ClientDetails({ client }) {
 
   return (
     <div className="space-y-5">
-      <Card>
-        <CardHeader>
-          <CardTitle>Client</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap items-center gap-3">
-          {client ? (
-            <>
-              <Badge variant="secondary" className="text-sm">{client.clientName}</Badge>
-              <span className="text-sm text-muted-foreground">{client.email}</span>
-              {client.company && <span className="text-sm text-muted-foreground">&middot; {client.company}</span>}
-            </>
-          ) : (
-            <span className="text-sm text-muted-foreground">Loading client details...</span>
-          )}
-        </CardContent>
-      </Card>
-
       <Card>
         <CardHeader>
           <CardTitle>Project Details</CardTitle>
@@ -115,7 +97,7 @@ export default function Step1ClientDetails({ client }) {
         <CardHeader>
           <CardTitle>Contract Value</CardTitle>
         </CardHeader>
-        <CardContent className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${isEdit ? "lg:grid-cols-5" : "lg:grid-cols-6"}`}>
+        <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="space-y-1.5">
             <Label>Contract Amount *</Label>
             <div className="relative">
@@ -161,7 +143,6 @@ export default function Step1ClientDetails({ client }) {
                 onChange={(value) => setField("paymentDate", value)}
                 placeholder="Select payment date"
               />
-              <p className="text-xs text-muted-foreground">The actual date this amount was received — not today's date, if backdating.</p>
             </div>
           )}
           <div className="space-y-1.5">
@@ -200,7 +181,7 @@ export default function Step1ClientDetails({ client }) {
             />
           </div>
 
-          <div className={`grid grid-cols-1 gap-4 sm:col-span-2 sm:grid-cols-2 ${isEdit ? "lg:col-span-5" : "lg:col-span-6"}`}>
+          <div className="grid grid-cols-1 gap-4 sm:col-span-2 sm:grid-cols-2 lg:contents">
             <div className="space-y-2 rounded-lg border border-input p-3">
               <div className="flex items-center gap-2">
                 <Checkbox
@@ -269,7 +250,7 @@ export default function Step1ClientDetails({ client }) {
           </div>
 
           {state.meta.gstEnabled && (
-            <div className={`space-y-1.5 sm:col-span-2 ${isEdit ? "lg:col-span-5" : "lg:col-span-6"}`}>
+            <div className="space-y-1.5 sm:col-span-2 lg:col-span-4">
               <div className="flex items-center justify-between rounded-lg bg-muted/50 px-4 py-3">
                 <span className="text-sm text-muted-foreground">
                   Final Amount ({formatCurrency(baseAmount, state.meta.currency)} + GST {formatCurrency(gstAmount, state.meta.currency)})
@@ -279,7 +260,7 @@ export default function Step1ClientDetails({ client }) {
             </div>
           )}
 
-          <div className={`space-y-1.5 sm:col-span-2 ${isEdit ? "lg:col-span-5" : "lg:col-span-6"}`}>
+          <div className="space-y-1.5 sm:col-span-2 lg:col-span-4">
             <Label>Upload PI (Proforma Invoice)</Label>
             {state.piFile ? (
               <div className="flex items-center justify-between gap-2 rounded-lg border border-input bg-muted/50 px-3 py-2 text-sm">

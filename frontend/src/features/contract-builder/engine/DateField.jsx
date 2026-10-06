@@ -17,14 +17,20 @@ export default function DateField({ value, onChange, placeholder = "Pick a date"
           variant="outline"
           className={cn("w-full justify-start text-left font-normal", !dateValue && "text-muted-foreground")}
         >
-          <CalendarIcon className="mr-2 h-4 w-4" />
-          {dateValue ? format(dateValue, "PPP") : placeholder}
+          <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
+          <span className="truncate">{dateValue ? format(dateValue, "PPP") : placeholder}</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0">
         <Calendar
           mode="single"
           selected={dateValue}
+          // Month + year dropdowns so backdated dates (e.g. March 2024) don't
+          // need dozens of clicks through the month arrows.
+          captionLayout="dropdown"
+          defaultMonth={dateValue}
+          startMonth={new Date(2015, 0)}
+          endMonth={new Date(new Date().getFullYear() + 10, 11)}
           onSelect={(date) => onChange(date ? date.toISOString() : "")}
         />
       </PopoverContent>

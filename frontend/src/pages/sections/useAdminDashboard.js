@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Briefcase, Building2, CalendarClock, ClipboardList, Clock,
@@ -116,11 +116,19 @@ export default function useAdminDashboard() {
   const fetchExpenses = async () => { try { const { data } = await API.get("/expenses"); setExpenses(listFromResponse(data, "expenses")); } catch { /* dashboard keeps partial data when a widget fails */ } };
   const fetchMeetings = async () => { try { const { data } = await API.get("/meetings"); setMeetings(listFromResponse(data, "meetings")); } catch { /* dashboard keeps partial data when a widget fails */ } };
   const fetchActivityLog = async () => { try { const { data } = await API.get("/clients/activity/all"); setActivityLog(listFromResponse(data, "activity")); } catch { /* dashboard keeps partial data when a widget fails */ } };
+  // DashboardSection owns the date range and passes it in; no-arg refetches
+  // (e.g. after adding an expense) reuse the last range instead of silently
+  // falling back to "this month". The request counter drops stale responses,
+  // so a slower earlier request can't overwrite the selected range's numbers.
+  const dashboardRangeRef = useRef(null);
+  const dashboardRequestRef = useRef(0);
   const fetchDashboardStats = async (range) => {
+    if (range?.start && range?.end) dashboardRangeRef.current = { start: range.start, end: range.end };
+    const requestId = ++dashboardRequestRef.current;
     try {
-      const params = range?.start && range?.end ? { start: range.start, end: range.end } : undefined;
+      const params = dashboardRangeRef.current || undefined;
       const { data } = await API.get("/clients/dashboard-stats", { params });
-      setDashboardStats(data);
+      if (requestId === dashboardRequestRef.current) setDashboardStats(data);
     } catch { /* dashboard keeps partial data when a widget fails */ }
   };
 
@@ -129,7 +137,7 @@ export default function useAdminDashboard() {
     catch { /* dashboard keeps partial data when a widget fails */ }
   };
 
-  useEffect(() => { fetchUsers(); fetchTasks(); fetchClients(); fetchProjects(); fetchContracts(); fetchReminders(); fetchExpenses(); fetchMeetings(); fetchActivityLog(); fetchDashboardStats(); fetchLeaves(); }, []);
+  useEffect(() => { fetchUsers(); fetchTasks(); fetchClients(); fetchProjects(); fetchContracts(); fetchReminders(); fetchExpenses(); fetchMeetings(); fetchActivityLog(); fetchLeaves(); }, []);
 
   const handleLeaveDecision = async (leaveId, status) => {
     setLeaveActionId(leaveId);

@@ -1521,12 +1521,25 @@ exports.getDashboardStats = async (req, res) => {
     // Jan-Dec must still show up when the date picker is set to any month
     // inside that span, so this scans allContracts (unfiltered by createdAt)
     // rather than the createdAt-scoped `contracts` above.
-    allContracts.forEach((contract) => {
+    const isActiveInPeriod = (contract) => {
       const isActiveStatus = contract.contractStatus !== "rejected" && contract.contractStatus !== "expired";
-      if (!isActiveStatus) return;
+      if (!isActiveStatus) return false;
       const startedByPeriodEnd = !contract.contractStartDate || new Date(contract.contractStartDate) <= periodEnd;
       const notEndedBeforePeriodStart = !contract.validUntil || new Date(contract.validUntil) >= periodStart;
-      if (!startedByPeriodEnd || !notEndedBeforePeriodStart) return;
+      return startedByPeriodEnd && notEndedBeforePeriodStart;
+    };
+    // A contract whose renewal is itself active in this period has been
+    // superseded — count only the renewal, not both old and new. If the
+    // period ends before the renewal starts, the old one still counts.
+    const supersededContractIds = new Set(
+      allContracts
+        .filter((contract) => contract.renewedFromContractId && isActiveInPeriod(contract))
+        .map((contract) => String(contract.renewedFromContractId))
+    );
+
+    allContracts.forEach((contract) => {
+      if (!isActiveInPeriod(contract)) return;
+      if (supersededContractIds.has(String(contract._id))) return;
 
       const enabledCategories = (contract.selectedServices || []).filter((cat) => cat?.enabled && (cat.selections || []).length);
       // Per-service "Selling Price" (Step 3 → Advanced) is what this amount is
@@ -1781,27 +1794,25 @@ exports.getDashboardStats = async (req, res) => {
     const overdueBalanceDueCount = balanceDue.filter((b) => b.status === "Overdue").length;
 
     // ── Renewal Cases ────────────────────────────────────────────────────────
-    // One row per contract whose validUntil (the renewal date) falls in the
-    // selected range — PLUS any contract whose renewal date was in an earlier
-    // period but is still unrenewed, which keeps carrying forward into every
-    // later period's view (not just due-in-range) until an admin marks it
-    // "Completed". Unlike Balance Due, this isn't limited to just the actual
-    // current month — a missed renewal stays visible in every month you look
-    // at from its due date onward, since (unlike a payment) there's no
-    // natural point where it stops being relevant to flag.
+    // Pending renewals only: one row per not-yet-renewed contract whose
+    // validUntil (the renewal date) falls in the selected range — PLUS any
+    // whose renewal date was in an earlier period but is still unrenewed,
+    // which keeps carrying forward into every later period's view until it's
+    // renewed. Already-renewed ("Completed") contracts are excluded — the
+    // renewal contract itself carries on from there. Unlike Balance Due,
+    // this isn't limited to just the actual current month — a missed renewal
+    // stays visible in every month you look at from its due date onward.
     const renewalCases = allContracts
-      .filter((contract) => contract.validUntil)
+      .filter((contract) => contract.validUntil && contract.renewalStatus !== "Completed")
       .filter((contract) => {
         const validUntil = new Date(contract.validUntil);
         const dueInSelectedPeriod = validUntil >= periodStart && validUntil <= periodEnd;
-        const stillUnrenewedFromEarlier = contract.renewalStatus !== "Completed" && validUntil < periodStart;
+        const stillUnrenewedFromEarlier = validUntil < periodStart;
         return dueInSelectedPeriod || stillUnrenewedFromEarlier;
       })
       .map((contract) => {
         const validUntil = contract.validUntil ? new Date(contract.validUntil) : null;
-        const status = contract.renewalStatus === "Completed"
-          ? "Completed"
-          : validUntil && validUntil < now ? "Overdue" : "Upcoming";
+        const status = validUntil && validUntil < now ? "Overdue" : "Upcoming";
         const serviceName = (contract.selectedServices || [])
           .filter((cat) => cat?.enabled && (cat.selections || []).length)
           .map((cat) => SERVICE_CATEGORY_LABELS[cat.categoryId] || cat.categoryId)
