@@ -16,7 +16,7 @@ const DEFAULT_ROW = { quantity: 4, period: "month" };
  * Included" checklist, where Graphic Creatives and AI Reels can each have
  * their own quantity and week/month/year cadence instead of one shared value.
  */
-export default function PerItemQuantityField({ field, values, value, onChange }) {
+export default function PerItemQuantityField({ field, values, value, onChange, disabled = false }) {
   const selectedValues = values?.[field.sourceField] || [];
   const labelByValue = new Map((field.sourceOptions || []).map((o) => [o.value, o.label]));
   const rows = value || {};
@@ -28,6 +28,8 @@ export default function PerItemQuantityField({ field, values, value, onChange })
   // Committing the default as soon as an item is selected keeps what's
   // saved in sync with what's displayed.
   useEffect(() => {
+    // Read-only (e.g. mirrored from another platform): the source owns these rows.
+    if (disabled) return;
     const missing = selectedValues.filter((itemValue) => !rows[itemValue]);
     if (missing.length === 0) return;
     const next = { ...rows };
@@ -56,10 +58,11 @@ export default function PerItemQuantityField({ field, values, value, onChange })
               type="number"
               min="0"
               className="w-20 shrink-0"
+              disabled={disabled}
               value={row.quantity}
               onChange={(e) => updateRow(itemValue, { quantity: e.target.value === "" ? "" : Number(e.target.value) })}
             />
-            <Select value={row.period} onValueChange={(period) => updateRow(itemValue, { period })}>
+            <Select value={row.period} onValueChange={(period) => updateRow(itemValue, { period })} disabled={disabled}>
               <SelectTrigger className="w-32 shrink-0">
                 <SelectValue />
               </SelectTrigger>

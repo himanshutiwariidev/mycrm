@@ -10,6 +10,7 @@ import ClientDetailPage from "./pages/ClientDetailPage";
 import HrDashboard from "./pages/HrDashboard";
 import ManagerDashboard from "./pages/ManagerDashboard";
 import SalesDashboard from "./pages/SalesDashboard";
+import TelecallerDashboard from "./pages/TelecallerDashboard";
 import ClientDashboard from "./pages/ClientDashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ContractBuilderPage from "./features/contract-builder/pages/ContractBuilderPage";
@@ -114,6 +115,15 @@ function App() {
           element={
             <ProtectedRoute role="sales">
               <SalesDashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/telecaller"
+          element={
+            <ProtectedRoute role="telecaller">
+              <TelecallerDashboard />
             </ProtectedRoute>
           }
         />

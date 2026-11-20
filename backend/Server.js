@@ -33,6 +33,8 @@ const leaveRoutes = require("./routes/leaveRoutes");
 const adminRecoveryRoutes = require("./routes/adminRecoveryRoutes");
 const expenseRoutes = require("./routes/expenseRoutes");
 const meetingRoutes = require("./routes/meetingRoutes");
+const clientVisitRoutes = require("./routes/clientVisitRoutes");
+const telecallingRoutes = require("./routes/telecallingRoutes");
 
 // ── Controllers used directly on Server-level routes ───────────────────────
 const { loginUser, logoutUser } = require("./controllers/userController");
@@ -146,6 +148,8 @@ app.use("/api/leaves", leaveRoutes);
 app.use("/api/admin-recovery", adminRecoveryRoutes);
 app.use("/api/expenses", expenseRoutes);
 app.use("/api/meetings", meetingRoutes);
+app.use("/api/client-visits", clientVisitRoutes);
+app.use("/api/telecalling", telecallingRoutes);
 
 // ── Shared login entry-point (rate-limited + validated) ──────────────────────
 // This route is also exposed at POST /api/users/login (inside userRoutes) for

@@ -13,6 +13,7 @@ const Expense = require("../models/Expense");
 const clientService = require("../services/clientService");
 const { computeDeliverableStats, decorateContract } = require("../utils/deliverableStats");
 const { logActivity } = require("../utils/activityLogger");
+const { getOwnedClientIds } = require("../middleware/clientOwnership");
 const ActivityLog = require("../models/ActivityLog");
 const { computeLeafFinalPrice, SERVICE_CATEGORY_LABELS } = require("../utils/pricingHelpers");
 
@@ -598,7 +599,7 @@ async function createTasksFromDeliverables(contract, client, createdByUserId) {
     // redundant category prefix since the task title already carries it.
     const prefix = `${categoryLabel} — `;
     const itemTitle = d.title?.startsWith(prefix) ? d.title.slice(prefix.length) : d.title;
-    groups.get(categoryId).items.push({ title: itemTitle, quantity: d.quantity, frequency: d.frequency, unit: d.unit, metadata: d.metadata, categoryId: d.categoryId });
+    groups.get(categoryId).items.push({ title: itemTitle, quantity: d.quantity, frequency: d.frequency, unit: d.unit, metadata: d.metadata, categoryId: d.categoryId, contractDeliverableId: d._id });
   });
 
   const tasks = Array.from(groups.values()).map((group) => {
@@ -1088,10 +1089,21 @@ exports.importClients = async (req, res) => {
   }
 };
 
+// List filter for client-scoped collections (contracts, reminders): admin sees
+// everything (optionally narrowed to ?clientId), while a sales person only
+// ever sees their own clients' records — a ?clientId they don't own matches nothing.
+async function scopedClientFilter(req) {
+  const { clientId } = req.query;
+  const owned = await getOwnedClientIds(req.user);
+  if (!owned) return clientId ? { clientId } : {};
+  const ownedSet = new Set(owned.map(String));
+  if (clientId) return { clientId: ownedSet.has(String(clientId)) ? clientId : { $in: [] } };
+  return { clientId: { $in: owned } };
+}
+
 exports.getAllContracts = async (req, res) => {
   try {
-    const { clientId } = req.query;
-    const filter = clientId ? { clientId } : {};
+    const filter = await scopedClientFilter(req);
     const contracts = await Contract.find(filter).populate("clientId", "clientName email").sort({ createdAt: -1 });
 
     return res.json({ contracts: contracts.map(decorateContract), total: contracts.length });
@@ -1480,6 +1492,12 @@ exports.getDashboardStats = async (req, res) => {
     let collectedThisMonth = 0;
     let bankCollection = 0;
     let cashCollection = 0;
+    // Revenue by case type: money collected this period on contracts created
+    // via "Renew Contract" (renewedFromContractId set) vs brand-new cases.
+    let renewalCaseRevenue = 0;
+    let newCaseRevenue = 0;
+    const renewalCaseContractIds = new Set();
+    const newCaseContractIds = new Set();
 
     // ── Service Wise Active Cases ────────────────────────────────────────────
     // "Active" = contractStatus is sent or accepted (a live, non-terminal-
@@ -1600,6 +1618,14 @@ exports.getDashboardStats = async (req, res) => {
         if (paidOn >= periodStart && paidOn <= periodEnd) {
           collectedThisMonth += payment.amount || 0;
 
+          if (contract.renewedFromContractId) {
+            renewalCaseRevenue += payment.amount || 0;
+            renewalCaseContractIds.add(String(contract._id));
+          } else {
+            newCaseRevenue += payment.amount || 0;
+            newCaseContractIds.add(String(contract._id));
+          }
+
           // Revenue Summary: Cash is the "Cash" method exactly; every other
           // recorded method (NEFT, RTGS, Bank Draft, UPI, Cheque, Card Swap,
           // Other, and legacy values like Bank Transfer/Card/Razorpay) is
@@ -1674,36 +1700,61 @@ exports.getDashboardStats = async (req, res) => {
     const totalExpenses = expensesInRange.reduce((sum, e) => sum + (e.amount || 0), 0);
     const netProfit = totalRevenue - totalExpenses;
 
-    // "vs last month" on the three stat cards must compare against whatever
-    // period is actually selected — an immediately-preceding window of the
-    // same length — not always real-calendar this-month-vs-last-month
-    // (that fixed comparison stayed pinned to "55%" no matter what the admin
-    // picked in the date-range filter, since it never looked at periodStart/
-    // periodEnd at all). Scans the already-fetched allContracts/allExpenses
-    // (unfiltered) rather than issuing new queries.
-    const periodLengthMs = periodEnd.getTime() - periodStart.getTime() + 1;
-    const previousPeriodEnd = new Date(periodStart.getTime() - 1);
-    const previousPeriodStart = new Date(previousPeriodEnd.getTime() - periodLengthMs + 1);
-
-    let previousPeriodCollected = 0;
-    allContracts.forEach((contract) => {
-      contract.payments.forEach((payment) => {
-        if (!payment.paymentDate) return;
-        const paidOn = new Date(payment.paymentDate);
-        if (paidOn >= previousPeriodStart && paidOn <= previousPeriodEnd) {
-          previousPeriodCollected += payment.amount || 0;
-        }
-      });
-    });
-    let previousPeriodExpenses = 0;
-    allExpenses.forEach((expense) => {
-      if (!expense.expenseDate) return;
-      const paidOn = new Date(expense.expenseDate);
-      if (paidOn >= previousPeriodStart && paidOn <= previousPeriodEnd) {
-        previousPeriodExpenses += expense.amount || 0;
+    // ── Comparison trend (stat-card sparklines + "% from last month") ────────
+    // One point per period — the selected period and the 6 equal periods
+    // before it — so each sparkline's final segment IS the "vs previous
+    // period" comparison printed beside it: the line rises exactly when the %
+    // is positive. (A day-by-day line inside the current period always sagged
+    // toward ₹0 at the end of an in-progress month, contradicting a "+152%".)
+    //
+    // A range covering whole calendar months (e.g. This Month = Nov 1–30)
+    // steps back by calendar months, so "from last month" compares with ALL of
+    // October rather than the 30 days before Nov 1 (which skipped Oct 1). Any
+    // other range steps back by its exact length. Scans the already-fetched
+    // allContracts/allExpenses (unfiltered) rather than issuing new queries.
+    const shiftPeriodBack = (k) => {
+      const endNext = new Date(periodEnd.getTime() + 1);
+      const startsOnFirst = periodStart.getDate() === 1 && periodStart.getHours() === 0 && periodStart.getMinutes() === 0;
+      const endsOnLastDay = endNext.getDate() === 1 && endNext.getHours() === 0 && endNext.getMinutes() === 0 && endNext.getSeconds() === 0;
+      if (startsOnFirst && endsOnLastDay) {
+        const months = (endNext.getFullYear() - periodStart.getFullYear()) * 12 + (endNext.getMonth() - periodStart.getMonth());
+        const s = new Date(periodStart.getFullYear(), periodStart.getMonth() - k * months, 1);
+        const e = new Date(endNext.getFullYear(), endNext.getMonth() - k * months, 1);
+        return { start: s, end: new Date(e.getTime() - 1), months };
       }
-    });
-    const previousPeriodProfit = previousPeriodCollected - previousPeriodExpenses;
+      const len = periodEnd.getTime() - periodStart.getTime() + 1;
+      return { start: new Date(periodStart.getTime() - k * len), end: new Date(periodEnd.getTime() - k * len), months: 0 };
+    };
+    const collectedBetween = (from, to) => allContracts.reduce((sum, contract) => sum + contract.payments.reduce((s, payment) => {
+      if (!payment.paymentDate) return s;
+      const paidOn = new Date(payment.paymentDate);
+      return paidOn >= from && paidOn <= to ? s + (payment.amount || 0) : s;
+    }, 0), 0);
+    const expensesBetween = (from, to) => allExpenses.reduce((sum, expense) => {
+      if (!expense.expenseDate) return sum;
+      const spentOn = new Date(expense.expenseDate);
+      return spentOn >= from && spentOn <= to ? sum + (expense.amount || 0) : sum;
+    }, 0);
+    const trendLabel = ({ start, end, months }) => {
+      if (months === 1) return start.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+      if (months === 12 && start.getMonth() === 0) return String(start.getFullYear());
+      return `${start.toLocaleDateString("en-US", { day: "numeric", month: "short" })} – ${end.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}`;
+    };
+
+    const COMPARISON_POINTS = 7;
+    const comparisonTrend = [];
+    for (let k = COMPARISON_POINTS - 1; k >= 0; k -= 1) {
+      const window = shiftPeriodBack(k);
+      // The current period uses the exact card totals so the last point, the
+      // % change and the big number can never disagree.
+      const collected = k === 0 ? totalRevenue : collectedBetween(window.start, window.end);
+      const expenses = k === 0 ? totalExpenses : expensesBetween(window.start, window.end);
+      comparisonTrend.push({ label: trendLabel(window), collected, expenses, profit: collected - expenses });
+    }
+    const previousPoint = comparisonTrend[COMPARISON_POINTS - 2];
+    const previousPeriodCollected = previousPoint.collected;
+    const previousPeriodExpenses = previousPoint.expenses;
+    const previousPeriodProfit = previousPoint.profit;
 
     // Populate the period-scoped trend buckets declared above.
     allContracts.forEach((contract) => {
@@ -2021,6 +2072,18 @@ exports.getDashboardStats = async (req, res) => {
         bank: bankCollection,
         cash: cashCollection,
       },
+      // Splits totalRevenue (always renewal + new === totalRevenue).
+      revenueByCaseType: {
+        renewal: Math.round(renewalCaseRevenue * 100) / 100,
+        new: Math.round(newCaseRevenue * 100) / 100,
+        renewalContracts: renewalCaseContractIds.size,
+        newContracts: newCaseContractIds.size,
+      },
+      // Quick Stats: all-time client count (totalClients above is only the
+      // clients created in the selected period, i.e. "New Clients"), and how
+      // many renewals were actually done (renewal contracts created) in it.
+      totalClientsAllTime: await Client.countDocuments(),
+      renewalsDoneCount: contracts.filter((c) => c.renewedFromContractId).length,
       renewalCases,
       totalRenewalCases,
       totalRenewalRevenue,
@@ -2035,6 +2098,7 @@ exports.getDashboardStats = async (req, res) => {
       })),
       monthlyTrend,
       periodTrend,
+      comparisonTrend,
       trendTotalCollected,
       trendTotalOutstanding,
       currentMonthCollected: currentMonthBucket.collected,
@@ -2124,8 +2188,7 @@ exports.createPaymentReminder = async (req, res) => {
 
 exports.getAllReminders = async (req, res) => {
   try {
-    const { clientId } = req.query;
-    const filter = clientId ? { clientId } : {};
+    const filter = await scopedClientFilter(req);
     const reminders = await PaymentReminder.find(filter).populate("clientId", "clientName email").sort({ createdAt: -1 });
 
     return res.json({ reminders, total: reminders.length });

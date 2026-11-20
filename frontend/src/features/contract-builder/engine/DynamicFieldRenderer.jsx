@@ -95,7 +95,7 @@ export default function DynamicFieldRenderer({ fields = [], values = {}, onChang
               </Select>
             )}
             {field.type === FIELD_TYPES.MULTISELECT && (
-              <MultiSelectField options={field.options || []} value={value || []} onChange={set} />
+              <MultiSelectField options={field.options || []} value={value || []} onChange={set} disabled={field.readOnly} />
             )}
             {field.type === FIELD_TYPES.TAGS && <TagsInput value={value || []} onChange={set} />}
             {field.type === FIELD_TYPES.DATE && <DateField value={value} onChange={set} />}
@@ -107,7 +107,7 @@ export default function DynamicFieldRenderer({ fields = [], values = {}, onChang
             )}
             {field.type === FIELD_TYPES.FILE && <AttachmentUploader value={value || []} onChange={set} />}
             {field.type === FIELD_TYPES.PER_ITEM_QUANTITY && (
-              <PerItemQuantityField field={field} values={values} value={value} onChange={set} />
+              <PerItemQuantityField field={field} values={values} value={value} onChange={set} disabled={field.readOnly} />
             )}
           </FieldShell>
         );

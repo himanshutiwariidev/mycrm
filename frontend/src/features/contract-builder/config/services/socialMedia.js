@@ -32,11 +32,20 @@ function toOptions(labels) {
   return labels.map((label) => ({ value: slugify(label), label }));
 }
 
-function buildPlatformPackage(platformLabel, serviceList, defaultUnitPrice) {
+// Fields a platform copies from another platform when the admin ticks
+// "Post the same content on" — the deliverables checklist and its
+// per-item quantities. Notes and pricing stay per-platform on purpose.
+const SHARED_CONTENT_FIELDS = ["deliverables", "itemQuantities"];
+
+function buildPlatformPackage(platformLabel, serviceList, defaultUnitPrice, shareGroup) {
   const deliverableOptions = toOptions(serviceList);
   return {
     id: "package",
     label: `${platformLabel} Content Package`,
+    // Platforms in the same share group offer the same deliverable options,
+    // so one can mirror another's deliverables + quantities (the same reels
+    // and posts cross-posted to Instagram, Facebook, LinkedIn, ...).
+    contentSharing: { group: shareGroup, platformLabel, fields: SHARED_CONTENT_FIELDS },
     fields: [
       { name: "deliverables", type: FIELD_TYPES.MULTISELECT, label: "Deliverables Included", options: deliverableOptions },
       // Each selected deliverable gets its own quantity + cadence (week/month/year)
@@ -56,11 +65,13 @@ export const socialMediaConfig = {
   description: "Platform-wise content creatives and video production.",
   kind: "tab-tree",
   groups: [
-    { id: "facebook", label: "Facebook", kind: "leaf-group", items: [buildPlatformPackage("Facebook", STANDARD_SOCIAL_SERVICES, 1500)] },
-    { id: "instagram", label: "Instagram", kind: "leaf-group", items: [buildPlatformPackage("Instagram", STANDARD_SOCIAL_SERVICES, 1500)] },
-    { id: "linkedin", label: "LinkedIn", kind: "leaf-group", items: [buildPlatformPackage("LinkedIn", STANDARD_SOCIAL_SERVICES, 1500)] },
-    { id: "threads", label: "Threads", kind: "leaf-group", items: [buildPlatformPackage("Threads", STANDARD_SOCIAL_SERVICES, 1500)] },
-    { id: "other", label: "Other", kind: "leaf-group", items: [buildPlatformPackage("Other", STANDARD_SOCIAL_SERVICES, 1500)] },
-    { id: "youtube", label: "YouTube", kind: "leaf-group", items: [buildPlatformPackage("YouTube", YOUTUBE_SERVICES, 2000)] },
+    { id: "facebook", label: "Facebook", kind: "leaf-group", items: [buildPlatformPackage("Facebook", STANDARD_SOCIAL_SERVICES, 1500, "standard")] },
+    { id: "instagram", label: "Instagram", kind: "leaf-group", items: [buildPlatformPackage("Instagram", STANDARD_SOCIAL_SERVICES, 1500, "standard")] },
+    { id: "linkedin", label: "LinkedIn", kind: "leaf-group", items: [buildPlatformPackage("LinkedIn", STANDARD_SOCIAL_SERVICES, 1500, "standard")] },
+    { id: "threads", label: "Threads", kind: "leaf-group", items: [buildPlatformPackage("Threads", STANDARD_SOCIAL_SERVICES, 1500, "standard")] },
+    { id: "other", label: "Other", kind: "leaf-group", items: [buildPlatformPackage("Other", STANDARD_SOCIAL_SERVICES, 1500, "standard")] },
+    // YouTube has its own deliverable list (Shorts, long videos, ...), so it
+    // sits alone in its share group and never offers/receives shared content.
+    { id: "youtube", label: "YouTube", kind: "leaf-group", items: [buildPlatformPackage("YouTube", YOUTUBE_SERVICES, 2000, "youtube")] },
   ],
 };

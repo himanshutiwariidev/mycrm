@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Briefcase, Building2, CalendarClock, ClipboardList, Clock,
-  LayoutDashboard, Plus, Receipt, UserPlus, Users,
+  Headset, LayoutDashboard, MapPin, Plus, Receipt, UserPlus, Users,
 } from "lucide-react";
 import API from "../../services/api";
 import {
@@ -663,6 +663,8 @@ export default function useAdminDashboard() {
     { id: "projects", label: "Projects", Icon: Briefcase, section: "overview", color: "#0f766e" },
     { id: "expenses", label: "Expenses", Icon: Receipt, section: "overview", color: "#16a34a" },
     { id: "meetings", label: "Meetings", Icon: CalendarClock, section: "overview", color: "#f7931e" },
+    { id: "clientVisits", label: "Client Visits", Icon: MapPin, section: "overview", color: "#dc2626" },
+    { id: "telecalling", label: "Telecalling", Icon: Headset, section: "overview", color: "#0891b2" },
     { id: "salary", label: "Salary", Icon: Briefcase, section: "manage", color: "#9333ea" },
     { id: "createTask", label: "New Task", Icon: Plus, section: "manage", color: "#0891b2" },
     { id: "createProject", label: "New Project", Icon: Plus, section: "manage", color: "#0f766e" },

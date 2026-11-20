@@ -166,4 +166,10 @@ const ClientSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.model("Client", ClientSchema);
+// Explicit collection name: the default "clients" collection is shared with an
+// unrelated tenant-aware system in this database, whose unique index on
+// (email, tenantId) lets only ONE email-less client exist (every one we save
+// is the same {email: null, tenantId: null} key) — so a second client without
+// an email failed to save. Same fix as Contract ("clientContracts"), Expense
+// and Meeting. Existing clients are moved by migrations/migrateClientsCollection.js.
+module.exports = mongoose.model("Client", ClientSchema, "crmClients");

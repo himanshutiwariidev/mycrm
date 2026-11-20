@@ -1,4 +1,7 @@
 const Task = require("../models/Task")
+const User = require("../models/User")
+const { syncTaskProgressToContract } = require("../utils/deliverableSync")
+const { logActivity } = require("../utils/activityLogger")
 
 exports.createTask = async(req,res)=>{
     try{
@@ -138,10 +141,35 @@ exports.updateDeliverableProgress = async (req, res) => {
     const requested = Number(delivered) || 0;
     const cap = deliverable.quantity ?? requested;
     const clamped = Math.max(0, Math.min(requested, cap));
+    const previousDelivered = deliverable.delivered || 0;
     deliverable.delivered = clamped;
+
+    // Push the change onto the originating contract deliverable too — the
+    // Sales and Admin panels read Contract.deliverables, not this task copy,
+    // so without this the user's/manager's progress never reached them.
+    // Runs before task.save() so a legacy task's matched contractDeliverableId
+    // is persisted in the same save. Best-effort: the task update stands even
+    // if the contract sync fails, but it's reported back as contractSynced.
+    let synced = null;
+    try {
+      synced = await syncTaskProgressToContract(task, deliverable, previousDelivered);
+    } catch (syncError) {
+      console.error("Failed to sync deliverable progress to contract:", syncError);
+    }
+
     await task.save();
 
-    res.json({ message: "Deliverable progress updated", task });
+    if (synced && clamped !== previousDelivered) {
+      const actor = await User.findById(req.user.id).select("name").lean().catch(() => null);
+      await logActivity(
+        task.clientId || synced.contract.clientId,
+        "deliverable_updated",
+        `${actor?.name || "A team member"} updated "${deliverable.title}" to ${clamped}/${deliverable.quantity ?? clamped} on "${synced.contract.projectName}"`,
+        { contractId: synced.contract._id, taskId: task._id }
+      );
+    }
+
+    res.json({ message: "Deliverable progress updated", task, contractSynced: !!synced });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

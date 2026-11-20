@@ -2,6 +2,7 @@ import { getFieldDefaultValue } from "../config/fieldDefinitions";
 import { COMMON_FIELDS } from "../config/commonFields";
 import { getLeafConfig } from "../utils/configLookup";
 import { computePricingSummary } from "../config/pricing";
+import { getSharedFields, getActiveLinkSource, pickSharedValues } from "../utils/contentSharing";
 
 export const ACTIONS = {
   HYDRATE_FROM_SERVER: "HYDRATE_FROM_SERVER",
@@ -12,6 +13,8 @@ export const ACTIONS = {
   SET_LEAF_ENABLED: "SET_LEAF_ENABLED",
   SET_LEAF_FIELD_VALUE: "SET_LEAF_FIELD_VALUE",
   SET_LEAF_ADVANCED_VALUE: "SET_LEAF_ADVANCED_VALUE",
+  LINK_LEAF: "LINK_LEAF",
+  UNLINK_LEAF: "UNLINK_LEAF",
   TOGGLE_ADVANCED_PANEL: "TOGGLE_ADVANCED_PANEL",
   ADD_ATTACHMENT: "ADD_ATTACHMENT",
   REMOVE_ATTACHMENT: "REMOVE_ATTACHMENT",
@@ -130,6 +133,12 @@ function syncGstAcrossSelections(selectedServices, gstPercent) {
   }));
 }
 
+function withoutLink(selection) {
+  // eslint-disable-next-line no-unused-vars
+  const { linkedFrom, ...rest } = selection;
+  return rest;
+}
+
 function recomputePricing(state) {
   return computePricingSummary(state.selectedServices, state.pricingSummary.currency);
 }
@@ -212,7 +221,14 @@ export function contractWizardReducer(state, action) {
           };
         }
         if (!enabled && existing) {
-          return { ...cat, selections: cat.selections.filter((s) => s.path !== path) };
+          // Platforms that were mirroring this one keep their current
+          // deliverables but become independent (editable) again.
+          return {
+            ...cat,
+            selections: cat.selections
+              .filter((s) => s.path !== path)
+              .map((s) => (s.linkedFrom === path ? withoutLink(s) : s)),
+          };
         }
         return cat;
       });
@@ -224,14 +240,83 @@ export function contractWizardReducer(state, action) {
 
     case ACTIONS.SET_LEAF_FIELD_VALUE: {
       const { categoryId, path, fieldName, value } = action.payload;
+      const isSharedField = getSharedFields(categoryId, path).includes(fieldName);
       const selectedServices = state.selectedServices.map((cat) => {
         if (cat.categoryId !== categoryId) return cat;
         return {
           ...cat,
-          selections: cat.selections.map((sel) =>
-            sel.path === path ? { ...sel, values: { ...sel.values, [fieldName]: value } } : sel
-          ),
+          selections: cat.selections.map((sel) => {
+            if (sel.path === path) {
+              // A linked platform's shared fields only ever come from its source.
+              if (isSharedField && getActiveLinkSource(cat.selections, sel)) return sel;
+              return { ...sel, values: { ...sel.values, [fieldName]: value } };
+            }
+            // Mirror the source's edit into every platform linked to it.
+            if (isSharedField && sel.linkedFrom === path) {
+              return { ...sel, values: { ...sel.values, [fieldName]: value } };
+            }
+            return sel;
+          }),
         };
+      });
+      return { ...state, selectedServices, status: { ...state.status, isDirty: true } };
+    }
+
+    case ACTIONS.LINK_LEAF: {
+      // Enables `targetPath` (if needed) and makes it follow `sourcePath`'s
+      // shared fields, e.g. Facebook posting the same content as Instagram.
+      const { categoryId, sourcePath, targetPath } = action.payload;
+      const sharedFields = getSharedFields(categoryId, sourcePath);
+      if (!sharedFields.length || sourcePath === targetPath) return state;
+
+      let changed = false;
+      let selectedServices = ensureCategory(state.selectedServices, categoryId);
+      selectedServices = selectedServices.map((cat) => {
+        if (cat.categoryId !== categoryId) return cat;
+        const selections = cat.selections || [];
+        const source = selections.find((s) => s.path === sourcePath);
+        // No chains: the source can't itself be linked, and the target can't
+        // be a source that other platforms already follow.
+        if (!source || getActiveLinkSource(selections, source)) return cat;
+        if (selections.some((s) => s.linkedFrom === targetPath)) return cat;
+
+        const mirrored = pickSharedValues(source.values, sharedFields);
+        const existing = selections.find((s) => s.path === targetPath);
+        changed = true;
+        if (existing) {
+          return {
+            ...cat,
+            enabled: true,
+            selections: selections.map((s) =>
+              s.path === targetPath ? { ...s, linkedFrom: sourcePath, values: { ...s.values, ...mirrored } } : s
+            ),
+          };
+        }
+        const leafConfig = getLeafConfig(categoryId, targetPath);
+        const { values, advanced } = leafConfig ? withLeafDefaults(leafConfig, state.meta) : { values: {}, advanced: {} };
+        return {
+          ...cat,
+          enabled: true,
+          selections: [
+            ...selections,
+            { path: targetPath, label: leafConfig?.label || targetPath, linkedFrom: sourcePath, values: { ...values, ...mirrored }, advanced },
+          ],
+        };
+      });
+      if (!changed) return state;
+
+      const next = { ...state, selectedServices, status: { ...state.status, isDirty: true } };
+      next.pricingSummary = recomputePricing(next);
+      return next;
+    }
+
+    case ACTIONS.UNLINK_LEAF: {
+      // Stops following the source but keeps the copied deliverables, so the
+      // admin can tweak this platform separately from where it left off.
+      const { categoryId, path } = action.payload;
+      const selectedServices = state.selectedServices.map((cat) => {
+        if (cat.categoryId !== categoryId) return cat;
+        return { ...cat, selections: cat.selections.map((s) => (s.path === path ? withoutLink(s) : s)) };
       });
       return { ...state, selectedServices, status: { ...state.status, isDirty: true } };
     }

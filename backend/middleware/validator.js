@@ -22,7 +22,7 @@ const handleValidationErrors = (req, res, next) => {
 // "manager" is creatable here too, but only by an admin caller (enforced in
 // userController.createUser, since this validator has no access to who's
 // calling — it only checks that the value is a structurally valid role).
-const VALID_USER_ROLES = ["user", "hr", "sales", "client", "manager"];
+const VALID_USER_ROLES = ["user", "hr", "sales", "client", "manager", "telecaller"];
 
 // ── 1. Login validator ──────────────────────────────────────────────────────
 // Applies to both POST /api/login and POST /api/users/login.

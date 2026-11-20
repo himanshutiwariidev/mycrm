@@ -37,6 +37,12 @@ deliverables:[{
   // a category-accurate icon when the title itself doesn't name a specific
   // brand/platform. Absent on legacy tasks.
   categoryId:{type:String},
+  // The Contract.deliverables[]._id this item was generated from, so progress
+  // recorded here can be synced back onto the contract that the Sales/Admin
+  // panels read (see backend/utils/deliverableSync.js). Absent on tasks
+  // created before this link existed — those are matched by title and
+  // backfilled on their first progress update.
+  contractDeliverableId:{type:mongoose.Schema.Types.ObjectId},
 }],
 },{timestamps:true});
 

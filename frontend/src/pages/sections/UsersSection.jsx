@@ -10,6 +10,7 @@ const ROLE_ACCENT = {
   manager: { color: "#7c3aed", bg: "#ede9fe", border: "#ddd6fe" },
   hr: { color: "#0d9488", bg: "#ccfbf1", border: "#99f6e4" },
   sales: { color: "#16a34a", bg: "#dcfce7", border: "#bbf7d0" },
+  telecaller: { color: "#0891b2", bg: "#cffafe", border: "#a5f3fc" },
   user: { color: "#d97706", bg: "#fffbeb", border: "#fde68a" },
   client: { color: "#db2777", bg: "#fce7f3", border: "#fbcfe8" },
 };
@@ -20,6 +21,7 @@ const ROLE_OPTIONS = [
   { value: "manager", label: "Manager" },
   { value: "hr", label: "HR" },
   { value: "sales", label: "Sales" },
+  { value: "telecaller", label: "Telecaller" },
   { value: "user", label: "User" },
   { value: "client", label: "Client" },
 ];

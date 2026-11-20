@@ -7,7 +7,12 @@
     "start": "node Server.js",
     "dev": "node Server.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "seed:admin": "node seedAdmin.js"
+    "seed:admin": "node seedAdmin.js",
+    "seed:sample-visits": "node seedSampleVisits.js",
+    "seed:sample-dashboard": "node seedSampleDashboard.js",
+    "seed:sample-telecalling": "node seedSampleTelecalling.js",
+    "seed:demo": "node seedDemo.js",
+    "migrate:clients": "node migrations/migrateClientsCollection.js"
   },
   "keywords": [],
   "author": "",

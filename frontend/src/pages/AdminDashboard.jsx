@@ -12,8 +12,10 @@ import CreateProjectSection from "./sections/CreateProjectSection";
 import CreateUserSection from "./sections/CreateUserSection";
 import ExpensesSection from "./sections/ExpensesSection";
 import CreateExpenseSection from "./sections/CreateExpenseSection";
-import MeetingsSection from "./sections/MeetingsSection";
 import CreateMeetingSection from "./sections/CreateMeetingSection";
+import ClientVisitsSection from "./sections/ClientVisitsSection";
+import TelecallingSection from "./sections/TelecallingSection";
+import AdminMeetingsHub from "./sections/AdminMeetingsHub";
 import DashboardModals from "./sections/DashboardModals";
 import useAdminDashboard from "./sections/useAdminDashboard";
 import { T } from "./sections/shared";
@@ -27,6 +29,7 @@ const ROLE_LABELS = {
   manager: "Manager",
   hr: "HR",
   sales: "Sales",
+  telecaller: "Telecaller",
 };
 
 // The sidebar is a dark panel against an otherwise light dashboard, so it
@@ -147,7 +150,11 @@ export default function AdminDashboard() {
       case "createExpense":
         return <CreateExpenseSection expenseForm={expenseForm} setExpenseForm={setExpenseForm} handleCreateExpense={handleCreateExpense} />;
       case "meetings":
-        return <MeetingsSection meetings={meetings} setTab={setTab} setDeleteMeeting={setDeleteMeeting} />;
+        return <AdminMeetingsHub meetings={meetings} setTab={setTab} setDeleteMeeting={setDeleteMeeting} />;
+      case "telecalling":
+        return <TelecallingSection />;
+      case "clientVisits":
+        return <ClientVisitsSection />;
       case "createMeeting":
         return <CreateMeetingSection meetingForm={meetingForm} setMeetingForm={setMeetingForm} handleCreateMeeting={handleCreateMeeting} />;
       case "createTask":
@@ -291,7 +298,10 @@ export default function AdminDashboard() {
             </div>
           </header>
 
-          <main style={{ padding: "30px 36px 64px", flex: 1 }}>
+          {/* The dashboard is sized to fit one screen (see DashboardSection.css,
+              which assumes this 16px top/bottom padding); other sections keep
+              the roomier default. */}
+          <main style={{ padding: tab === "dashboard" ? "16px 28px" : "30px 36px 64px", flex: 1 }}>
             {renderSection()}
           </main>
         </div>

@@ -149,6 +149,10 @@ export const deleteContractPi = (contractId) =>
 export const getDashboardStats = () =>
   API.get("/clients/dashboard-stats");
 
+// Sales person's own book only: renewals, balance due, deliverables (role: sales).
+export const getSalesDashboard = () =>
+  API.get("/clients/sales-dashboard");
+
 // ============= PAYMENT REMINDER OPERATIONS =============
 
 export const createPaymentReminder = (reminderData) =>

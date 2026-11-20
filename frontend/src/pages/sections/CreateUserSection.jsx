@@ -44,6 +44,7 @@ export default function CreateUserSection({
                       <option value="admin">Admin</option>
                       <option value="hr">HR</option>
                       <option value="sales">Sales</option>
+                      <option value="telecaller">Telecaller</option>
                     </>
                   )}
                 </select>

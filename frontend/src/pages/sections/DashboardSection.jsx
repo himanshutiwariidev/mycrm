@@ -1,12 +1,15 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Activity, AlertTriangle, Banknote, Bell, BarChart3, Calendar, CheckCircle2, ChevronDown, ChevronRight, Clock, CreditCard, Edit3, FileText,
-  IndianRupee, Inbox, Landmark, Layers, MapPin, MessageSquare, Package, Paperclip,
-  RefreshCw, Send, ShieldCheck, TrendingDown, TrendingUp, UserCheck, UserPlus, Wallet,
+  Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Banknote, BadgeIndianRupee, CalendarDays, ChartColumnBig,
+  ChartNoAxesColumnIncreasing, CircleAlert, Clock, Database, Handshake, Landmark, Lightbulb, RefreshCw,
+  UserPlus, Users, Wallet, Zap,
 } from "lucide-react";
-import { Area, AreaChart, ResponsiveContainer } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, LabelList, Pie, PieChart, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { T } from "./shared";
 import DateRangePicker, { computeRangeForPreset } from "../../components/DateRangePicker";
+import DashboardDetails from "./DashboardDetails";
+import { ACTIVITY_META, fmtCompactINR, fmtINR, fmtTimeAgo } from "./dashboardFormat";
+import "./DashboardSection.css";
 
 const DASHBOARD_RANGE_STORAGE_KEY = "crm_main_dashboard_date_range";
 
@@ -25,221 +28,355 @@ function loadStoredDashboardRange() {
   return { ...computeRangeForPreset("thisMonth"), presetKey: "thisMonth" };
 }
 
-const fmtINR = (v) => `₹${Math.round(v || 0).toLocaleString("en-IN")}`;
-const fmtShortDate = (v) => new Date(v).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-const fmtTimeAgo = (v) => {
-  const diffMs = Date.now() - new Date(v).getTime();
-  const mins = Math.round(diffMs / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return fmtShortDate(v);
+// Wording that follows the date-range picker, so "(This Month)" / "from last
+// month" stay truthful when the admin looks at a different period.
+const PERIOD_COPY = {
+  today: { short: "Today", overview: "today", compare: "from yesterday" },
+  yesterday: { short: "Yesterday", overview: "yesterday", compare: "from the day before" },
+  last7: { short: "Last 7 Days", overview: "the last 7 days", compare: "vs previous 7 days" },
+  last30: { short: "Last 30 Days", overview: "the last 30 days", compare: "vs previous 30 days" },
+  thisMonth: { short: "This Month", overview: "this month", compare: "from last month" },
+  lastMonth: { short: "Last Month", overview: "last month", compare: "from the month before" },
+  thisYear: { short: "This Year", overview: "this year", compare: "from last year" },
 };
 
-const RENEWAL_STATUS_COLORS = {
-  Upcoming: { color: "#2563eb", bg: "#dbeafe" },
-  Overdue: { color: "#dc2626", bg: "#fee2e2" },
-  Completed: { color: "#16a34a", bg: "#dcfce7" },
-};
+function periodCopy(range) {
+  const preset = PERIOD_COPY[range.presetKey];
+  if (preset) return preset;
+  const fmt = (d) => new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  const label = `${fmt(range.start)} – ${fmt(range.end)}`;
+  return { short: label, overview: label, compare: "vs previous period" };
+}
 
-const ACTIVITY_META = {
-  client_created: { Icon: UserPlus, color: "#16a34a" },
-  client_updated: { Icon: Edit3, color: "#2563eb" },
-  status_changed: { Icon: RefreshCw, color: "#f7931e" },
-  contract_created: { Icon: FileText, color: "#2563eb" },
-  contract_updated: { Icon: Edit3, color: "#2563eb" },
-  contract_sent: { Icon: Send, color: "#16a34a" },
-  deliverable_added: { Icon: Package, color: "#f7931e" },
-  deliverable_updated: { Icon: Package, color: "#2563eb" },
-  payment_added: { Icon: IndianRupee, color: "#16a34a" },
-  payment_deleted: { Icon: IndianRupee, color: "#dc2626" },
-  reminder_created: { Icon: Bell, color: "#f7931e" },
-  reminder_sent: { Icon: Send, color: "#16a34a" },
-  portal_enabled: { Icon: ShieldCheck, color: "#7c3aed" },
-  invoice_generated: { Icon: FileText, color: "#2563eb" },
-  user_assigned: { Icon: UserCheck, color: "#7c3aed" },
-  remark_added: { Icon: MessageSquare, color: "#0891b2" },
-  progress_updated: { Icon: TrendingUp, color: "#16a34a" },
-  pi_uploaded: { Icon: Paperclip, color: "#2563eb" },
-  pi_deleted: { Icon: Paperclip, color: "#dc2626" },
-};
+// Collapses a long daily trend into ≤10 points (summing neighbours) so the
+// small sparklines show direction instead of day-to-day noise.
+function resampleTrend(periodTrend, key, maxPoints = 10) {
+  if (periodTrend.length <= maxPoints) return periodTrend.map((m) => ({ value: m[key] || 0 }));
+  const chunk = Math.ceil(periodTrend.length / maxPoints);
+  const out = [];
+  for (let i = 0; i < periodTrend.length; i += chunk) {
+    out.push({ value: periodTrend.slice(i, i + chunk).reduce((sum, m) => sum + (m[key] || 0), 0) });
+  }
+  return out;
+}
 
-function StatCard({ Icon, iconBg, label, value, changePercent, changeIsGood, sparkline, sparklineColor, sparklineId }) {
-  const isUp = (changePercent || 0) >= 0;
+/** Round axis steps (1/2/2.5/5 × 10ⁿ) so ticks read 0, 1L, 2L, 3L — not 2.3L, 75K. */
+function niceTicks(max, target = 3) {
+  if (!(max > 0)) return [0, 1];
+  const raw = max / target;
+  const pow = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * pow).find((s) => s >= raw);
+  const top = Math.ceil(max / step) * step;
+  const ticks = [];
+  for (let t = 0; t <= top + step / 2; t += step) ticks.push(t);
+  return ticks;
+}
+
+/** Tracks an element's content-box size (for charts that need exact pixels). */
+function useElementSize() {
+  const ref = useRef(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setSize((s) => (Math.abs(s.width - width) < 1 && Math.abs(s.height - height) < 1 ? s : { width, height }));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, size];
+}
+
+/** Steps big ₹ figures down a size so crore/thousand-crore amounts still fit. */
+const valueFont = (text, base) => (text.length > 15 ? base - 5 : text.length > 13 ? base - 3 : base);
+
+const uniqueClients = (rows = []) => new Set(rows.map((r) => String(r.clientId?._id || r.clientId || r.contractId))).size;
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+function Sparkline({ data, color, id, width = 120, height = 44, title }) {
+  if (!data.some((d) => d.value)) return null;
   return (
-    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 18, padding: "22px 22px 16px", boxShadow: "0 1px 3px rgba(0,0,0,.04)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
-        <div style={{ width: 48, height: 48, borderRadius: 14, flexShrink: 0, background: iconBg, display: "grid", placeItems: "center" }}>
-          <Icon size={21} color="#fff" strokeWidth={2} />
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 13, color: T.textMuted, fontWeight: 500, marginBottom: 3 }}>{label}</div>
-          <div style={{ fontSize: 23, fontWeight: 700, color: T.textPrimary, fontFamily: "'Inter', sans-serif", lineHeight: 1.2 }}>{fmtINR(value)}</div>
-          <div style={{ fontSize: 12, fontWeight: 700, color: changeIsGood ? T.green : T.red, display: "flex", alignItems: "center", gap: 4, marginTop: 4 }}>
-            {isUp ? <TrendingUp size={12} strokeWidth={2.4} /> : <TrendingDown size={12} strokeWidth={2.4} />}
-            {Math.abs(changePercent || 0)}%
-            <span style={{ color: T.textMuted, fontWeight: 500 }}>vs previous period</span>
-          </div>
-        </div>
-      </div>
-      <ResponsiveContainer width="100%" height={48}>
-        <AreaChart data={sparkline} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
+    <div className="sad-spark" style={{ width, height }} aria-hidden="true" title={title}>
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 5, right: 5, left: 3, bottom: 1 }}>
           <defs>
-            <linearGradient id={sparklineId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={sparklineColor} stopOpacity={0.35} />
-              <stop offset="100%" stopColor={sparklineColor} stopOpacity={0} />
+            <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity={0.32} />
+              <stop offset="100%" stopColor={color} stopOpacity={0.02} />
             </linearGradient>
           </defs>
-          <Area type="monotone" dataKey="value" stroke={sparklineColor} strokeWidth={2} fill={`url(#${sparklineId})`} dot={false} isAnimationActive={false} />
+          <Area
+            type="monotone" dataKey="value" stroke={color} strokeWidth={2.5} strokeLinejoin="round"
+            fill={`url(#${id})`} dot={{ r: 3, fill: color, stroke: color, strokeWidth: 0 }} activeDot={false}
+            baseValue={0} isAnimationActive={false}
+          />
         </AreaChart>
       </ResponsiveContainer>
     </div>
   );
 }
 
-function GrowthOverviewCard({ growthOverview }) {
-  const [mode, setMode] = useState("monthly");
-  const data = growthOverview?.[mode] || { currentLabel: "", currentProfit: 0, priorLabel: "", priorProfit: 0, hasPriorData: false };
-  const changePercent = data.hasPriorData && data.priorProfit
-    ? Math.round(((data.currentProfit - data.priorProfit) / Math.abs(data.priorProfit)) * 100)
-    : null;
-
+function Change({ percent, compare, goodWhenUp = true, color }) {
+  const value = Number(percent) || 0;
+  const up = value >= 0;
+  const tone = color || ((goodWhenUp ? up : !up) ? T.green : T.red);
+  const Arrow = up ? ArrowUpRight : ArrowDownRight;
   return (
-    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 18, padding: "22px" }}>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div style={{ width: 48, height: 48, borderRadius: 14, flexShrink: 0, background: "#2563eb", display: "grid", placeItems: "center" }}>
-            <BarChart3 size={21} color="#fff" strokeWidth={2} />
-          </div>
-          <div style={{ fontSize: 13, color: T.textMuted, fontWeight: 500 }}>Growth Overview</div>
-        </div>
-        <select
-          value={mode}
-          onChange={(e) => setMode(e.target.value)}
-          style={{ padding: "6px 10px", borderRadius: 8, border: `1.5px solid ${T.inputBorder}`, fontSize: 12, background: "#fff", color: T.textPrimary, fontFamily: "inherit", cursor: "pointer" }}
-        >
-          <option value="monthly">Monthly</option>
-          <option value="yearly">Yearly</option>
-        </select>
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 12, color: T.textSecondary, whiteSpace: "nowrap" }}>
+      <Arrow size={13} color={tone} strokeWidth={2.4} />
+      <span style={{ color: tone, fontWeight: 700 }}>{up ? "+" : "−"}{Math.abs(value)}%</span> {compare}
+    </span>
+  );
+}
+
+function CardTitle({ Icon, color, bg, children }) {
+  return (
+    <div className="sad-card-title">
+      <span className="sad-icon-box" style={{ background: bg }}><Icon size={15} color={color} strokeWidth={2.2} /></span>
+      <span>{children}</span>
+    </div>
+  );
+}
+
+// ── Row 1: hero cards ─────────────────────────────────────────────────────
+function Hero({ tone, Icon, iconColor, iconBg, label, sub, value, meta, art }) {
+  return (
+    <div className={`sad-hero sad-hero-${tone}`}>
+      <div className="sad-hero-icon" style={{ background: iconBg }}>
+        <Icon size={24} color={iconColor} strokeWidth={2.2} />
       </div>
-
-      {!data.hasPriorData ? (
-        <>
-          <div style={{ fontSize: 26, fontWeight: 700, color: T.textMuted, fontFamily: "'Inter', sans-serif" }}>N/A</div>
-          <div style={{ fontSize: 12, color: T.textMuted, marginTop: 4 }}>No prior {mode === "monthly" ? "year" : "period"} data</div>
-        </>
-      ) : (
-        <div style={{ fontSize: 12, fontWeight: 700, color: changePercent >= 0 ? T.green : T.red, display: "flex", alignItems: "center", gap: 4 }}>
-          {changePercent >= 0 ? <TrendingUp size={12} strokeWidth={2.4} /> : <TrendingDown size={12} strokeWidth={2.4} />}
-          {Math.abs(changePercent)}% <span style={{ color: T.textMuted, fontWeight: 500 }}>vs {data.priorLabel}</span>
-        </div>
-      )}
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 16 }}>
-        <div style={{ background: T.inputBg, borderRadius: 10, padding: "10px 12px" }}>
-          <div style={{ fontSize: 11, color: T.textMuted }}>{data.priorLabel} Profit</div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: T.textPrimary, marginTop: 2 }}>{fmtINR(data.priorProfit)}</div>
-        </div>
-        <div style={{ background: T.brandLight, borderRadius: 10, padding: "10px 12px" }}>
-          <div style={{ fontSize: 11, color: T.brand }}>{data.currentLabel} Profit</div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: T.brand, marginTop: 2 }}>{fmtINR(data.currentProfit)}</div>
+      <div className="sad-hero-body">
+        <div className="sad-hero-label">{label}{sub && <small> ({sub})</small>}</div>
+        <div className="sad-hero-main">
+          <div className="sad-hero-figures">
+            <div className="sad-hero-value" style={{ fontSize: valueFont(value, 23) }}>{value}</div>
+            {meta}
+          </div>
+          <div className="sad-hero-art">{art}</div>
         </div>
       </div>
     </div>
   );
 }
 
-function TodaysSchedule({ meetings, setTab }) {
-  const today = new Date();
-  const todaysMeetings = (meetings || [])
-    .filter((m) => {
-      const d = new Date(m.meetingDate);
-      return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
-    })
-    .sort((a, b) => new Date(a.meetingDate) - new Date(b.meetingDate));
+// ── Row 2: charts ─────────────────────────────────────────────────────────
+const CASE_COLORS = { renewal: "#2563eb", new: "#9dbcf6" };
+
+const DONUT_INNER = 0.72; // inner radius as a fraction of the outer radius
+
+/** Largest font (10–18px) at which `text` fits across ~85% of the donut hole. */
+function centreFont(text, donutSize) {
+  const hole = donutSize * DONUT_INNER;
+  const byWidth = (hole * 0.85) / (text.length * 0.62);
+  return Math.round(Math.max(10, Math.min(18, donutSize * 0.12, byWidth)));
+}
+
+function RevenueByCases({ stats, copy }) {
+  // The donut is drawn at an exact pixel size measured from the card, so the
+  // ring and the centred total are always concentric, and the total's font
+  // shrinks to fit inside the hole however long the amount gets.
+  const [bodyRef, body] = useElementSize();
+  const donutSize = Math.round(Math.max(120, Math.min(220, body.height || 180, (body.width || 420) * 0.45)));
+  const renewal = stats.revenueByCaseType?.renewal || 0;
+  const fresh = stats.revenueByCaseType?.new || 0;
+  const total = renewal + fresh;
+  const pct = (v) => (total ? Math.round((v / total) * 100) : 0);
+  const data = total ? [{ key: "renewal", value: renewal }, { key: "new", value: fresh }] : [{ key: "empty", value: 1 }];
+  const legend = [
+    { key: "renewal", label: "Renewal Cases", value: renewal },
+    { key: "new", label: "New Cases / Clients", value: fresh },
+  ];
 
   return (
-    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 18, padding: 22, display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 15, color: T.textPrimary, marginBottom: 16 }}>Today's Schedule</div>
-
-      {todaysMeetings.length === 0 ? (
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: "20px 0" }}>
-          <Calendar size={30} strokeWidth={1.4} color={T.textMuted} />
-          <div style={{ fontSize: 13.5, color: T.textMuted }}>No meetings today</div>
+    <div className="sad-card sad-chart-card">
+      <div className="sad-card-head">
+        <CardTitle Icon={ChartColumnBig} color="#2563eb" bg="#e8efff">Total Revenue by Cases</CardTitle>
+        <span className="sad-pill">{copy.short}</span>
+      </div>
+      <div className="sad-chart-body sad-donut-body" ref={bodyRef}>
+        <div className="sad-donut" style={{ width: donutSize, height: donutSize }}>
+          <PieChart width={donutSize} height={donutSize}>
+            <Pie
+              data={data} dataKey="value" cx="50%" cy="50%"
+              innerRadius={(donutSize / 2) * DONUT_INNER} outerRadius={donutSize / 2}
+              startAngle={90} endAngle={-270} stroke="none" isAnimationActive={false}
+            >
+              {data.map((d) => <Cell key={d.key} fill={CASE_COLORS[d.key] || "#e2e8f0"} />)}
+            </Pie>
+          </PieChart>
+          <div className="sad-donut-center">
+            <div>
+              <div style={{ fontSize: centreFont(fmtINR(total), donutSize), fontWeight: 800, color: T.textPrimary, whiteSpace: "nowrap" }}>{fmtINR(total)}</div>
+              <div style={{ fontSize: Math.max(10, Math.min(12, donutSize * 0.075)), color: T.textSecondary, marginTop: 1 }}>Total Revenue</div>
+            </div>
+          </div>
         </div>
-      ) : (
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
-          {todaysMeetings.map((m) => (
-            <div key={m._id} style={{ background: T.inputBg, borderRadius: 10, padding: "10px 12px" }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary }}>{m.title}</div>
-              <div style={{ display: "flex", gap: 12, marginTop: 4, fontSize: 11.5, color: T.textMuted, flexWrap: "wrap" }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 4 }}><Clock size={11} strokeWidth={1.8} />{new Date(m.meetingDate).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}</span>
-                {m.location && <span style={{ display: "flex", alignItems: "center", gap: 4 }}><MapPin size={11} strokeWidth={1.8} />{m.location}</span>}
+        <div className="sad-legend">
+          {legend.map((l) => (
+            <div key={l.key} style={{ display: "flex", gap: 9 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 99, background: CASE_COLORS[l.key], marginTop: 4, flexShrink: 0 }} />
+              <div>
+                <div style={{ fontSize: 12.5, color: T.textPrimary }}>{l.label}</div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: T.textPrimary, marginTop: 2, whiteSpace: "nowrap" }}>
+                  {fmtINR(l.value)} ({pct(l.value)}%)
+                </div>
               </div>
             </div>
           ))}
+          {!total && <div style={{ fontSize: 11.5, color: T.textMuted }}>No payments received in this period yet.</div>}
         </div>
-      )}
-
-      <button
-        onClick={() => setTab("meetings")}
-        style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, background: "none", border: "none", cursor: "pointer", color: "#f7931e", fontSize: 12.5, fontWeight: 600, fontFamily: "inherit", padding: "8px 0 0" }}
-      >
-        <Calendar size={14} strokeWidth={2} /> View Calendar
-      </button>
+      </div>
     </div>
   );
 }
 
-// Bank vs Cash received this period — keyed off each payment's own paymentDate
-// (see revenueSummary in getDashboardStats), never contract/due dates.
-function PaymentOverviewCard({ revenueSummary }) {
-  const { bank = 0, cash = 0, total = 0 } = revenueSummary || {};
+function SourceTick({ x, y, payload }) {
+  const isBank = payload.value === "Bank";
+  const Icon = isBank ? Landmark : Banknote;
   return (
-    <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 18, padding: 22, height: "100%" }}>
-      <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 15, color: T.textPrimary, marginBottom: 4 }}>Payment Overview</div>
-      <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 18 }}>Received this period, by payment method</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-        <div style={{ background: "#dbeafe", borderRadius: 12, padding: 16 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 10, background: "#2563eb", display: "grid", placeItems: "center", marginBottom: 10 }}>
-            <Landmark size={16} color="#fff" strokeWidth={2} />
-          </div>
-          <div style={{ fontSize: 11, color: "#1e40af", fontWeight: 600 }}>Bank</div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: T.textPrimary, marginTop: 2, fontFamily: "'Inter', sans-serif" }}>{fmtINR(bank)}</div>
-        </div>
-        <div style={{ background: "#fef3c7", borderRadius: 12, padding: 16 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 10, background: "#d97706", display: "grid", placeItems: "center", marginBottom: 10 }}>
-            <Banknote size={16} color="#fff" strokeWidth={2} />
-          </div>
-          <div style={{ fontSize: 11, color: "#92400e", fontWeight: 600 }}>Cash</div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: T.textPrimary, marginTop: 2, fontFamily: "'Inter', sans-serif" }}>{fmtINR(cash)}</div>
-        </div>
+    <g transform={`translate(${x},${y + 4})`}>
+      <Icon x={-30} y={1} width={16} height={16} color={isBank ? "#2563eb" : "#16a34a"} strokeWidth={2} />
+      <text x={-9} y={14} fill={T.textPrimary} fontSize={12.5} fontWeight={600}>{payload.value}</text>
+    </g>
+  );
+}
+
+function RevenueBySource({ stats, copy }) {
+  const data = [
+    { name: "Bank", value: stats.revenueSummary?.bank || 0, color: "#2563eb" },
+    { name: "Cash", value: stats.revenueSummary?.cash || 0, color: "#f08a2c" },
+  ];
+  const ticks = niceTicks(Math.max(...data.map((d) => d.value)));
+  const yAxisWidth = Math.max(30, Math.max(...ticks.map((t) => fmtCompactINR(t).length)) * 7 + 10);
+  // Exact pixel size (measured), so the bars always fill the card's height.
+  const [bodyRef, body] = useElementSize();
+  return (
+    <div className="sad-card sad-chart-card">
+      <div className="sad-card-head">
+        <CardTitle Icon={ChartColumnBig} color="#2563eb" bg="#e8efff">Total Revenue by Source</CardTitle>
+        <span className="sad-pill">{copy.short}</span>
       </div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 14, borderTop: `1px solid ${T.borderLight}` }}>
-        <span style={{ fontSize: 12.5, color: T.textMuted, fontWeight: 600 }}>Total Received</span>
-        <span style={{ fontSize: 18, fontWeight: 700, color: T.green, fontFamily: "'Inter', sans-serif" }}>{fmtINR(total)}</span>
+      <div className="sad-chart-body" ref={bodyRef}>
+        {body.width > 0 && body.height > 0 && (
+          <BarChart width={body.width} height={body.height} data={data} margin={{ top: 20, right: 8, left: 0, bottom: 2 }} barCategoryGap="34%">
+            <CartesianGrid vertical={false} stroke="#eef0f5" />
+            <XAxis dataKey="name" tickLine={false} axisLine={{ stroke: "#cbd5e1" }} tick={<SourceTick />} interval={0} height={26} />
+            <YAxis tickFormatter={fmtCompactINR} tickLine={false} axisLine={{ stroke: "#cbd5e1" }} width={yAxisWidth} tick={{ fill: T.textSecondary, fontSize: 11 }} domain={[0, ticks[ticks.length - 1]]} ticks={ticks} />
+            <Bar dataKey="value" radius={[3, 3, 0, 0]} isAnimationActive={false} maxBarSize={150}>
+              {data.map((d) => <Cell key={d.name} fill={d.color} />)}
+              <LabelList dataKey="value" position="top" formatter={fmtINR} style={{ fill: T.textPrimary, fontSize: 12, fontWeight: 700 }} />
+            </Bar>
+          </BarChart>
+        )}
       </div>
     </div>
   );
 }
 
-const BALANCE_DUE_STATUS_META = {
-  Overdue: { color: "#dc2626", bg: "#fee2e2" },
-  "Due Today": { color: "#d97706", bg: "#fef3c7" },
-  Upcoming: { color: "#2563eb", bg: "#dbeafe" },
-};
+// ── Row 3 ─────────────────────────────────────────────────────────────────
+function MetricCard({ Icon, iconColor, iconBg, label, value, change, sparkline }) {
+  return (
+    <div className="sad-card">
+      <CardTitle Icon={Icon} color={iconColor} bg={iconBg}>{label}</CardTitle>
+      <div className="sad-metric-main">
+        <div className="sad-metric-figures">
+          <div className="sad-metric-value" style={{ fontSize: valueFont(value, 22) }}>{value}</div>
+          <div style={{ marginTop: 3 }}>{change}</div>
+        </div>
+        {sparkline}
+      </div>
+    </div>
+  );
+}
 
-export default function DashboardSection({ dashboardStats, meetings, activityLog, setTab, fetchDashboardStats }) {
+function DueSummary({ stats, renewalClients, balanceClients, onOpen }) {
+  const rows = [
+    { tab: "renewals", Icon: RefreshCw, color: "#7c3aed", bg: "#f1ebff", label: "Renewal Due", amount: stats.totalRenewalRevenue, clients: renewalClients, countColor: "#2563eb" },
+    { tab: "balance", Icon: Wallet, color: "#ea580c", bg: "#ffedd5", label: "Balance Due", amount: stats.totalBalanceDue, clients: balanceClients, countColor: T.green },
+  ];
+  return (
+    <div className="sad-card">
+      <div className="sad-card-head" style={{ marginBottom: 4 }}>
+        <CardTitle Icon={CalendarDays} color="#2563eb" bg="#e8efff">Upcoming &amp; Due Summary</CardTitle>
+        <button type="button" className="sad-link" onClick={() => onOpen("renewals")}>View All <ArrowRight size={13} /></button>
+      </div>
+      {rows.map((r) => (
+        <button key={r.tab} type="button" className="sad-summary-row" onClick={() => onOpen(r.tab)}>
+          <span className="sad-icon-box" style={{ background: r.bg, width: 26, height: 26, borderRadius: 99 }}><r.Icon size={13} color={r.color} strokeWidth={2.3} /></span>
+          <span style={{ fontSize: 13, color: T.textPrimary, fontWeight: 500 }}>{r.label}</span>
+          <span style={{ fontSize: 13, fontWeight: 800, color: T.textPrimary }}>{fmtINR(r.amount)}</span>
+          <span className="sad-summary-count" style={{ fontSize: 12.5, color: r.countColor, fontWeight: 500, whiteSpace: "nowrap" }}>{plural(r.clients, "Client")}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Row 4 ─────────────────────────────────────────────────────────────────
+function ActivityLogCard({ activity, onViewAll }) {
+  const recent = activity.slice(0, 5);
+  return (
+    <div className="sad-card">
+      <div className="sad-card-head" style={{ marginBottom: 2 }}>
+        <CardTitle Icon={Zap} color="#2563eb" bg="#e8efff">Activity Log</CardTitle>
+        <button type="button" className="sad-link" onClick={onViewAll}>View All <ArrowRight size={13} /></button>
+      </div>
+      {recent.length === 0 ? (
+        <div style={{ padding: "20px 0", textAlign: "center", fontSize: 12.5, color: T.textMuted }}>No activity recorded yet</div>
+      ) : (
+        recent.map((entry) => {
+          const meta = ACTIVITY_META[entry.type] || { Icon: Activity, color: T.textMuted };
+          const clientName = entry.clientId?.companyName || entry.clientId?.clientName;
+          const message = clientName && !entry.message?.includes(clientName) ? `${entry.message} – ${clientName}` : entry.message;
+          return (
+            <div key={entry._id} className="sad-activity-row">
+              <span style={{ width: 22, height: 22, borderRadius: 99, flexShrink: 0, background: `${meta.color}1f`, display: "grid", placeItems: "center" }}>
+                <meta.Icon size={12} color={meta.color} strokeWidth={2.3} />
+              </span>
+              <span className="sad-activity-msg" title={message}>{message}</span>
+              <span style={{ fontSize: 11, color: T.textMuted, whiteSpace: "nowrap" }}>{fmtTimeAgo(entry.createdAt)}</span>
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+function QuickStats({ stats, copy }) {
+  const growth = Number(stats.collectionsChangePercent) || 0;
+  const items = [
+    { Icon: Database, color: "#2563eb", label: "Total Clients", value: (stats.totalClientsAllTime ?? 0).toLocaleString("en-IN") },
+    { Icon: Handshake, color: "#ea580c", label: copy.short === "This Month" ? "Renewals This Month" : "Renewals Done", value: (stats.renewalsDoneCount ?? 0).toLocaleString("en-IN") },
+    { Icon: UserPlus, color: "#2563eb", label: "New Clients", value: (stats.totalClients ?? 0).toLocaleString("en-IN") },
+    { Icon: ChartNoAxesColumnIncreasing, color: T.green, label: "Growth", value: `${growth >= 0 ? "+" : "−"}${Math.abs(growth)}%`, valueColor: growth >= 0 ? T.green : T.red },
+  ];
+  return (
+    <div className="sad-card sad-quick">
+      <CardTitle Icon={Lightbulb} color="#f59e0b" bg="#ffe9c7">Quick Stats</CardTitle>
+      <div className="sad-quick-grid">
+        {items.map((it) => (
+          <div key={it.label} className="sad-quick-item">
+            <it.Icon size={22} color={it.color} strokeWidth={2} style={{ margin: "0 auto" }} />
+            <div className="sad-quick-label" title={it.label}>{it.label}</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: it.valueColor || T.textPrimary, marginTop: 2 }}>{it.value}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 10.5, color: T.textMuted, textAlign: "center" }}>Growth = revenue {copy.compare}</div>
+    </div>
+  );
+}
+
+// ── Section ───────────────────────────────────────────────────────────────
+export default function DashboardSection({ dashboardStats, activityLog, fetchDashboardStats }) {
   const stats = dashboardStats || {};
-  const serviceWiseActiveCases = stats.serviceWiseActiveCases || [];
-  const renewalCases = stats.renewalCases || [];
-  const balanceDue = stats.balanceDue || [];
   const activity = activityLog || [];
-  const [expandedServiceId, setExpandedServiceId] = useState(null);
   const [range, setRange] = useState(loadStoredDashboardRange);
+  const [detailTab, setDetailTab] = useState(null);
+  const detailsRef = useRef(null);
 
   useEffect(() => {
     localStorage.setItem(DASHBOARD_RANGE_STORAGE_KEY, JSON.stringify({ start: range.start, end: range.end, presetKey: range.presetKey }));
@@ -247,307 +384,90 @@ export default function DashboardSection({ dashboardStats, meetings, activityLog
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range.start, range.end]);
 
-  // periodTrend is bucketed across the currently-selected date range (see
-  // backend getDashboardStats) — unlike the old monthlyTrend (a fixed
-  // trailing-8-months view), this redraws whenever the date-range picker
-  // above changes, instead of looking frozen.
-  // A day-by-day view of real collections legitimately swings from ~0 to
-  // several lakh depending on which days happen to have payments logged
-  // against them, which reads as a meaningless jagged zig-zag at the tiny
-  // (48px, no axis) size this sparkline renders at — so for a long range,
-  // coarsen it down to a handful of points by summing consecutive buckets
-  // together. (A running cumulative total was tried instead, but that's
-  // always flat-or-rising for a metric that only ever adds non-negative
-  // amounts — it'll show an "increasing" line even in a period whose total
-  // is DOWN vs the previous one, contradicting the "vs previous period" %
-  // right next to it. Summing raw per-bucket totals keeps the line's actual
-  // up/down direction intact, just smoother.)
-  const periodTrend = stats.periodTrend || [];
-  const MAX_SPARKLINE_POINTS = 10;
-  const resample = (key) => {
-    if (periodTrend.length <= MAX_SPARKLINE_POINTS) {
-      return periodTrend.map((m) => ({ label: m.label, value: m[key] || 0 }));
-    }
-    const chunkSize = Math.ceil(periodTrend.length / MAX_SPARKLINE_POINTS);
-    const out = [];
-    for (let i = 0; i < periodTrend.length; i += chunkSize) {
-      const chunk = periodTrend.slice(i, i + chunkSize);
-      out.push({ label: chunk[0].label, value: chunk.reduce((sum, m) => sum + (m[key] || 0), 0) });
-    }
-    return out;
+  const copy = periodCopy(range);
+  // Sparklines plot one point per period (the selected period + the 6 before
+  // it), so their last segment is exactly the "% from last month" printed
+  // beside them — up when the % is positive, down when it's negative. Older
+  // backends without comparisonTrend fall back to the in-period daily trend.
+  const comparisonTrend = stats.comparisonTrend;
+  const periodTrend = useMemo(() => stats.periodTrend || [], [stats.periodTrend]);
+  const trendFor = (key) => (comparisonTrend?.length ? comparisonTrend.map((p) => ({ value: p[key] || 0 })) : resampleTrend(periodTrend, key));
+  const revenueTrend = useMemo(() => trendFor("collected"), [comparisonTrend, periodTrend]); // eslint-disable-line react-hooks/exhaustive-deps
+  const expensesTrend = useMemo(() => trendFor("expenses"), [comparisonTrend, periodTrend]); // eslint-disable-line react-hooks/exhaustive-deps
+  const profitTrend = useMemo(() => trendFor("profit"), [comparisonTrend, periodTrend]); // eslint-disable-line react-hooks/exhaustive-deps
+  const trendTitle = comparisonTrend?.length
+    ? `Trend: ${comparisonTrend[0].label} → ${comparisonTrend[comparisonTrend.length - 1].label}`
+    : undefined;
+  const renewalClients = uniqueClients(stats.renewalCases);
+  const balanceClients = uniqueClients(stats.balanceDue);
+
+  const openDetails = (tab) => {
+    setDetailTab(tab);
+    requestAnimationFrame(() => detailsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   };
-  const collectionsSparkline = resample("collected");
-  const expensesSparkline = resample("expenses");
-  const profitSparkline = resample("profit");
 
   return (
     <div className="fade-up">
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
-        <DateRangePicker value={range} onChange={setRange} />
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 18, marginBottom: 18 }}>
-        <StatCard
-          Icon={Wallet} iconBg="#7c3aed" label="Total Collections" value={stats.totalRevenue}
-          changePercent={stats.collectionsChangePercent} changeIsGood={(stats.collectionsChangePercent || 0) >= 0}
-          sparkline={collectionsSparkline} sparklineColor="#7c3aed" sparklineId="sparkCollections"
-        />
-        <StatCard
-          Icon={CreditCard} iconBg="#16a34a" label="Total Expenses" value={stats.totalExpenses}
-          changePercent={stats.expensesChangePercent} changeIsGood={(stats.expensesChangePercent || 0) <= 0}
-          sparkline={expensesSparkline} sparklineColor="#16a34a" sparklineId="sparkExpenses"
-        />
-        <StatCard
-          Icon={TrendingUp} iconBg="#f7931e" label="Total Profit" value={stats.netProfit}
-          changePercent={stats.profitChangePercent} changeIsGood={(stats.profitChangePercent || 0) >= 0}
-          sparkline={profitSparkline} sparklineColor="#f7931e" sparklineId="sparkProfit"
-        />
-        <GrowthOverviewCard growthOverview={stats.growthOverview} />
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-        <PaymentOverviewCard revenueSummary={stats.revenueSummary} />
-        <TodaysSchedule meetings={meetings} setTab={setTab} />
-      </div>
-
-      {/* ── Balance Due ── */}
-      <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 18, padding: 22, marginTop: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, flexWrap: "wrap", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, background: "#fee2e2", display: "grid", placeItems: "center" }}>
-              <AlertTriangle size={16} color="#dc2626" strokeWidth={2} />
-            </div>
-            <div>
-              <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 15, color: T.textPrimary }}>Balance Due</div>
-              <div style={{ fontSize: 12, color: T.textMuted, marginTop: 2 }}>Outstanding contracts with a due date in this period</div>
-            </div>
+      <div className="sad-screen">
+        <div className="sad-header">
+          <div className="sad-title">
+            <h2>Super Admin Dashboard</h2>
+            <p>Welcome back! Here&apos;s your business overview for {copy.overview}.</p>
           </div>
-          <div style={{ display: "flex", gap: 18 }}>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 11, color: T.textMuted }}>Overdue</div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#dc2626" }}>{stats.overdueBalanceDueCount || 0}</div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 11, color: T.textMuted }}>Total Balance Due</div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#f7931e" }}>{fmtINR(stats.totalBalanceDue)}</div>
-            </div>
+          <div className="sad-header-actions">
+            <button type="button" className="sad-link" onClick={() => openDetails("renewals")}>Detailed reports <ArrowRight size={13} /></button>
+            <DateRangePicker value={range} onChange={setRange} />
           </div>
         </div>
 
-        {balanceDue.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "30px 10px", color: T.textMuted, fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-            <CheckCircle2 size={24} strokeWidth={1.6} color={T.green} /> All contracts due this period are fully paid
-          </div>
-        ) : (
-          <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: 440 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                  {["Client", "Contract", "Contract Amount", "Received", "Balance", "Due Date", "Status"].map((h) => (
-                    <th key={h} style={{ textAlign: h === "Contract Amount" || h === "Received" || h === "Balance" ? "right" : "left", padding: "8px 10px", fontSize: 11, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.4, position: "sticky", top: 0, background: T.card, zIndex: 1 }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {balanceDue.map((b) => {
-                  const statusAccent = BALANCE_DUE_STATUS_META[b.status] || BALANCE_DUE_STATUS_META.Upcoming;
-                  return (
-                    <tr key={b.contractId} style={{ borderBottom: `1px solid ${T.borderLight}` }}>
-                      <td style={{ padding: "10px", color: T.textPrimary, fontWeight: 600 }}>{b.companyName || b.clientName}</td>
-                      <td style={{ padding: "10px", color: T.textSecondary }}>{b.projectName}</td>
-                      <td style={{ padding: "10px", color: T.textSecondary, textAlign: "right" }}>{fmtINR(b.contractAmount)}</td>
-                      <td style={{ padding: "10px", color: T.textSecondary, textAlign: "right" }}>{fmtINR(b.receivedAmount)}</td>
-                      <td style={{ padding: "10px", color: T.textPrimary, fontWeight: 700, textAlign: "right" }}>{fmtINR(b.balance)}</td>
-                      <td style={{ padding: "10px", color: T.textSecondary }}>{fmtShortDate(b.dueDate)}</td>
-                      <td style={{ padding: "10px" }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 99, color: statusAccent.color, background: statusAccent.bg }}>{b.status}</span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* ── Service Wise Active Cases / Activity Log ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 18, marginTop: 18 }}>
-        <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 18, padding: 22 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 18 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, background: "#e0f7fa", display: "grid", placeItems: "center" }}>
-              <Layers size={16} color="#0891b2" strokeWidth={2} />
-            </div>
-            <div>
-              <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 15, color: T.textPrimary }}>Service Wise Active Cases</div>
-              <div style={{ fontSize: 12, color: T.textMuted, marginTop: 2 }}>Excludes rejected/expired contracts</div>
-            </div>
-          </div>
-          {serviceWiseActiveCases.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "30px 10px", color: T.textMuted, fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-              <Inbox size={24} strokeWidth={1.6} color={T.textMuted} /> No active cases in this period
-            </div>
-          ) : (
-            <>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {serviceWiseActiveCases.map((s, i) => {
-                  const isExpanded = expandedServiceId === s.categoryId;
-                  return (
-                    <div key={s.categoryId} style={{ borderRadius: 10, background: T.inputBg, overflow: "hidden" }}>
-                      <div
-                        onClick={() => setExpandedServiceId(isExpanded ? null : s.categoryId)}
-                        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 12px", cursor: "pointer" }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                          {isExpanded ? <ChevronDown size={14} color={T.textMuted} /> : <ChevronRight size={14} color={T.textMuted} />}
-                          <span style={{ width: 8, height: 8, borderRadius: 99, flexShrink: 0, background: ["#0891b2", "#7c3aed", "#f7931e", "#16a34a", "#db2777", "#d97706"][i % 6] }} />
-                          <span style={{ fontSize: 13, fontWeight: 600, color: T.textPrimary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.label}</span>
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 16, flexShrink: 0 }}>
-                          <span style={{ fontSize: 12.5, color: T.textMuted }}>{s.activeCases} case{s.activeCases === 1 ? "" : "s"}</span>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: T.textPrimary, minWidth: 90, textAlign: "right" }}>{fmtINR(s.totalAmount)}</span>
-                        </div>
-                      </div>
-                      {isExpanded && (
-                        <div style={{ padding: "0 12px 12px 34px" }}>
-                          <div style={{ maxHeight: 260, overflowY: "auto" }}>
-                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
-                              <thead style={{ position: "sticky", top: 0, background: T.inputBg }}>
-                                <tr>
-                                  {["Client", "Project", "Status", "Amount"].map((h) => (
-                                    <th key={h} style={{ textAlign: h === "Amount" ? "right" : "left", padding: "4px 8px", fontSize: 10.5, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.3 }}>{h}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {(s.cases || []).map((c) => (
-                                  <tr key={c.contractId} style={{ borderTop: `1px solid ${T.borderLight}` }}>
-                                    <td style={{ padding: "6px 8px", color: T.textPrimary, fontWeight: 600 }}>{c.companyName || c.clientName}</td>
-                                    <td style={{ padding: "6px 8px", color: T.textSecondary }}>{c.projectName}</td>
-                                    <td style={{ padding: "6px 8px", color: T.textSecondary, textTransform: "capitalize" }}>{c.contractStatus}</td>
-                                    <td style={{ padding: "6px 8px", color: T.textPrimary, fontWeight: 600, textAlign: "right" }}>{fmtINR(c.amount)}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 16, paddingTop: 14, borderTop: `1px solid ${T.borderLight}` }}>
-                <div>
-                  <div style={{ fontSize: 11, color: T.textMuted }}>Total Active Cases</div>
-                  <div style={{ fontSize: 17, fontWeight: 700, color: T.textPrimary }}>{stats.totalActiveCases || 0}</div>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontSize: 11, color: T.textMuted }}>Total Active Revenue</div>
-                  <div style={{ fontSize: 17, fontWeight: 700, color: "#f7931e" }}>{fmtINR(stats.totalActiveRevenue)}</div>
-                </div>
-              </div>
-            </>
-          )}
+        <div className="sad-row sad-row-hero">
+          <Hero
+            tone="green" Icon={BadgeIndianRupee} iconColor="#16a34a" iconBg="#d3f5df"
+            label="Total Revenue" sub={copy.short} value={fmtINR(stats.totalRevenue)}
+            meta={<Change percent={stats.collectionsChangePercent} compare={copy.compare} />}
+            art={<Sparkline data={revenueTrend} color="#16a34a" id="sadRevenueSpark" width={124} height={52} title={trendTitle} />}
+          />
+          <Hero
+            tone="blue" Icon={RefreshCw} iconColor="#2563eb" iconBg="#d9e6fd"
+            label="Renewal Due / Upcoming" value={fmtINR(stats.totalRenewalRevenue)}
+            meta={<div className="sad-hero-meta"><CalendarDays size={13} color="#2563eb" /> {plural(renewalClients, "Client")}</div>}
+            art={<Clock size={36} color="#93b4f5" strokeWidth={1.6} />}
+          />
+          <Hero
+            tone="orange" Icon={Wallet} iconColor="#ea580c" iconBg="#ffe2c7"
+            label="Balance Payment Due" value={fmtINR(stats.totalBalanceDue)}
+            meta={<div className="sad-hero-meta"><Users size={13} color="#ea580c" /> {plural(balanceClients, "Client")}</div>}
+            art={<CircleAlert size={36} color="#f59e5b" strokeWidth={1.8} />}
+          />
         </div>
 
-        <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 18, padding: 22 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 11, marginBottom: 18 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, background: "#fff4e6", display: "grid", placeItems: "center" }}>
-              <Activity size={16} color="#f7931e" strokeWidth={2} />
-            </div>
-            <div>
-              <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 15, color: T.textPrimary }}>Activity Log</div>
-              <div style={{ fontSize: 12, color: T.textMuted, marginTop: 2 }}>Most recent activity across the CRM</div>
-            </div>
-          </div>
-          {activity.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "30px 10px", color: T.textMuted, fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-              <Inbox size={24} strokeWidth={1.6} color={T.textMuted} /> No activity recorded yet
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 320, overflowY: "auto" }}>
-              {activity.map((entry) => {
-                const meta = ACTIVITY_META[entry.type] || { Icon: Activity, color: T.textMuted };
-                const clientName = entry.clientId?.clientName || entry.clientId?.companyName;
-                return (
-                  <div key={entry._id} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "8px 4px" }}>
-                    <div style={{ width: 26, height: 26, borderRadius: 8, flexShrink: 0, background: `${meta.color}1a`, display: "grid", placeItems: "center", marginTop: 1 }}>
-                      <meta.Icon size={13} color={meta.color} strokeWidth={2.2} />
-                    </div>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontSize: 12.5, color: T.textPrimary, lineHeight: 1.5 }}>{entry.message}</div>
-                      <div style={{ fontSize: 11, color: T.textMuted, marginTop: 1 }}>
-                        {clientName && <span>{clientName} &middot; </span>}
-                        {fmtTimeAgo(entry.createdAt)}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+        <div className="sad-row sad-row-charts">
+          <RevenueByCases stats={stats} copy={copy} />
+          <RevenueBySource stats={stats} copy={copy} />
+        </div>
+
+        <div className="sad-row sad-row-3">
+          <MetricCard
+            Icon={Wallet} iconColor="#7c3aed" iconBg="#f1ebff" label="Total Expenses" value={fmtINR(stats.totalExpenses)}
+            change={<Change percent={stats.expensesChangePercent} compare={copy.compare} color="#7c3aed" />}
+            sparkline={<Sparkline data={expensesTrend} color="#a855f7" id="sadExpenseSpark" width={130} height={50} title={trendTitle} />}
+          />
+          <MetricCard
+            Icon={ChartNoAxesColumnIncreasing} iconColor={T.green} iconBg="#dcfce7" label="Total Profit" value={fmtINR(stats.netProfit)}
+            change={<Change percent={stats.profitChangePercent} compare={copy.compare} />}
+            sparkline={<Sparkline data={profitTrend} color="#16a34a" id="sadProfitSpark" width={130} height={50} title={trendTitle} />}
+          />
+          <DueSummary stats={stats} renewalClients={renewalClients} balanceClients={balanceClients} onOpen={openDetails} />
+        </div>
+
+        <div className="sad-row sad-row-bottom">
+          <ActivityLogCard activity={activity} onViewAll={() => openDetails("activity")} />
+          <QuickStats stats={stats} copy={copy} />
         </div>
       </div>
 
-      {/* ── Renewal Cases ── */}
-      <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 18, padding: 22, marginTop: 18 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, flexWrap: "wrap", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, background: "#fff4e6", display: "grid", placeItems: "center" }}>
-              <RefreshCw size={16} color="#f7931e" strokeWidth={2} />
-            </div>
-            <div>
-              <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 15, color: T.textPrimary }}>Renewal Cases</div>
-              <div style={{ fontSize: 12, color: T.textMuted, marginTop: 2 }}>Renewal date (Valid Until) within the selected period</div>
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 18 }}>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 11, color: T.textMuted }}>Total Cases</div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: T.textPrimary }}>{stats.totalRenewalCases || 0}</div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 11, color: T.textMuted }}>Total Revenue</div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#f7931e" }}>{fmtINR(stats.totalRenewalRevenue)}</div>
-            </div>
-          </div>
-        </div>
-
-        {renewalCases.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "30px 10px", color: T.textMuted, fontSize: 13, display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-            <Inbox size={24} strokeWidth={1.6} color={T.textMuted} /> No renewals due in this period
-          </div>
-        ) : (
-          <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: 440 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                  {["Client Name", "Service Name", "Renewal Date", "Renewal Amount", "Salesperson", "Status"].map((h) => (
-                    <th key={h} style={{ textAlign: "left", padding: "8px 10px", fontSize: 11, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.4, position: "sticky", top: 0, background: T.card, zIndex: 1 }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {renewalCases.map((r) => {
-                  const statusAccent = RENEWAL_STATUS_COLORS[r.status] || RENEWAL_STATUS_COLORS.Upcoming;
-                  return (
-                    <tr key={r.contractId} style={{ borderBottom: `1px solid ${T.borderLight}` }}>
-                      <td style={{ padding: "10px", color: T.textPrimary, fontWeight: 600 }}>{r.companyName || r.clientName}</td>
-                      <td style={{ padding: "10px", color: T.textSecondary }}>{r.serviceName}</td>
-                      <td style={{ padding: "10px", color: T.textSecondary }}>{fmtShortDate(r.renewalDate)}</td>
-                      <td style={{ padding: "10px", color: T.textPrimary, fontWeight: 600 }}>{fmtINR(r.renewalAmount)}</td>
-                      <td style={{ padding: "10px", color: T.textSecondary }}>{r.salesPerson}</td>
-                      <td style={{ padding: "10px" }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 99, color: statusAccent.color, background: statusAccent.bg }}>{r.status}</span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+      <div ref={detailsRef} style={{ scrollMarginTop: 76 }}>
+        {detailTab && <DashboardDetails stats={stats} activity={activity} tab={detailTab} onTabChange={setDetailTab} />}
       </div>
     </div>
   );

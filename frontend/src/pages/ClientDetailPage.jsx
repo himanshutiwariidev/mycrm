@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, Pencil, Trash2, Download, FileText, Wallet, Package,
   CreditCard, History, Plus, X, User, CheckCircle2, ChevronDown, ChevronRight,
@@ -139,6 +139,7 @@ function Field({ label, value }) {
 export default function ClientDetailPage() {
   const { clientId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [client, setClient] = useState(null);
   const [contracts, setContracts] = useState([]);
@@ -147,7 +148,12 @@ export default function ClientDetailPage() {
   const [remarks, setRemarks] = useState([]);
   const [workProgress, setWorkProgress] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("overview");
+  // ?tab=deliverables (etc.) deep-links straight to a tab, e.g. from the
+  // Sales Dashboard's renewal / balance / deliverable rows.
+  const [activeTab, setActiveTab] = useState(() => {
+    const requested = searchParams.get("tab");
+    return TABS.some((t) => t.id === requested) ? requested : "overview";
+  });
   const [statusSaving, setStatusSaving] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
@@ -168,6 +174,9 @@ export default function ClientDetailPage() {
   const [progressSaving, setProgressSaving] = useState(false);
 
   const userRole = localStorage.getItem("role");
+  // Sales people work from their own /sales page (dashboard + clients tabs),
+  // not the bare /clients list, so "back" should return them there.
+  const backPath = userRole === "sales" ? "/sales" : "/clients";
   const userId = localStorage.getItem("userId");
   const isAdmin = userRole === "admin";
 
@@ -270,7 +279,7 @@ export default function ClientDetailPage() {
     if (!window.confirm("Are you sure you want to delete this client and all related data?")) return;
     try {
       await deleteClient(clientId);
-      navigate("/clients");
+      navigate(backPath);
     } catch {
       alert("Error deleting client");
     }
@@ -329,7 +338,7 @@ export default function ClientDetailPage() {
   if (!client) {
     return (
       <div className="client-detail-page">
-        <button className="cd-back" onClick={() => navigate("/clients")}>
+        <button className="cd-back" onClick={() => navigate(backPath)}>
           <ArrowLeft size={15} strokeWidth={2.2} /> Back to Clients
         </button>
         <EmptyState message="Client not found" />
@@ -376,7 +385,7 @@ export default function ClientDetailPage() {
     <div className="client-detail-page">
       <style>{`@keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }`}</style>
 
-      <button className="cd-back" onClick={() => navigate("/clients")}>
+      <button className="cd-back" onClick={() => navigate(backPath)}>
         <ArrowLeft size={15} strokeWidth={2.2} /> Back to Clients
       </button>
 

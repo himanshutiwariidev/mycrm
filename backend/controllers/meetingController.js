@@ -27,7 +27,10 @@ exports.createMeeting = async (req, res) => {
 
 exports.getMeetings = async (req, res) => {
   try {
-    const meetings = await Meeting.find().populate("createdBy", "name email").sort({ meetingDate: 1 });
+    const meetings = await Meeting.find()
+      .populate("createdBy", "name email")
+      .populate("salesPerson", "name")
+      .sort({ meetingDate: 1 });
     return res.json(meetings);
   } catch (error) {
     console.error("Error fetching meetings:", error);

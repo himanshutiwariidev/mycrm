@@ -9,6 +9,7 @@ import { useContractWizard } from "../context/useContractWizard";
 import { getCategoryMeta } from "../config/serviceCategories";
 import { getLeafConfig } from "../utils/configLookup";
 import { computeLeafFinalPrice, formatCurrency, computeContractTaxSummary } from "../config/pricing";
+import { groupSharedSelections, getSharingLabel } from "../utils/contentSharing";
 
 function describeQuantity(sel, categoryId) {
   const leafConfig = getLeafConfig(categoryId, sel.path);
@@ -57,21 +58,31 @@ export default function ContractSummary({ variant = "sidebar" }) {
               </button>
             </div>
             <ul className="space-y-1.5 pl-1">
-              {cat.selections.map((sel) => {
-                const { finalPrice } = computeLeafFinalPrice(sel.advanced);
+              {groupSharedSelections(cat.selections).map(({ primary: sel, members }) => {
+                // Platforms posting the same content (e.g. Instagram + LinkedIn
+                // linked to Facebook) share one line and one combined amount.
+                const isShared = members.length > 1;
+                const finalPrice = members.reduce((sum, m) => sum + computeLeafFinalPrice(m.advanced).finalPrice, 0);
                 const qty = describeQuantity(sel, cat.categoryId);
+                const label = isShared ? members.map((m) => getSharingLabel(cat.categoryId, m.path)).join(" + ") : sel.label;
                 return (
                   <li key={sel.path} className="flex items-center justify-between gap-2 rounded-md bg-muted/60 px-2.5 py-1.5 text-xs">
-                    <span className="truncate">
-                      {sel.label}
-                      {qty ? <span className="text-muted-foreground"> &times;{qty}</span> : null}
+                    <span className={isShared ? "min-w-0" : "truncate"}>
+                      <span className={isShared ? "block break-words" : undefined}>
+                        {label}
+                        {qty ? <span className="text-muted-foreground"> &times;{qty}</span> : null}
+                      </span>
+                      {isShared && (
+                        <span className="block text-[11px] text-muted-foreground">Same content on {members.length} platforms</span>
+                      )}
                     </span>
                     <span className="flex shrink-0 items-center gap-2">
                       <span className="font-medium">{formatCurrency(finalPrice, currency)}</span>
                       <button
                         type="button"
-                        onClick={() => removeLeaf(cat.categoryId, sel.path)}
+                        onClick={() => members.forEach((m) => removeLeaf(cat.categoryId, m.path))}
                         className="text-muted-foreground hover:text-destructive"
+                        title={isShared ? `Remove ${label}` : undefined}
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -92,7 +103,14 @@ export default function ContractSummary({ variant = "sidebar" }) {
         <CardTitle>Contract Summary</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        {variant === "sidebar" ? <ScrollArea className="max-h-[45vh] pr-2">{content}</ScrollArea> : content}
+        {/* Radix wraps the viewport content in a `display: table` div that grows
+            to the widest row, which pushed long rows' amounts past the card
+            edge — force it back to block so rows fit (and truncate) inside. */}
+        {variant === "sidebar" ? (
+          <ScrollArea className="max-h-[45vh] pr-2 [&_[data-radix-scroll-area-viewport]>div]:!block">{content}</ScrollArea>
+        ) : (
+          content
+        )}
         <Separator />
         <div className="flex items-center justify-between">
           <span className="text-sm font-semibold">{gstEnabled ? "Final Amount (incl. GST)" : "Contract Amount"}</span>

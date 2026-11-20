@@ -7,12 +7,23 @@ import { cn } from "@/lib/utils";
 import { useContractWizard } from "../context/useContractWizard";
 import DynamicFieldRenderer from "./DynamicFieldRenderer";
 import AdvancedFieldsPanel from "./AdvancedFieldsPanel";
+import { ShareContentChecklist, LinkedContentBanner } from "./ContentSharingPanel";
+import { getActiveLinkSource } from "../utils/contentSharing";
 
 export default function LeafItemCard({ categoryId, path, leafConfig }) {
-  const { state, dispatch, ACTIONS, isLeafEnabled, getLeafSelection } = useContractWizard();
+  const { state, dispatch, ACTIONS, isLeafEnabled, getLeafSelection, getSelectionsForCategory } = useContractWizard();
   const enabled = isLeafEnabled(categoryId, path);
   const selection = getLeafSelection(categoryId, path);
   const expanded = state.ui.expandedAdvancedPaths.includes(path);
+
+  // Content sharing (e.g. Facebook posting the same content as Instagram):
+  // while linked, the mirrored fields are read-only here and edited on the
+  // source platform instead.
+  const sharing = leafConfig.contentSharing;
+  const linkSource = sharing ? getActiveLinkSource(getSelectionsForCategory(categoryId), selection) : null;
+  const fields = (leafConfig.fields || []).map((f) =>
+    linkSource && sharing.fields.includes(f.name) ? { ...f, readOnly: true } : f
+  );
 
   const setEnabled = (next) =>
     dispatch({ type: ACTIONS.SET_LEAF_ENABLED, payload: { categoryId, path, enabled: next } });
@@ -47,11 +58,13 @@ export default function LeafItemCard({ categoryId, path, leafConfig }) {
           >
             <CardContent className="space-y-4 pt-0">
               <Separator />
+              {linkSource && <LinkedContentBanner categoryId={categoryId} path={path} sourcePath={linkSource} />}
               <DynamicFieldRenderer
-                fields={leafConfig.fields || []}
+                fields={fields}
                 values={selection?.values || {}}
                 onChange={setFieldValue}
               />
+              {sharing && !linkSource && <ShareContentChecklist categoryId={categoryId} path={path} />}
               {leafConfig.commonFields && (
                 <AdvancedFieldsPanel
                   advanced={selection?.advanced || {}}
