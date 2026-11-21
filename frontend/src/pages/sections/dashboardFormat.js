@@ -1,6 +1,6 @@
 import {
   Bell, CalendarCheck, CalendarClock, CalendarX, Edit3, FileText, IndianRupee, MapPin, MessageSquare, Package, Paperclip, RefreshCw, Send, ShieldCheck,
-  TrendingUp, UserCheck, UserPlus,
+  Images, TrendingUp, UserCheck, UserPlus,
 } from "lucide-react";
 
 // Formatting + activity icon map shared by the Super Admin Dashboard and its
@@ -59,4 +59,5 @@ export const ACTIVITY_META = {
   meeting_no_show: { Icon: CalendarX, color: "#d97706" },
   meeting_cancelled: { Icon: CalendarX, color: "#64748b" },
   meeting_check_out: { Icon: MapPin, color: "#16a34a" },
+  visit_photos_added: { Icon: Images, color: "#0891b2" },
 };

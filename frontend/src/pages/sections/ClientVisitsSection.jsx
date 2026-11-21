@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  MapPin, Users, Building2, Timer, Radio, Download, RefreshCw, ChevronLeft, ChevronRight, AlertTriangle,
+  MapPin, Users, Building2, Timer, Radio, Download, RefreshCw, ChevronLeft, ChevronRight, AlertTriangle, Images,
 } from "lucide-react";
 import { getUsersByRole } from "../../services/clientApi";
-import { getAllClientVisits, mapUrl } from "../../services/clientVisitApi";
+import { getAllClientVisits, mapUrl, visitPhotoUrl, photoCategoryLabel } from "../../services/clientVisitApi";
+import { PhotoStrip, PhotoLightbox } from "./VisitPhotos";
 import { T, KpiCard, kpiGridStyle, escapeCsvValue } from "./shared";
 import { Card, Chip, Empty, th, td, linkBtn } from "./salesUi";
 import {
@@ -62,7 +63,7 @@ function FixCell({ fix, label }) {
 function toCsv(visits) {
   const header = [
     "Sales Person", "Client", "Company", "City", "Status", "Check-in Time", "Check-in Lat", "Check-in Lng", "Check-in Accuracy (m)",
-    "Check-out Time", "Check-out Lat", "Check-out Lng", "Duration (min)", "Purpose", "Outcome",
+    "Check-out Time", "Check-out Lat", "Check-out Lng", "Duration (min)", "Purpose", "Outcome", "Photos", "Photo Links",
   ];
   const rows = visits.map((v) => [
     v.salesPerson?.name, v.clientId?.clientName, v.clientId?.companyName, v.clientId?.city,
@@ -73,6 +74,8 @@ function toCsv(visits) {
     v.checkOut?.lat, v.checkOut?.lng,
     v.status === "completed" ? Math.round(visitMinutes(v)) : "",
     v.purpose, v.outcome,
+    (v.photos || []).length,
+    (v.photos || []).map((p) => `${photoCategoryLabel(p.category)}${p.caption ? ` (${p.caption})` : ""}: ${visitPhotoUrl(p)}`).join(" | "),
   ]);
   return [header, ...rows].map((r) => r.map(escapeCsvValue).join(",")).join("\n");
 }
@@ -85,6 +88,7 @@ export default function ClientVisitsSection() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
+  const [viewer, setViewer] = useState(null); // { visit, index }
 
   useEffect(() => {
     getUsersByRole("sales")
@@ -189,12 +193,13 @@ export default function ClientVisitsSection() {
       )}
 
       {s && (
-        <div style={kpiGridStyle}>
+        <div style={{ ...kpiGridStyle, gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
           <KpiCard Icon={MapPin} label="Visits" value={s.totalVisits} color={T.brand} bgColor={T.brandLight} />
           <KpiCard Icon={Building2} label="Clients Met" value={s.uniqueClients} color="#2563eb" bgColor="#eff6ff" />
           <KpiCard Icon={Users} label="Sales People" value={s.activeSalesPeople} color="#7c3aed" bgColor="#f5f3ff" />
           <KpiCard Icon={Radio} label="In Meeting Now" value={s.inProgress} color="#c2410c" bgColor="#ffedd5" />
           <KpiCard Icon={Timer} label="Time With Clients" value={fmtDuration(s.totalMinutes)} color={T.green} bgColor={T.greenBg} />
+          <KpiCard Icon={Images} label="Photos Shared" value={s.totalPhotos ?? 0} color="#0891b2" bgColor="#ecfeff" />
         </div>
       )}
 
@@ -210,7 +215,7 @@ export default function ClientVisitsSection() {
         ) : (
           <>
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 900 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 1040 }}>
                 <thead>
                   <tr>
                     <th style={th()}>Sales Person</th>
@@ -218,6 +223,7 @@ export default function ClientVisitsSection() {
                     <th style={th()}>Check-in</th>
                     <th style={th()}>Check-out</th>
                     <th style={th()}>Location</th>
+                    <th style={th()}>Photos</th>
                     <th style={th()}>Purpose / Outcome</th>
                     <th style={th()}>Status</th>
                   </tr>
@@ -251,6 +257,9 @@ export default function ClientVisitsSection() {
                             {done && <FixCell fix={v.checkOut} label="Check-out" />}
                           </div>
                         </td>
+                        <td style={td({ minWidth: 150 })}>
+                          <PhotoStrip visit={v} onOpen={(index) => setViewer({ visit: v, index })} />
+                        </td>
                         <td style={td({ color: T.textSecondary, maxWidth: 280 })}>
                           {v.purpose && <div><span style={{ color: T.textMuted }}>Purpose:</span> {v.purpose}</div>}
                           {v.outcome && <div style={{ marginTop: v.purpose ? 3 : 0 }}><span style={{ color: T.textMuted }}>Outcome:</span> {v.outcome}</div>}
@@ -282,6 +291,15 @@ export default function ClientVisitsSection() {
           </>
         )}
       </Card>
+
+      {viewer && (
+        <PhotoLightbox
+          visit={viewer.visit}
+          startIndex={viewer.index}
+          title={`${clientLabel(viewer.visit.clientId)} · ${viewer.visit.salesPerson?.name || "Sales person"} · ${fmtDateTime(viewer.visit.checkIn?.at)}`}
+          onClose={() => setViewer(null)}
+        />
+      )}
     </div>
   );
 }

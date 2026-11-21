@@ -18,7 +18,9 @@ export default function DateField({ value, onChange, placeholder = "Pick a date"
           className={cn("w-full justify-start text-left font-normal", !dateValue && "text-muted-foreground")}
         >
           <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
-          <span className="truncate">{dateValue ? format(dateValue, "PPP") : placeholder}</span>
+          {/* "30 Sep 2026" — short enough for the narrow date boxes in the
+              builder's one-row layout, and the same style as the summary. */}
+          <span className="truncate">{dateValue ? format(dateValue, "d MMM yyyy") : placeholder}</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0">

@@ -52,10 +52,11 @@ function statusFromProgress(delivered, quantity) {
  * Returns { contract, deliverable } on success, or null when the task isn't
  * contract-linked or no matching contract deliverable exists.
  */
-async function syncTaskProgressToContract(task, taskItem, previousDelivered) {
+async function syncTaskProgressToContract(task, taskItem, previousDelivered, newDeliveredOverride) {
   if (!task.contractId) return null;
 
-  const contract = await Contract.findById(task.contractId);
+  // task.contractId may be populated (the progress route loads its dates).
+  const contract = await Contract.findById(task.contractId._id || task.contractId);
   if (!contract) return null;
 
   const target = findContractDeliverable(contract, taskItem);
@@ -64,7 +65,9 @@ async function syncTaskProgressToContract(task, taskItem, previousDelivered) {
   // Self-heal legacy tasks: remember the match so later updates use the id.
   if (!taskItem.contractDeliverableId) taskItem.contractDeliverableId = target._id;
 
-  const newDelivered = taskItem.delivered || 0;
+  // Monthly items pass the changed month's new count explicitly (the delta
+  // between that month's old and new count is what moves the contract total).
+  const newDelivered = newDeliveredOverride ?? (taskItem.delivered || 0);
 
   if (target.trackingMode === "status") {
     const status = statusFromProgress(newDelivered, taskItem.quantity);

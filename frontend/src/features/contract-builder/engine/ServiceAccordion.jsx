@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import * as Icons from "lucide-react";
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
@@ -10,21 +10,31 @@ import CategoryRenderer from "./CategoryRenderer";
 export default function ServiceAccordion() {
   const { state } = useContractWizard();
   const enabledCategories = state.selectedServices.filter((c) => c.enabled);
+  const enabledKey = enabledCategories.map((c) => c.categoryId).join(",");
+
+  // Controlled so a service picked on the same screen opens straight away
+  // (an uncontrolled defaultValue only applies to the first render).
+  const [open, setOpen] = useState(() => enabledCategories.map((c) => c.categoryId));
+  const seen = useRef(new Set(open));
+  useEffect(() => {
+    const added = enabledCategories.map((c) => c.categoryId).filter((id) => !seen.current.has(id));
+    if (added.length) {
+      added.forEach((id) => seen.current.add(id));
+      setOpen((prev) => [...prev, ...added]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabledKey]);
 
   if (!enabledCategories.length) {
     return (
       <div className="rounded-xl border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
-        No services selected yet. Go back to Step 2 to choose services.
+        No services selected yet — pick one above to configure it.
       </div>
     );
   }
 
   return (
-    <Accordion
-      type="multiple"
-      defaultValue={enabledCategories.map((c) => c.categoryId)}
-      className="space-y-3"
-    >
+    <Accordion type="multiple" value={open} onValueChange={setOpen} className="space-y-3">
       {enabledCategories.map(({ categoryId, selections }) => {
         const meta = getCategoryMeta(categoryId);
         const config = SERVICE_CONFIG[categoryId];

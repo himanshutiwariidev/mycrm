@@ -5,17 +5,15 @@ import {
   CreditCard, History, Plus, X, User, CheckCircle2, ChevronDown, ChevronRight,
   Activity, Inbox, IndianRupee, Eye,
   UserPlus, Send, RefreshCw, Edit3, ShieldCheck, FilePlus,
-  MessageSquare, TrendingUp,
+  MessageSquare, TrendingUp, Phone, Mail, FileBarChart2,
 } from "lucide-react";
 import {
   getClientById, updateClient, deleteClient, getClientActivity,
-  deleteContract, deletePaymentReminder,
+  deleteContract,
   getClientRemarks, addClientRemark,
-  getWorkProgress, addWorkProgress, updateWorkProgress,
   updateDeliverable,
 } from "../services/clientApi";
 import ClientForm from "../components/ClientForm";
-import PaymentReminderForm from "../components/PaymentReminderForm";
 import ContractDetail from "./ContractDetail";
 import DeliverableDetailPanel from "../components/DeliverableDetailPanel";
 import { getLeafConfig } from "../features/contract-builder/utils/configLookup";
@@ -23,6 +21,10 @@ import { findMatchingSelection } from "../features/contract-builder/utils/delive
 import { getCategoryMeta } from "../features/contract-builder/config/serviceCategories";
 import { resolveDeliverableVisual, resolveCategoryVisual } from "../config/serviceVisuals";
 import { unitNoun, formatDeliverableAmount } from "../config/deliverableUnits";
+import { ProofButton, ProofDialog, proofsForContractDeliverable, useDeliverableProofs } from "../components/DeliverableProofs";
+import { clientCategoryLabel } from "../config/clientCategories";
+import PackageStars from "../components/PackageStars";
+import ClientMonthlyReports from "../components/ClientMonthlyReports";
 import "./ClientDetailPage.css";
 
 const initials = (name = "") =>
@@ -55,7 +57,7 @@ const STATUS_OPTIONS = [
 // "Custom Information" below — so newly added onboarding fields show up with no code changes.
 const KNOWN_CLIENT_FIELDS = new Set([
   "_id", "__v", "clientName", "email", "phone", "companyName", "gstNo", "tanNo",
-  "salesPerson", "leadSource", "clientType", "projectType", "projectName",
+  "salesPerson", "leadSource", "clientType", "businessCategory", "projectType", "projectName",
   "address", "city", "state", "country", "zipCode", "contactPerson", "designation",
   "status", "activeStatus", "totalProjects", "totalAmount", "notes", "onboardedAt",
   "createdAt", "updatedAt", "hasLoginAccess",
@@ -68,18 +70,9 @@ const TABS = [
   { id: "remarks", label: "Remarks History", Icon: MessageSquare },
   { id: "deliverables", label: "Deliverables", Icon: Package },
   { id: "payments", label: "Payments", Icon: CreditCard },
-  { id: "reminders", label: "Payment Reminders", Icon: Wallet },
-  { id: "progress", label: "Work Progress", Icon: TrendingUp },
+  { id: "reports", label: "Monthly Reports", Icon: FileBarChart2 },
   { id: "activity", label: "Activity Timeline", Icon: History },
 ];
-
-const WORK_PROGRESS_STATUS_META = {
-  "Pending": { color: "#94a3b8", bg: "#f1f5f9" },
-  "In Progress": { color: "#2563eb", bg: "#eff6ff" },
-  "On Hold": { color: "#d97706", bg: "#fffbeb" },
-  "Waiting for Client": { color: "#7c3aed", bg: "#f5f3ff" },
-  "Completed": { color: "#16a34a", bg: "#f0fdf4" },
-};
 
 const ACTIVITY_META = {
   client_created: { Icon: UserPlus, color: "#16a34a" },
@@ -136,6 +129,39 @@ function Field({ label, value }) {
   );
 }
 
+/** One label → value row in the compact profile card (hidden when empty). */
+function KV({ label, value, href, cap = false }) {
+  if (value === undefined || value === null || value === "" || value === "—") return null;
+  return (
+    <div className="cdx-kv">
+      <span className="cdx-kv-label">{label}</span>
+      {href ? <a className="cdx-kv-value" href={href}>{value}</a> : <span className={`cdx-kv-value${cap ? " cdx-cap" : ""}`}>{value}</span>}
+    </div>
+  );
+}
+
+/** A section card on the single-page layout (one per former tab). */
+function Block({ id, Icon, title, count, subtitle, actions, children, className = "" }) {
+  return (
+    <section id={`cd-${id}`} className={`cdx-card ${className}`}>
+      <header className="cdx-card-head">
+        <div className="cdx-card-title">
+          <span className="cdx-card-icon"><Icon size={15} strokeWidth={2.2} /></span>
+          <h2>{title}</h2>
+          {count !== undefined && <span className="cdx-count">{count}</span>}
+          {subtitle && <span className="cdx-sub">{subtitle}</span>}
+        </div>
+        {actions && <div className="cdx-card-actions">{actions}</div>}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+const SECTION_IDS = new Set(TABS.map((t) => t.id).filter((id) => id !== "overview"));
+const scrollToSection = (id) =>
+  document.getElementById(`cd-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+
 export default function ClientDetailPage() {
   const { clientId } = useParams();
   const navigate = useNavigate();
@@ -143,23 +169,21 @@ export default function ClientDetailPage() {
 
   const [client, setClient] = useState(null);
   const [contracts, setContracts] = useState([]);
-  const [reminders, setReminders] = useState([]);
+  // Proof of work (screenshots / live links) the team attached to this client's deliverables.
+  const { proofs, remove: removeProof } = useDeliverableProofs({ clientIds: clientId ? [clientId] : [] });
+  const [proofItem, setProofItem] = useState(null); // contract deliverable whose proof is open
   const [activity, setActivity] = useState([]);
   const [remarks, setRemarks] = useState([]);
-  const [workProgress, setWorkProgress] = useState([]);
   const [loading, setLoading] = useState(true);
-  // ?tab=deliverables (etc.) deep-links straight to a tab, e.g. from the
-  // Sales Dashboard's renewal / balance / deliverable rows.
-  const [activeTab, setActiveTab] = useState(() => {
-    const requested = searchParams.get("tab");
-    return TABS.some((t) => t.id === requested) ? requested : "overview";
-  });
+  // Everything is on one page now; ?tab=deliverables (etc., e.g. from the
+  // Sales Dashboard) scrolls to that section once the data has loaded.
+  const requestedSection = searchParams.get("tab");
+  const [showAllActivity, setShowAllActivity] = useState(false);
   const [statusSaving, setStatusSaving] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
   const [showRenewPicker, setShowRenewPicker] = useState(false);
   const [formType, setFormType] = useState(null);
-  const [selectedReminder, setSelectedReminder] = useState(null);
   const [manageContractId, setManageContractId] = useState(null);
   const [manageContractTab, setManageContractTab] = useState(null);
   const [manageContractDefaultTab, setManageContractDefaultTab] = useState(null);
@@ -170,31 +194,25 @@ export default function ClientDetailPage() {
   const [remarkText, setRemarkText] = useState("");
   const [remarkSaving, setRemarkSaving] = useState(false);
 
-  const [progressForm, setProgressForm] = useState(null); // null | { editingId, title, description, status, percentage }
-  const [progressSaving, setProgressSaving] = useState(false);
-
   const userRole = localStorage.getItem("role");
-  // Sales people work from their own /sales page (dashboard + clients tabs),
-  // not the bare /clients list, so "back" should return them there.
-  const backPath = userRole === "sales" ? "/sales" : "/clients";
+  // "Back to Clients" returns to the Clients section inside each role's own
+  // dashboard (with its sidebar/tabs) — never the bare /clients page.
+  const backPath = { admin: "/admin?tab=clients", sales: "/sales?view=clients", user: "/dashboard?tab=clients" }[userRole] || "/clients";
   const userId = localStorage.getItem("userId");
   const isAdmin = userRole === "admin";
 
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [clientRes, activityRes, remarksRes, progressRes] = await Promise.all([
+      const [clientRes, activityRes, remarksRes] = await Promise.all([
         getClientById(clientId),
         getClientActivity(clientId).catch(() => ({ data: { activity: [] } })),
         getClientRemarks(clientId).catch(() => ({ data: { remarks: [] } })),
-        getWorkProgress(clientId).catch(() => ({ data: { workProgress: [] } })),
       ]);
       setClient(clientRes.data.client);
       setContracts(clientRes.data.contracts || []);
-      setReminders(clientRes.data.reminders || []);
       setActivity(activityRes.data.activity || []);
       setRemarks(remarksRes.data.remarks || []);
-      setWorkProgress(progressRes.data.workProgress || []);
     } catch (error) {
       console.error("Error loading client:", error);
       setClient(null);
@@ -205,11 +223,17 @@ export default function ClientDetailPage() {
 
   useEffect(() => { loadAll(); }, [clientId]);
 
-  const canManageRemarksOrProgress = isAdmin
+  useEffect(() => {
+    if (!loading && SECTION_IDS.has(requestedSection)) {
+      const t = setTimeout(() => scrollToSection(requestedSection), 150);
+      return () => clearTimeout(t);
+    }
+    return undefined;
+  }, [loading, requestedSection]);
+
+  const canManageRemarks = isAdmin
     || (client?.salesPerson?._id && String(client.salesPerson._id) === userId)
     || (client?.assignedUser?._id && String(client.assignedUser._id) === userId);
-
-  const canAddWorkProgress = isAdmin || (client?.assignedUser?._id && String(client.assignedUser._id) === userId);
 
   const handleAddRemark = async () => {
     if (!remarkText.trim()) return;
@@ -222,32 +246,6 @@ export default function ClientDetailPage() {
       alert(err.response?.data?.message || "Failed to add remark");
     } finally {
       setRemarkSaving(false);
-    }
-  };
-
-  const latestProgressEntry = workProgress[0]; // backend returns newest-first
-
-  const handleSaveProgress = async () => {
-    if (!progressForm?.title?.trim()) return;
-    setProgressSaving(true);
-    try {
-      const payload = {
-        title: progressForm.title.trim(),
-        description: progressForm.description,
-        status: progressForm.status,
-        percentage: Number(progressForm.percentage) || 0,
-      };
-      if (progressForm.editingId) {
-        await updateWorkProgress(clientId, progressForm.editingId, payload);
-      } else {
-        await addWorkProgress(clientId, payload);
-      }
-      setProgressForm(null);
-      await loadAll();
-    } catch (err) {
-      alert(err.response?.data?.message || "Failed to save work progress update");
-    } finally {
-      setProgressSaving(false);
     }
   };
 
@@ -304,16 +302,6 @@ export default function ClientDetailPage() {
       alert("Error updating deliverable status");
     } finally {
       setDeliverableStatusSaving(null);
-    }
-  };
-
-  const handleDeleteReminder = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this reminder?")) return;
-    try {
-      await deletePaymentReminder(id);
-      loadAll();
-    } catch {
-      alert("Error deleting reminder");
     }
   };
 
@@ -381,297 +369,252 @@ export default function ClientDetailPage() {
     ([key, value]) => !KNOWN_CLIENT_FIELDS.has(key) && value !== null && value !== undefined && value !== ""
   );
 
+  const statusLabel = STATUS_OPTIONS.find((o) => o.value === client.status)?.label || client.status;
+  const addressLine = [client.address, client.city, client.state, client.country, client.zipCode].filter(Boolean).join(", ");
+  const salesName = client.salesPerson?.name || client.salesPersonName;
+  // Profile fields that are still empty — one line instead of a dozen "—" cells.
+  const emptyCount = [
+    client.email, client.contactPerson, client.designation, client.clientType, client.gstNo, client.tanNo,
+    client.leadSource, salesName, addressLine,
+  ].filter((v) => !v).length;
+  const visibleActivity = showAllActivity ? activity : activity.slice(0, 8);
+  const sectionNav = [
+    { id: "contracts", label: "Contracts", count: contracts.length },
+    { id: "deliverables", label: "Deliverables", count: groupedDeliverables.length },
+    { id: "reports", label: "Monthly Reports" },
+    { id: "payments", label: "Payments", count: allPayments.length },
+    { id: "remarks", label: "Remarks", count: remarks.length },
+    { id: "activity", label: "Activity", count: activity.length },
+  ];
+  const piBaseUrl = import.meta.env.VITE_API_BASE_URL
+    ? import.meta.env.VITE_API_BASE_URL.replace("/api", "")
+    : "http://localhost:4050";
+
   return (
-    <div className="client-detail-page">
+    <div className="client-detail-page cdx-page">
       <style>{`@keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }`}</style>
 
       <button className="cd-back" onClick={() => navigate(backPath)}>
         <ArrowLeft size={15} strokeWidth={2.2} /> Back to Clients
       </button>
 
-      <div className="cd-header">
-        <div className="cd-header-row">
-          <div className="cd-identity">
-            <div className="cd-avatar">{initials(client.clientName)}</div>
-            <div>
+      <div className="cdx-layout">
+        {/* ═══ Left: compact client profile ═══ */}
+        <aside className="cdx-profile">
+          <div className="cdx-profile-top">
+            <div className="cd-avatar cdx-avatar">{initials(client.clientName)}</div>
+            <div className="cdx-profile-names">
               <h1>{client.companyName || client.clientName}</h1>
-              {client.companyName && <p className="cd-company"><User size={13} strokeWidth={2} /> {client.clientName}</p>}
-              <div className="cd-meta-row">
-                <span>Sales Person: <strong>{client.salesPerson?.name || client.salesPersonName || "Unassigned"}</strong></span>
-                <span>Created: {fmtDate(client.createdAt)}</span>
-                <span>Updated: {fmtDate(client.updatedAt)}</span>
-              </div>
+              {client.companyName && <p><User size={12} strokeWidth={2} /> {client.clientName}</p>}
             </div>
-          </div>
-
-          <div className="cd-header-right">
-            <div className="cd-actions">
+            <div className="cdx-profile-actions">
               <button className="btn-small" title="Edit Client" onClick={() => { setFormType("client"); setShowForm(true); }}>
-                <Pencil size={15} strokeWidth={2.1} />
+                <Pencil size={14} strokeWidth={2.1} />
               </button>
               <button className="btn-small" title="Delete Client" onClick={handleDeleteClient}>
-                <Trash2 size={15} strokeWidth={2.1} />
+                <Trash2 size={14} strokeWidth={2.1} />
               </button>
-            </div>
-
-            <div className="cd-status-block">
-              <select
-                className={`status status-select ${client.status}`}
-                value={client.status}
-                disabled={statusSaving}
-                onChange={(e) => handleStatusChange(e.target.value)}
-                title="Update lead status"
-              >
-                {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-              <button
-                className={`cd-active-toggle ${client.activeStatus}`}
-                disabled={statusSaving}
-                onClick={handleActiveStatusToggle}
-                title="Toggle whether this client is active or a past (dead) client"
-              >
-                <Activity size={13} strokeWidth={2.2} /> {client.activeStatus === "active" ? "Active" : "Dead"}
-              </button>
-              {client.hasLoginAccess && (
-                <span className="login-access-badge">
-                  <CheckCircle2 size={13} strokeWidth={2.4} /> Portal access enabled
-                </span>
-              )}
             </div>
           </div>
-        </div>
-      </div>
 
-      <div className="cd-tabs">
-        {TABS.map(({ id, label, Icon }) => (
-          <button key={id} className={`cd-tab ${activeTab === id ? "active" : ""}`} onClick={() => setActiveTab(id)}>
-            <Icon size={15} strokeWidth={2.2} /> {label}
-          </button>
-        ))}
-      </div>
+          <div className="cdx-status-row">
+            <select
+              className={`status status-select ${client.status}`}
+              value={client.status}
+              disabled={statusSaving}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              title="Update lead status"
+            >
+              {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <button
+              className={`cd-active-toggle ${client.activeStatus}`}
+              disabled={statusSaving}
+              onClick={handleActiveStatusToggle}
+              title="Toggle whether this client is active or a past (dead) client"
+            >
+              <Activity size={13} strokeWidth={2.2} /> {client.activeStatus === "active" ? "Active" : "Dead"}
+            </button>
+            {client.hasLoginAccess && (
+              <span className="login-access-badge">
+                <CheckCircle2 size={13} strokeWidth={2.4} /> Portal
+              </span>
+            )}
+          </div>
 
-      {/* ── OVERVIEW ── */}
-      {activeTab === "overview" && (
-        <div className="cd-panel">
-          <Section title="Basic Information">
-            <Field label="Client Name" value={client.clientName} />
-            <Field label="Company Name" value={client.companyName} />
-            <Field label="Contact Person" value={client.contactPerson} />
-            <Field label="Designation" value={client.designation} />
-            <Field label="Email" value={client.email} />
-            <Field label="Phone" value={client.phone} />
-          </Section>
+          <div className="cdx-group">
+            <div className="cdx-group-title">Contact</div>
+            <KV label="Phone" value={client.phone} href={client.phone ? `tel:${client.phone}` : undefined} />
+            <KV label="Email" value={client.email} href={client.email ? `mailto:${client.email}` : undefined} />
+            <KV label="Contact Person" value={client.contactPerson} />
+            <KV label="Designation" value={client.designation} />
+          </div>
 
-          <Section title="Business Information">
-            <Field label="GST Number" value={client.gstNo} />
-            <Field label="TAN Number" value={client.tanNo} />
-            <Field label="Client Type" value={client.clientType} />
-          </Section>
+          <div className="cdx-group">
+            <div className="cdx-group-title">Business &amp; Lead</div>
+            <KV label="Client Type" value={client.clientType} cap />
+            <KV label="Category" value={clientCategoryLabel(client.businessCategory)} />
+            <KV label="Deals In" value={client.projectType} cap />
+            <KV label="GST No." value={client.gstNo} />
+            <KV label="TAN No." value={client.tanNo} />
+            <KV label="Lead Source" value={client.leadSource} cap />
+            <KV label="Sales Person" value={salesName || "Unassigned"} />
+            <KV label="Lead Status" value={statusLabel} />
+          </div>
 
-          <Section title="Address">
-            <Field label="Address" value={client.address} />
-            <Field label="City" value={client.city} />
-            <Field label="State" value={client.state} />
-            <Field label="Country" value={client.country} />
-            <Field label="Zip Code" value={client.zipCode} />
-          </Section>
+          {(addressLine || client.projectName || client.totalAmount > 0) && (
+            <div className="cdx-group">
+              <div className="cdx-group-title">Address &amp; Project</div>
+              <KV label="Address" value={addressLine} />
+              <KV label="Project" value={client.projectName} />
+              {client.totalAmount > 0 && <KV label="Total Amount" value={fmtINR(client.totalAmount)} />}
+            </div>
+          )}
 
-          <Section title="Lead Information">
-            <Field label="Lead Source" value={client.leadSource} />
-            <Field label="Sales Person" value={client.salesPerson?.name || client.salesPersonName} />
-            <Field label="Status" value={client.status} />
-          </Section>
-
-          <Section title="Project Information">
-            <Field label="Project Name" value={client.projectName} />
-            <Field label="Project Type" value={client.projectType} />
-            <Field label="Total Amount" value={fmtINR(client.totalAmount)} />
-          </Section>
-
-          <Section title="Portal Information">
-            <Field label="Portal Enabled" value={client.hasLoginAccess ? "Yes" : "No"} />
-            <Field label="Login Email" value={client.hasLoginAccess ? client.email : "—"} />
-            <Field label="Account Created" value={fmtDate(client.onboardedAt)} />
-          </Section>
+          <div className="cdx-group">
+            <div className="cdx-group-title">Record</div>
+            <KV label="Portal" value={client.hasLoginAccess ? `Enabled · ${client.email}` : "Not enabled"} />
+            {client.hasLoginAccess && <KV label="Account Created" value={fmtDate(client.onboardedAt)} />}
+            <KV label="Created" value={fmtDate(client.createdAt)} />
+            <KV label="Updated" value={fmtDate(client.updatedAt)} />
+          </div>
 
           {client.notes && (
-            <Section title="Notes">
-              <p className="detail-notes">{client.notes}</p>
-            </Section>
+            <div className="cdx-group">
+              <div className="cdx-group-title">Notes</div>
+              <p className="cdx-notes">{client.notes}</p>
+            </div>
           )}
 
           {customFields.length > 0 && (
-            <Section title="Custom Information">
+            <div className="cdx-group">
+              <div className="cdx-group-title">Custom Information</div>
               {customFields.map(([key, value]) => (
-                <Field key={key} label={key} value={typeof value === "object" ? JSON.stringify(value) : String(value)} />
+                <KV key={key} label={key} value={typeof value === "object" ? JSON.stringify(value) : String(value)} />
               ))}
-            </Section>
-          )}
-        </div>
-      )}
-
-      {/* ── CONTRACTS ── */}
-      {activeTab === "contracts" && (
-        <div className="cd-panel">
-          <div className="cd-panel-header">
-            <h2>Contracts</h2>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {contracts.length > 0 && (
-                <button className="btn-secondary" onClick={() => setShowRenewPicker(true)}>
-                  <RefreshCw size={14} strokeWidth={2.4} /> Renew Contract
-                </button>
-              )}
-              <button className="btn-primary" onClick={() => navigate(`/clients/${clientId}/contracts/new`)}>
-                <Plus size={14} strokeWidth={2.4} /> Add New Contract
-              </button>
-            </div>
-          </div>
-          {contracts.length === 0 ? (
-            <EmptyState message="No contracts yet" />
-          ) : (
-            <div className="table-container">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Contract</th>
-                    <th>Contract Start Date</th>
-                    <th>Contract End Date</th>
-                    <th>Contract Amount</th>
-                    <th>Received Amount</th>
-                    <th>Balance Amount</th>
-                    <th>Due Date</th>
-                    <th>PI</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {contracts.map((contract) => {
-                    const piBaseUrl = import.meta.env.VITE_API_BASE_URL
-                      ? import.meta.env.VITE_API_BASE_URL.replace("/api", "")
-                      : "http://localhost:4050";
-                    const piUrl = contract.piAttachment?.filename ? `${piBaseUrl}/uploads/${contract.piAttachment.filename}` : null;
-                    return (
-                      <tr key={contract._id}>
-                        <td>{contract.contractNumber}</td>
-                        <td>{contract.projectName}</td>
-                        <td>{fmtDate(contract.contractStartDate)}</td>
-                        <td>{fmtDate(contract.validUntil)}</td>
-                        <td>{contract.projectAmount} {contract.currency}</td>
-                        <td>{contract.receivedAmount || 0} {contract.currency}</td>
-                        <td>{contract.dueAmount ?? contract.projectAmount} {contract.currency}</td>
-                        <td>
-                          {contract.nextDueDate ? (
-                            <span style={contract.nextDueDate && contract.dueAmount > 0 && new Date(contract.nextDueDate) < now ? { color: "#dc2626", fontWeight: 600 } : undefined}>
-                              {fmtDate(contract.nextDueDate)}
-                            </span>
-                          ) : (
-                            <span className="cd-pi-none">—</span>
-                          )}
-                        </td>
-                        <td>
-                          {piUrl ? (
-                            <a
-                              href={piUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              download={contract.piAttachment.originalname}
-                              className="btn-small"
-                              title={`Download ${contract.piAttachment.originalname}`}
-                            >
-                              <Download size={15} strokeWidth={2.1} />
-                            </a>
-                          ) : (
-                            <span className="cd-pi-none">—</span>
-                          )}
-                        </td>
-                        <td>
-                          <div className="action-buttons">
-                            <button className="btn-small" title="View Full Details" onClick={() => { setManageContractId(contract._id); setManageContractTab(null); setManageContractDefaultTab("details"); }}>
-                              <Eye size={15} strokeWidth={2.1} />
-                            </button>
-                            <button className="btn-small" title="Edit" onClick={() => navigate(`/clients/${clientId}/contracts/${contract._id}/edit`)}>
-                              <Pencil size={15} strokeWidth={2.1} />
-                            </button>
-                            <button className="btn-small" title="Delete" onClick={() => handleDeleteContract(contract._id)}>
-                              <Trash2 size={15} strokeWidth={2.1} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
             </div>
           )}
-        </div>
-      )}
 
-      {/* ── PAYMENT REMINDERS ── */}
-      {activeTab === "reminders" && (
-        <div className="cd-panel">
-          <div className="cd-panel-header">
-            <h2>Payment Reminders</h2>
-            <button className="btn-primary" onClick={() => { setSelectedReminder(null); setFormType("reminder"); setShowForm(true); }}>
-              <Plus size={14} strokeWidth={2.4} /> Add Reminder
+          {emptyCount > 0 && (
+            <button type="button" className="cdx-empty-hint" onClick={() => { setFormType("client"); setShowForm(true); }}>
+              {emptyCount} detail{emptyCount === 1 ? "" : "s"} not filled — <strong>Edit to add</strong>
             </button>
-          </div>
-          {reminders.length === 0 ? (
-            <EmptyState message="No payment reminders yet" />
-          ) : (
-            <div className="table-container">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Reminder #</th>
-                    <th>Invoice #</th>
-                    <th>Amount</th>
-                    <th>Due Date</th>
-                    <th>Status</th>
-                    <th>Sent</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reminders.map((reminder) => (
-                    <tr key={reminder._id}>
-                      <td>{reminder.reminderId}</td>
-                      <td>{reminder.invoiceNumber || "—"}</td>
-                      <td>{reminder.amountDue} {reminder.currency}</td>
-                      <td>{reminder.dueDate ? fmtDate(reminder.dueDate) : "On Demand"}</td>
-                      <td><span className={`status ${reminder.reminderStatus}`}>{reminder.reminderStatus}</span></td>
-                      <td>{reminder.sentAt ? fmtDate(reminder.sentAt) : "—"}</td>
-                      <td>
-                        <div className="action-buttons">
-                          <button className="btn-small" title="Edit" onClick={() => { setSelectedReminder(reminder); setFormType("reminder"); setShowForm(true); }}>
-                            <Pencil size={15} strokeWidth={2.1} />
-                          </button>
-                          <button className="btn-small" title="Delete" onClick={() => handleDeleteReminder(reminder._id)}>
-                            <Trash2 size={15} strokeWidth={2.1} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           )}
-        </div>
-      )}
+        </aside>
 
-      {/* ── DELIVERABLES ── */}
-      {activeTab === "deliverables" && (
-        <div className="cd-panel">
-          <div className="cd-panel-header">
-            <h2>Deliverables</h2>
-            <span className="cd-panel-subtitle">Across all contracts — expand a row for service-specific details</span>
+        {/* ═══ Right: everything else, one page ═══ */}
+        <main className="cdx-main">
+          <div className="cdx-kpis">
+            <div className="cdx-kpi"><span>Contracts</span><strong>{contracts.length}</strong></div>
+            <div className="cdx-kpi"><span>Total Value</span><strong>{fmtINR(totalProjectValue)}</strong></div>
+            <div className="cdx-kpi green"><span>Received</span><strong>{fmtINR(totalReceived)}</strong></div>
+            <div className="cdx-kpi amber"><span>Due</span><strong>{fmtINR(totalDue)}</strong></div>
+            <div className={`cdx-kpi ${overdueCount ? "red" : ""}`}><span>Overdue</span><strong>{overdueCount}</strong></div>
+            {totalTds > 0 && <div className="cdx-kpi"><span>TDS (records)</span><strong>{fmtINR(totalTds)}</strong></div>}
           </div>
-          {groupedDeliverables.length === 0 ? (
-            <EmptyState message="No deliverables defined yet" />
-          ) : (
-            <div className="table-container">
+
+          <nav className="cdx-nav" aria-label="Jump to section">
+            {sectionNav.map((n) => (
+              <button key={n.id} type="button" onClick={() => scrollToSection(n.id)}>
+                {n.label} <span>{n.count}</span>
+              </button>
+            ))}
+          </nav>
+
+          {/* ── Contracts ── */}
+          <Block
+            id="contracts"
+            Icon={FileText}
+            title="Contracts"
+            count={contracts.length}
+            actions={
+              <>
+                {contracts.length > 0 && (
+                  <button className="btn-secondary cdx-btn" onClick={() => setShowRenewPicker(true)}>
+                    <RefreshCw size={13} strokeWidth={2.4} /> Renew
+                  </button>
+                )}
+                <button className="btn-primary cdx-btn" onClick={() => navigate(`/clients/${clientId}/contracts/new`)}>
+                  <Plus size={13} strokeWidth={2.4} /> New Contract
+                </button>
+              </>
+            }
+          >
+            {contracts.length === 0 ? (
+              <EmptyState message="No contracts yet" />
+            ) : (
+              <div className="table-container cdx-scroll">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Contract</th>
+                      <th>Period</th>
+                      <th>Amount</th>
+                      <th>Received</th>
+                      <th>Balance</th>
+                      <th>Due Date</th>
+                      <th>PI</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {contracts.map((contract) => {
+                      const piUrl = contract.piAttachment?.filename ? `${piBaseUrl}/uploads/${contract.piAttachment.filename}` : null;
+                      const overdue = contract.nextDueDate && contract.dueAmount > 0 && new Date(contract.nextDueDate) < now;
+                      return (
+                        <tr key={contract._id}>
+                          <td className="cdx-muted">{contract.contractNumber}</td>
+                          <td className="cdx-strong">
+                            {contract.projectName}
+                            <PackageStars packageType={contract.packageType} style={{ marginLeft: 7 }} />
+                          </td>
+                          <td className="cdx-nowrap">{fmtDate(contract.contractStartDate)} → {fmtDate(contract.validUntil)}</td>
+                          <td className="cdx-nowrap">{fmtINR(contract.projectAmount)}</td>
+                          <td className="cdx-nowrap">{fmtINR(contract.receivedAmount || 0)}</td>
+                          <td className="cdx-nowrap cdx-strong">{fmtINR(contract.dueAmount ?? contract.projectAmount)}</td>
+                          <td className="cdx-nowrap">
+                            {contract.nextDueDate
+                              ? <span style={overdue ? { color: "#dc2626", fontWeight: 600 } : undefined}>{fmtDate(contract.nextDueDate)}</span>
+                              : <span className="cd-pi-none">—</span>}
+                          </td>
+                          <td>
+                            {piUrl ? (
+                              <a href={piUrl} target="_blank" rel="noopener noreferrer" download={contract.piAttachment.originalname} className="btn-small" title={`Download ${contract.piAttachment.originalname}`}>
+                                <Download size={14} strokeWidth={2.1} />
+                              </a>
+                            ) : (
+                              <span className="cd-pi-none">—</span>
+                            )}
+                          </td>
+                          <td>
+                            <div className="action-buttons">
+                              <button className="btn-small" title="View Full Details" onClick={() => { setManageContractId(contract._id); setManageContractTab(null); setManageContractDefaultTab("details"); }}>
+                                <Eye size={14} strokeWidth={2.1} />
+                              </button>
+                              <button className="btn-small" title="Edit" onClick={() => navigate(`/clients/${clientId}/contracts/${contract._id}/edit`)}>
+                                <Pencil size={14} strokeWidth={2.1} />
+                              </button>
+                              <button className="btn-small" title="Delete" onClick={() => handleDeleteContract(contract._id)}>
+                                <Trash2 size={14} strokeWidth={2.1} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Block>
+
+          {/* ── Deliverables ── */}
+          <Block id="deliverables" Icon={Package} title="Deliverables" count={groupedDeliverables.length} subtitle="Click a row for item details">
+            {groupedDeliverables.length === 0 ? (
+              <EmptyState message="No deliverables defined yet" />
+            ) : (
+            <div className="table-container cdx-scroll">
               <table className="data-table">
                 <thead>
                   <tr>
@@ -745,7 +688,7 @@ export default function ClientDetailPage() {
                               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                                 <thead>
                                   <tr>
-                                    {["", "Item", "Platform", "Quantity", "Progress", "Status"].map((h) => (
+                                    {["", "Item", "Platform", "Quantity", "Progress", "Status", "Proof"].map((h) => (
                                       <th key={h} style={{ textAlign: "left", padding: "8px 14px", fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.4, background: "#f8f9fc" }}>{h}</th>
                                     ))}
                                   </tr>
@@ -793,6 +736,9 @@ export default function ClientDetailPage() {
                                             </select>
                                           )}
                                         </td>
+                                        <td style={{ padding: "8px 14px" }} onClick={(e) => e.stopPropagation()}>
+                                          <ProofButton proofs={proofsForContractDeliverable(proofs, d._id)} onClick={() => setProofItem({ ...d, _label: `${group.categoryLabel} · ${itemLabel}` })} />
+                                        </td>
                                       </tr>
                                     );
                                   })}
@@ -807,69 +753,51 @@ export default function ClientDetailPage() {
                 </tbody>
               </table>
             </div>
-          )}
-        </div>
-      )}
-
-      {/* ── PAYMENTS ── */}
-      {activeTab === "payments" && (
-        <div className="cd-panel">
-          <div className="cd-panel-header">
-            <h2>Payments</h2>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              {contracts.length > 1 && (
-                <select
-                  value={effectivePaymentContractId || ""}
-                  onChange={(e) => setPaymentContractId(e.target.value)}
-                  title="Choose which contract this payment update applies to"
-                  style={{ padding: "7px 10px", borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 13 }}
-                >
-                  {contracts.map((c) => (
-                    <option key={c._id} value={c._id}>{c.projectName} ({c.contractNumber})</option>
-                  ))}
-                </select>
-              )}
-              <button
-                className="btn-primary"
-                disabled={!effectivePaymentContractId}
-                title={!effectivePaymentContractId ? "Create a contract first" : ""}
-                onClick={() => { if (effectivePaymentContractId) { setManageContractId(effectivePaymentContractId); setManageContractTab("payments"); } }}
-              >
-                <Plus size={14} strokeWidth={2.4} /> Add Payment
-              </button>
-            </div>
-          </div>
-
-          <div className="cd-payment-summary">
-            <div className="cd-summary-card">
-              <span className="detail-label">Total Project Value</span>
-              <span className="cd-summary-value">{fmtINR(totalProjectValue)}</span>
-            </div>
-            <div className="cd-summary-card cd-summary-green">
-              <span className="detail-label">Amount Received</span>
-              <span className="cd-summary-value">{fmtINR(totalReceived)}</span>
-            </div>
-            <div className="cd-summary-card cd-summary-amber">
-              <span className="detail-label">Due Amount</span>
-              <span className="cd-summary-value">{fmtINR(totalDue)}</span>
-            </div>
-            <div className="cd-summary-card cd-summary-red">
-              <span className="detail-label">Overdue</span>
-              <span className="cd-summary-value">{overdueCount}</span>
-            </div>
-            {totalTds > 0 && (
-              <div className="cd-summary-card">
-                <span className="detail-label">TDS (records only)</span>
-                <span className="cd-summary-value">{fmtINR(totalTds)}</span>
-              </div>
             )}
-          </div>
+          </Block>
 
-          <h3 className="cd-subheading">Payment History</h3>
-          {allPayments.length === 0 ? (
-            <EmptyState message="No payments recorded yet" />
-          ) : (
-            <div className="table-container">
+          {/* ── Monthly reports (per contract service, per month) ── */}
+          <Block id="reports" Icon={FileBarChart2} title="Monthly Reports" subtitle="Each service's report for the month — PDF, Word, Excel, CSV or Google Sheet">
+            <ClientMonthlyReports clientId={clientId} />
+          </Block>
+
+          <div className="cdx-row">
+            {/* ── Payments ── */}
+            <Block
+              id="payments"
+              className="cdx-card--fixed"
+              Icon={CreditCard}
+              title="Payments"
+              count={allPayments.length}
+              actions={
+                <>
+                  {contracts.length > 1 && (
+                    <select
+                      className="cdx-select"
+                      value={effectivePaymentContractId || ""}
+                      onChange={(e) => setPaymentContractId(e.target.value)}
+                      title="Choose which contract this payment update applies to"
+                    >
+                      {contracts.map((c) => (
+                        <option key={c._id} value={c._id}>{c.projectName} ({c.contractNumber})</option>
+                      ))}
+                    </select>
+                  )}
+                  <button
+                    className="btn-primary cdx-btn"
+                    disabled={!effectivePaymentContractId}
+                    title={!effectivePaymentContractId ? "Create a contract first" : ""}
+                    onClick={() => { if (effectivePaymentContractId) { setManageContractId(effectivePaymentContractId); setManageContractTab("payments"); } }}
+                  >
+                    <Plus size={13} strokeWidth={2.4} /> Add Payment
+                  </button>
+                </>
+              }
+            >
+              {allPayments.length === 0 ? (
+                <div className="cdx-fill cdx-fill-center"><EmptyState message="No payments recorded yet" /></div>
+              ) : (
+            <div className="table-container cdx-scroll cdx-fill">
               <table className="data-table">
                 <thead>
                   <tr>
@@ -893,193 +821,86 @@ export default function ClientDetailPage() {
                 </tbody>
               </table>
             </div>
-          )}
-        </div>
-      )}
+              )}
+            </Block>
 
-      {/* ── REMARKS ── */}
-      {activeTab === "remarks" && (
-        <div className="cd-panel">
-          <div className="cd-panel-header">
-            <h2>Remarks history</h2>
-            <span className="cd-panel-subtitle">Visible to Admin, the Sales Person, and the Assigned User</span>
-          </div>
-
-          {canManageRemarksOrProgress && (
-            <div className="cd-remark-composer">
-              <textarea
-                rows={3}
-                placeholder="Add a remark..."
-                value={remarkText}
-                onChange={(e) => setRemarkText(e.target.value)}
-              />
-              <button className="btn-primary" disabled={!remarkText.trim() || remarkSaving} onClick={handleAddRemark}>
-                {remarkSaving ? "Posting..." : "Post Remark"}
-              </button>
-            </div>
-          )}
-
-          {remarks.length === 0 ? (
-            <EmptyState message="No remarks yet" />
-          ) : (
-            <div className="cd-remark-feed">
-              {remarks.map((r) => (
-                <div key={r._id} className="cd-remark-card">
-                  <div className="cd-remark-card-header">
-                    <span className="cd-remark-name">{r.user?.name || "Unknown"}</span>
-                    <span className="cd-remark-role">{r.role}</span>
-                    <span className="cd-remark-time">{fmtDateTime(r.createdAt)}</span>
-                  </div>
-                  <p className="cd-remark-message">{r.message}</p>
+            {/* ── Remarks ── */}
+            <Block id="remarks" className="cdx-card--fixed" Icon={MessageSquare} title="Remarks" count={remarks.length} subtitle="Admin, sales person & assigned user">
+              {canManageRemarks && (
+                <div className="cd-remark-composer">
+                  <textarea
+                    rows={3}
+                    placeholder="Add a remark..."
+                    value={remarkText}
+                    onChange={(e) => setRemarkText(e.target.value)}
+                  />
+                  <button className="btn-primary" disabled={!remarkText.trim() || remarkSaving} onClick={handleAddRemark}>
+                    {remarkSaving ? "Posting..." : "Post Remark"}
+                  </button>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+              )}
 
-      {/* ── WORK PROGRESS ── */}
-      {activeTab === "progress" && (
-        <div className="cd-panel">
-          <div className="cd-panel-header">
-            <h2>Work Progress</h2>
-            <span className="cd-panel-subtitle">Newest update first — only the latest entry can be edited</span>
+              {remarks.length === 0 ? (
+                <div className="cdx-fill cdx-fill-center"><EmptyState message="No remarks yet" /></div>
+              ) : (
+                <div className="cd-remark-feed cdx-fill">
+                  {remarks.map((r) => (
+                    <div key={r._id} className="cd-remark-card">
+                      <div className="cd-remark-card-header">
+                        <span className="cd-remark-name">{r.user?.name || "Unknown"}</span>
+                        <span className="cd-remark-role">{r.role}</span>
+                        <span className="cd-remark-time">{fmtDateTime(r.createdAt)}</span>
+                      </div>
+                      <p className="cd-remark-message">{r.message}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Block>
           </div>
 
-          {canAddWorkProgress && !progressForm && (
-            <button
-              className="btn-primary"
-              style={{ marginBottom: 18 }}
-              onClick={() => setProgressForm({ editingId: null, title: "", description: "", status: "Pending", percentage: 0 })}
-            >
-              <Plus size={14} strokeWidth={2.4} /> Add Progress Update
-            </button>
-          )}
-
-          {progressForm && (
-            <div className="cd-progress-form">
-              <input
-                type="text"
-                placeholder="Progress Title *"
-                value={progressForm.title}
-                onChange={(e) => setProgressForm((p) => ({ ...p, title: e.target.value }))}
-              />
-              <textarea
-                rows={2}
-                placeholder="Description"
-                value={progressForm.description}
-                onChange={(e) => setProgressForm((p) => ({ ...p, description: e.target.value }))}
-              />
-              <div className="cd-progress-form-row">
-                <select
-                  value={progressForm.status}
-                  onChange={(e) => setProgressForm((p) => ({ ...p, status: e.target.value }))}
-                >
-                  {Object.keys(WORK_PROGRESS_STATUS_META).map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  placeholder="Completion %"
-                  value={progressForm.percentage}
-                  onChange={(e) => setProgressForm((p) => ({ ...p, percentage: e.target.value }))}
-                />
-              </div>
-              <div className="cd-progress-form-actions">
-                <button className="btn-primary" disabled={!progressForm.title.trim() || progressSaving} onClick={handleSaveProgress}>
-                  {progressSaving ? "Saving..." : "Save Update"}
-                </button>
-                <button className="cd-action-btn" onClick={() => setProgressForm(null)}>Cancel</button>
-              </div>
-            </div>
-          )}
-
-          {workProgress.length === 0 ? (
-            <EmptyState message="No work progress updates yet" />
-          ) : (
-            <div className="cd-timeline">
-              {workProgress.map((entry) => {
-                const meta = WORK_PROGRESS_STATUS_META[entry.status] || WORK_PROGRESS_STATUS_META.Pending;
-                const isLatest = latestProgressEntry && entry._id === latestProgressEntry._id;
-                const canEditThis = isLatest && (isAdmin || String(entry.updatedBy?._id) === userId);
-                return (
-                  <div key={entry._id} className="cd-progress-entry">
-                    <div className="cd-progress-entry-header">
-                      <span className="cd-progress-title">{entry.title}</span>
-                      <span className="cd-status-pill" style={{ background: meta.bg, color: meta.color }}>{entry.status}</span>
-                      {canEditThis && (
-                        <button
-                          className="btn-small"
-                          title="Edit latest update"
-                          onClick={() => setProgressForm({
-                            editingId: entry._id,
-                            title: entry.title,
-                            description: entry.description || "",
-                            status: entry.status,
-                            percentage: entry.percentage,
-                          })}
-                        >
-                          <Pencil size={14} strokeWidth={2.1} />
-                        </button>
-                      )}
-                    </div>
-                    {entry.description && <p className="cd-progress-description">{entry.description}</p>}
-                    <div className="cd-progress-bar-track">
-                      <div className="cd-progress-bar-fill" style={{ width: `${entry.percentage || 0}%`, background: meta.color }} />
-                    </div>
-                    <div className="cd-timeline-time">
-                      {entry.percentage || 0}% complete · {entry.updatedBy?.name || "—"} ({entry.role}) · {fmtDateTime(entry.createdAt)}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── ACTIVITY TIMELINE ── */}
-      {activeTab === "activity" && (
-        <div className="cd-panel">
-          <div className="cd-panel-header">
-            <h2>Activity Timeline</h2>
-          </div>
-          {activity.length === 0 ? (
-            <EmptyState message="No activity recorded yet" />
-          ) : (
-            <div className="cd-timeline">
-              {activity.map((entry) => {
-                const meta = ACTIVITY_META[entry.type] || { Icon: Activity, color: "#94a3b8" };
-                return (
-                  <div key={entry._id} className="cd-timeline-row">
-                    <div className="cd-timeline-icon" style={{ background: `${meta.color}1a`, color: meta.color }}>
-                      <meta.Icon size={15} strokeWidth={2.2} />
-                    </div>
-                    <div>
-                      <div className="cd-timeline-message">{entry.message}</div>
-                      <div className="cd-timeline-time">{fmtDateTime(entry.createdAt)}</div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
+          {/* ── Activity ── */}
+          <Block id="activity" Icon={History} title="Activity Timeline" count={activity.length}>
+            {activity.length === 0 ? (
+              <EmptyState message="No activity recorded yet" />
+            ) : (
+              <>
+                <div className="cd-timeline cdx-timeline">
+                  {visibleActivity.map((entry) => {
+                    const meta = ACTIVITY_META[entry.type] || { Icon: Activity, color: "#94a3b8" };
+                    return (
+                      <div key={entry._id} className="cd-timeline-row">
+                        <div className="cd-timeline-icon" style={{ background: `${meta.color}1a`, color: meta.color }}>
+                          <meta.Icon size={14} strokeWidth={2.2} />
+                        </div>
+                        <div>
+                          <div className="cd-timeline-message">{entry.message}</div>
+                          <div className="cd-timeline-time">{fmtDateTime(entry.createdAt)}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {activity.length > 8 && (
+                  <button type="button" className="cdx-more" onClick={() => setShowAllActivity((v) => !v)}>
+                    {showAllActivity ? "Show less" : `Show all ${activity.length}`}
+                  </button>
+                )}
+              </>
+            )}
+          </Block>
+        </main>
+      </div>
 
       {/* ── modals ── */}
       {showForm && (
-        <div className="modal-overlay" onClick={() => setShowForm(false)}>
+        <div className="modal-overlay" onClick={() => { if (formType !== "client") setShowForm(false); }}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <button className="close-btn" onClick={() => setShowForm(false)}>
               <X size={18} strokeWidth={2} />
             </button>
             {formType === "client" && (
               <ClientForm client={client} onSuccess={handleFormSuccess} onCancel={() => setShowForm(false)} />
-            )}
-            {formType === "reminder" && (
-              <PaymentReminderForm clientId={clientId} reminder={selectedReminder} onSuccess={handleFormSuccess} onCancel={() => setShowForm(false)} />
             )}
           </div>
         </div>
@@ -1125,6 +946,16 @@ export default function ClientDetailPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {proofItem && (
+        <ProofDialog
+          title={proofItem._label}
+          subtitle={`${proofItem._contractName ? `${proofItem._contractName} · ` : ""}${proofItem.trackingMode === "status" ? proofItem.status || "Pending" : `${proofItem.delivered || 0}/${proofItem.due ?? proofItem.quantity ?? 0} delivered`}`}
+          proofs={proofsForContractDeliverable(proofs, proofItem._id)}
+          onRemoved={removeProof}
+          onClose={() => setProofItem(null)}
+        />
       )}
 
       {manageContractId && (

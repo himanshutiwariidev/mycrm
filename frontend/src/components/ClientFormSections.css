@@ -1,0 +1,330 @@
+/* Sectioned layout for the Add / Edit Client form (ClientForm.jsx). Kept in
+   its own file: ClientForm.css's .form-row / .form-group are also used by the
+   payment reminder and payment manager forms. */
+
+.cf-container {
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
+  font-family: 'Inter', sans-serif;
+}
+
+.cf-head {
+  padding-right: 40px; /* room for the modal's close button */
+  margin-bottom: 16px;
+}
+
+.cf-head h2 {
+  margin: 0;
+  font-family: 'Syne', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.cf-head p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.cf-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── Sections ─────────────────────────────────────────────────────────── */
+.cf-section {
+  border: 1px solid #e8eaf0;
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.cf-section.open {
+  border-color: #e2e6ef;
+  box-shadow: 0 6px 18px -16px rgba(15, 23, 42, 0.35);
+}
+
+.cf-essentials {
+  background: #fff;
+}
+
+.cf-section-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 12px 14px;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cf-section-head.static {
+  cursor: default;
+  padding-bottom: 4px;
+}
+
+.cf-section-head:not(.static):hover {
+  background: #fafbfd;
+}
+
+.cf-section-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: #fff4e6;
+  color: #ea580c;
+  flex-shrink: 0;
+}
+
+.cf-section-titles {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cf-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.cf-optional {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #94a3b8;
+  background: #f1f5f9;
+  border-radius: 99px;
+  padding: 2px 8px;
+}
+
+.cf-section-summary {
+  font-size: 12.5px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cf-chevron {
+  color: #94a3b8;
+  flex-shrink: 0;
+  transition: transform 0.18s ease;
+}
+
+.cf-section.open .cf-chevron {
+  transform: rotate(180deg);
+}
+
+.cf-section-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 14px;
+  padding: 8px 14px 16px;
+}
+
+@media (max-width: 560px) {
+  .cf-section-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ── Fields ───────────────────────────────────────────────────────────── */
+.cf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cf-field.full {
+  grid-column: 1 / -1;
+}
+
+.cf-field > label {
+  font-size: 12px;
+  font-weight: 650;
+  color: #334155;
+}
+
+.cf-field > label em {
+  color: #dc2626;
+  font-style: normal;
+}
+
+.cf-field input,
+.cf-field select,
+.cf-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1.5px solid #e2e6ef;
+  background: #fff;
+  color: #0f172a;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.cf-field textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.cf-field input:focus,
+.cf-field select:focus,
+.cf-field textarea:focus {
+  border-color: #f7931e;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(247, 147, 30, 0.14);
+}
+
+.cf-field input:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.cf-field small {
+  font-size: 11.5px;
+  color: #94a3b8;
+  line-height: 1.45;
+}
+
+.cf-link {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  padding: 0;
+  color: #ea580c;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ── Chips ────────────────────────────────────────────────────────────── */
+.cf-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cf-chip {
+  border: 1.5px solid #e2e6ef;
+  background: #fff;
+  color: #334155;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 13px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.cf-chip:hover {
+  border-color: #cbd5e1;
+}
+
+.cf-chip.active {
+  background: #fff4e6;
+  border-color: #f7931e;
+  color: #c2410c;
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────── */
+.cf-footer {
+  position: sticky;
+  bottom: -28px; /* sits flush with the modal's bottom padding while scrolling */
+  margin: 6px -28px -28px;
+  padding: 14px 28px 18px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(6px);
+  border-top: 1px solid #eef0f5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  z-index: 2;
+}
+
+.cf-footer-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cf-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 11px;
+  padding: 10px 16px;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 650;
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  transition: transform 0.12s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.cf-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.cf-btn-primary {
+  color: #fff;
+  background: linear-gradient(135deg, #f7931e 0%, #e8590c 100%);
+  box-shadow: 0 6px 16px -6px rgba(232, 89, 12, 0.55);
+}
+
+.cf-btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.cf-btn-secondary {
+  color: #0f172a;
+  background: #fff;
+  border-color: #e2e8f0;
+}
+
+.cf-btn-secondary:hover:not(:disabled) {
+  background: #f8fafc;
+}
+
+.cf-btn-ghost {
+  color: #64748b;
+  background: transparent;
+}
+
+.cf-btn-ghost:hover {
+  color: #0f172a;
+  background: #f1f5f9;
+}
+
+.cf-spin {
+  animation: cfSpin 0.9s linear infinite;
+}
+
+@keyframes cfSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -24,6 +24,10 @@ const handleValidationErrors = (req, res, next) => {
 // calling — it only checks that the value is a structurally valid role).
 const VALID_USER_ROLES = ["user", "hr", "sales", "client", "manager", "telecaller"];
 
+// Names: letters in any language (e.g. Hindi), spaces and ' . , - ( ).
+// Parentheses allow labels like "Priya Nair (Demo)"; still no digits, <, > etc.
+const NAME_PATTERN = /^[\p{L}\p{M}\s'.,()-]+$/u;
+
 // ── 1. Login validator ──────────────────────────────────────────────────────
 // Applies to both POST /api/login and POST /api/users/login.
 // This application has NO public registration — credentials are created only
@@ -52,8 +56,8 @@ const createUserValidator = [
     .notEmpty().withMessage("Name is required")
     .isLength({ min: 2, max: 100 })
     .withMessage("Name must be between 2 and 100 characters")
-    .matches(/^[a-zA-Z\s'.,-]+$/)
-    .withMessage("Name contains invalid characters"),
+    .matches(NAME_PATTERN)
+    .withMessage("Name can only contain letters, spaces and ' . , - ( )"),
 
   body("email")
     .trim()
@@ -82,8 +86,8 @@ const updateUserValidator = [
     .trim()
     .isLength({ min: 2, max: 100 })
     .withMessage("Name must be between 2 and 100 characters")
-    .matches(/^[a-zA-Z\s'.,-]+$/)
-    .withMessage("Name contains invalid characters"),
+    .matches(NAME_PATTERN)
+    .withMessage("Name can only contain letters, spaces and ' . , - ( )"),
 
   body("email")
     .optional()

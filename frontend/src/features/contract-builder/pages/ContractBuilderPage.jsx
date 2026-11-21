@@ -9,7 +9,7 @@ import { useContractDraft, draftKey } from "../hooks/useContractDraft";
 import { useAutosave } from "../hooks/useAutosave";
 import { useBeforeUnloadWarning } from "../hooks/useBeforeUnloadWarning";
 import { buildContractPayload } from "../utils/buildContractPayload";
-import WizardShell from "../components/WizardShell";
+import ContractBuilderLayout from "../components/ContractBuilderLayout";
 
 function ContractBuilderInner({ clientId, contractId, renewFromContractId }) {
   const navigate = useNavigate();
@@ -83,7 +83,7 @@ function ContractBuilderInner({ clientId, contractId, renewFromContractId }) {
     );
   }
 
-  return <WizardShell client={client} onSubmit={handleSubmit} />;
+  return <ContractBuilderLayout client={client} onSubmit={handleSubmit} />;
 }
 
 export default function ContractBuilderPage() {

@@ -65,6 +65,11 @@ const ClientSchema = new mongoose.Schema(
       type: String,
       enum: ["pvt ltd", "ltd", "llp", "huf", "proprietor", "other"],
     },
+    // The client's industry ("Category" in the client form). Optional.
+    businessCategory: {
+      type: String,
+      enum: ["manufacturing", "fmcg", "furniture", "cosmetics", "health", "electronics", "real-estate", "automobile", "jewellery", "perfume"],
+    },
     projectType: {
       type: String,
       enum: ["service", "product"],

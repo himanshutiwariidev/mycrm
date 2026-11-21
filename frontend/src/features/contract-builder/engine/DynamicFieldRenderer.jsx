@@ -48,17 +48,23 @@ function RadioField({ field, value, onChange }) {
  * Single field-type -> component mapping used by every category, flat or
  * nested. Adding a new field `type` here (rare) is the only engine change
  * ever required by new categories.
+ *
+ * Columns follow the width of the card the fields sit in (a container query,
+ * not the window): 1 column when narrow, 2 from ~450px, 4 from ~770px — so a
+ * single number or price never stretches across a whole wide card. Long
+ * fields (notes, multi-selects, per-item quantities) take two columns.
  */
 export default function DynamicFieldRenderer({ fields = [], values = {}, onChange, className }) {
   return (
-    <div className={cn("grid grid-cols-1 gap-4 sm:grid-cols-2", className)}>
+    <div className="@container">
+    <div className={cn("grid grid-cols-1 gap-4 @md:grid-cols-2 @3xl:grid-cols-4", className)}>
       {fields.map((field) => {
         const value = values[field.name];
         const set = (val) => onChange(field.name, val);
         const span2 = field.type === FIELD_TYPES.TEXTAREA || field.type === FIELD_TYPES.MULTISELECT || field.type === FIELD_TYPES.PER_ITEM_QUANTITY;
 
         return (
-          <FieldShell key={field.name} field={field} className={span2 ? "sm:col-span-2" : undefined}>
+          <FieldShell key={field.name} field={field} className={span2 ? "@md:col-span-2" : undefined}>
             {field.type === FIELD_TYPES.TEXT && (
               <Input value={value ?? ""} placeholder={field.placeholder} disabled={field.readOnly} onChange={(e) => set(e.target.value)} />
             )}
@@ -112,6 +118,7 @@ export default function DynamicFieldRenderer({ fields = [], values = {}, onChang
           </FieldShell>
         );
       })}
+    </div>
     </div>
   );
 }

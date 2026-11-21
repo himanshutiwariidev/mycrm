@@ -57,7 +57,10 @@ export function computeRangeForPreset(key) {
 
 const fmt = (d) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
-export default function DateRangePicker({ value, onChange }) {
+// `allLabel` (optional) adds an "All time" choice for pages where the range is
+// an optional filter: picking it sets presetKey "all" and the button shows the
+// label instead of dates. Pages that don't pass it are unchanged.
+export default function DateRangePicker({ value, onChange, allLabel }) {
   const [open, setOpen] = useState(false);
   const [customFrom, setCustomFrom] = useState(toInputValue(value.start));
   const [customTo, setCustomTo] = useState(toInputValue(value.end));
@@ -76,10 +79,18 @@ export default function DateRangePicker({ value, onChange }) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const presetLabel = PRESETS.find((p) => p.key === value.presetKey)?.label || "Custom Range";
+  const showAll = Boolean(allLabel);
+  const isAll = showAll && value.presetKey === "all";
+  const presetLabel = isAll ? allLabel : PRESETS.find((p) => p.key === value.presetKey)?.label || "Custom Range";
+  const presets = showAll ? [{ key: "all", label: "All Time" }, ...PRESETS] : PRESETS;
 
   const pickPreset = (key) => {
     if (key === "custom") return;
+    if (key === "all") {
+      onChange({ start: value.start, end: value.end, presetKey: "all" });
+      setOpen(false);
+      return;
+    }
     const range = computeRangeForPreset(key);
     onChange({ ...range, presetKey: key });
     setOpen(false);
@@ -106,7 +117,7 @@ export default function DateRangePicker({ value, onChange }) {
         }}
       >
         <Calendar size={14} strokeWidth={2} color="#94a3b8" />
-        <span style={{ whiteSpace: "nowrap" }}>{fmt(value.start)} – {fmt(value.end)}</span>
+        <span style={{ whiteSpace: "nowrap" }}>{isAll ? allLabel : `${fmt(value.start)} – ${fmt(value.end)}`}</span>
         <ChevronDown size={14} strokeWidth={2} color="#94a3b8" />
       </button>
 
@@ -118,7 +129,7 @@ export default function DateRangePicker({ value, onChange }) {
           display: "flex", flexDirection: "column", gap: 4,
         }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: ".07em", textTransform: "uppercase", padding: "2px 6px 8px" }}>Quick filters</div>
-          {PRESETS.filter((p) => p.key !== "custom").map((p) => {
+          {presets.filter((p) => p.key !== "custom").map((p) => {
             const active = value.presetKey === p.key;
             return (
               <button

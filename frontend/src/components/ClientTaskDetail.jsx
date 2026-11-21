@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { Package, MessageSquare, TrendingUp, X, Plus, Pencil } from "lucide-react";
+import { Package, MessageSquare, TrendingUp, X, Plus, Pencil, FileBarChart2 } from "lucide-react";
 import {
   getClientById, getClientRemarks, addClientRemark,
   getWorkProgress, addWorkProgress, updateWorkProgress,
 } from "../services/clientApi";
+import ClientMonthlyReports from "./ClientMonthlyReports";
 import "../pages/ClientDetailPage.css";
 
 const WORK_PROGRESS_STATUS_META = {
@@ -130,7 +131,16 @@ export default function ClientTaskDetail({ clientId, onClose }) {
         <button className={`cd-tab ${activeTab === "progress" ? "active" : ""}`} onClick={() => setActiveTab("progress")}>
           <TrendingUp size={15} strokeWidth={2.2} /> Work Progress
         </button>
+        <button className={`cd-tab ${activeTab === "reports" ? "active" : ""}`} onClick={() => setActiveTab("reports")}>
+          <FileBarChart2 size={15} strokeWidth={2.2} /> Monthly Reports
+        </button>
       </div>
+
+      {activeTab === "reports" && (
+        <div className="cd-panel">
+          <ClientMonthlyReports clientId={clientId} />
+        </div>
+      )}
 
       {activeTab === "scope" && (
         <div className="cd-panel">

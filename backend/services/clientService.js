@@ -49,8 +49,6 @@ const formatAmount = (value) =>
 const formatCurrencyForPdf = (value, currency = "INR") =>
   currency && currency !== "INR" ? `${currency} ${formatAmount(value)}` : `Rs. ${formatAmount(value)}`;
 
-const buildContractNumber = () => `CONTRACT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
 const buildReminderNumber = () => `REMIND-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
 const contractAsset = (fileName) => {
@@ -771,7 +769,6 @@ const sendPaymentReminderEmail = async ({ client, reminder }) => {
 };
 
 module.exports = {
-  buildContractNumber,
   buildReminderNumber,
   generateContractPdf,
   generateInvoicePdf,

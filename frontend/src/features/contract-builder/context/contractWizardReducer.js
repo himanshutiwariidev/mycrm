@@ -46,6 +46,8 @@ export function createInitialState({ clientId }) {
       clientName: "",
       clientEmail: "",
       projectName: "",
+      // "starter" | "standard" | "business" — optional (see config/packageTypes.js)
+      packageType: "",
       timeline: "",
       contractStartDate: "",
       validUntil: "",

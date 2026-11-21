@@ -809,3 +809,474 @@
   background: #fee2e2 !important;
   border-color: #fca5a5 !important;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Single-page client view (cdx-*): compact profile on the left, every
+   former tab as a card on the right — no tabs, no wasted space.
+   ═══════════════════════════════════════════════════════════════════════ */
+.cdx-page {
+  padding: 18px 26px 40px;
+}
+
+.cdx-page .cd-back {
+  margin-bottom: 12px;
+}
+
+.cdx-layout {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+/* ── Profile ─────────────────────────────────────────────────────────── */
+.cdx-profile {
+  position: sticky;
+  top: 14px;
+  max-height: calc(100vh - 28px);
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #e8eaf0;
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.cdx-profile-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+}
+
+.cdx-avatar {
+  width: 46px !important;
+  height: 46px !important;
+  font-size: 16px !important;
+  border-radius: 13px !important;
+  flex-shrink: 0;
+}
+
+.cdx-profile-names {
+  flex: 1;
+  min-width: 0;
+}
+
+.cdx-profile-names h1 {
+  margin: 0;
+  font-family: 'Syne', sans-serif;
+  font-size: 17px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.cdx-profile-names p {
+  margin: 3px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  color: #64748b;
+}
+
+.cdx-profile-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.cdx-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 4px;
+}
+
+.cdx-status-row .status-select {
+  padding: 5px 26px 5px 10px;
+  font-size: 12px;
+}
+
+.cdx-group {
+  border-top: 1px solid #f0f1f6;
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+.cdx-group-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+
+.cdx-kv {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.cdx-kv-label {
+  color: #94a3b8;
+}
+
+.cdx-kv-value {
+  color: #0f172a;
+  font-weight: 550;
+  word-break: break-word;
+  text-transform: none;
+}
+
+a.cdx-kv-value {
+  color: #c2410c;
+  text-decoration: none;
+}
+
+a.cdx-kv-value:hover {
+  text-decoration: underline;
+}
+
+.cdx-notes {
+  margin: 0;
+  font-size: 12.5px;
+  color: #334155;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cdx-empty-hint {
+  margin-top: 12px;
+  width: 100%;
+  border: 1px dashed #e2e8f0;
+  background: #fafbfc;
+  color: #64748b;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 8px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.cdx-empty-hint strong {
+  color: #c2410c;
+}
+
+.cdx-empty-hint:hover {
+  border-color: #f7931e;
+}
+
+/* ── Main column ─────────────────────────────────────────────────────── */
+.cdx-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cdx-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.cdx-kpi {
+  background: #fff;
+  border: 1px solid #e8eaf0;
+  border-radius: 12px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cdx-kpi span {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.cdx-kpi strong {
+  font-size: 17px;
+  font-weight: 800;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cdx-kpi.green strong { color: #16a34a; }
+.cdx-kpi.amber strong { color: #d97706; }
+.cdx-kpi.red strong { color: #dc2626; }
+
+.cdx-nav {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 8px 0;
+  background: #f5f6fa;
+}
+
+.cdx-nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #334155;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 11px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.cdx-nav button:hover {
+  border-color: #f7931e;
+  color: #c2410c;
+}
+
+.cdx-nav button span {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+/* ── Cards ───────────────────────────────────────────────────────────── */
+.cdx-card {
+  background: #fff;
+  border: 1px solid #e8eaf0;
+  border-radius: 14px;
+  padding: 14px 16px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  min-width: 0;
+  scroll-margin-top: 56px;
+}
+
+.cdx-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.cdx-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.cdx-card-title h2 {
+  margin: 0;
+  font-family: 'Syne', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.cdx-card-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: #fff4e6;
+  color: #ea580c;
+  flex-shrink: 0;
+}
+
+.cdx-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  background: #f1f5f9;
+  border-radius: 99px;
+  padding: 1px 8px;
+}
+
+.cdx-sub {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.cdx-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cdx-btn {
+  padding: 7px 12px !important;
+  font-size: 12.5px !important;
+}
+
+.cdx-select {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  font-size: 12.5px;
+  font-family: inherit;
+  max-width: 220px;
+}
+
+.cdx-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+/* Dense tables inside cards; long ones scroll inside the card. */
+.cdx-card .data-table th {
+  padding: 8px 10px;
+  font-size: 10.5px;
+}
+
+.cdx-card .data-table td {
+  padding: 8px 10px;
+  font-size: 12.5px;
+}
+
+.cdx-scroll {
+  max-height: 340px;
+  overflow: auto;
+}
+
+/* The shared .data-table has min-width: 760px for the full-page lists;
+   inside these cards tables fit the card (wide ones still scroll). */
+.cdx-card .data-table {
+  min-width: 0;
+}
+
+.cdx-card .data-table td {
+  white-space: normal;
+}
+
+.cdx-card .data-table td:first-child {
+  white-space: nowrap;
+}
+
+.cdx-cap {
+  text-transform: capitalize;
+}
+
+.cdx-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f8f9fc;
+}
+
+/* Payments + Remarks: side-by-side cards of one fixed height; what's inside
+   scrolls vertically (the remark box and card header stay put). */
+.cdx-card--fixed {
+  height: 420px;
+  display: flex;
+  flex-direction: column;
+}
+
+.cdx-card--fixed > .cdx-card-head {
+  flex-shrink: 0;
+}
+
+.cdx-fill {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.cdx-card--fixed .cdx-scroll {
+  max-height: none;
+}
+
+.cdx-fill-center {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cdx-card--fixed .cd-remark-composer {
+  flex-shrink: 0;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.cdx-card--fixed .cd-remark-composer textarea {
+  resize: none;
+}
+
+.cdx-card--fixed .cd-remark-feed {
+  gap: 10px;
+  padding-right: 2px;
+}
+
+.cdx-card .cd-empty {
+  padding: 18px 10px;
+  font-size: 12.5px;
+}
+
+.cdx-muted { color: #94a3b8; font-size: 12px; }
+.cdx-strong { color: #0f172a; font-weight: 600; }
+.cdx-nowrap { white-space: nowrap; }
+
+.cdx-timeline .cd-timeline-row {
+  padding: 6px 0;
+}
+
+.cdx-more {
+  margin-top: 6px;
+  border: none;
+  background: none;
+  color: #c2410c;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────── */
+@media (max-width: 1280px) {
+  .cdx-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 980px) {
+  .cdx-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cdx-profile {
+    position: static;
+    max-height: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .cdx-page {
+    padding: 14px 14px 32px;
+  }
+}

@@ -6,14 +6,28 @@ export function draftKey(clientId, contractId) {
   return `contract-draft-${clientId}-${contractId || "new"}`;
 }
 
+// Keep the server's full timestamp. Cutting it to "YYYY-MM-DD" took the UTC
+// calendar day, so a date picked in India (local midnight = 18:30 UTC the day
+// before) came back one day earlier — and every edit + save shifted it again.
+const keepDate = (value) => (value ? String(value) : "");
+
+/** Local midnight today (or `years` from today), as an ISO timestamp. */
+function localDayIso({ years = 0 } = {}) {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setFullYear(d.getFullYear() + years);
+  return d.toISOString();
+}
+
 function reverseMapContractToState(contract) {
   return {
     meta: {
       contractId: contract._id,
       projectName: contract.projectName || "",
+      packageType: contract.packageType || "",
       timeline: contract.timeline || "",
-      contractStartDate: contract.contractStartDate ? String(contract.contractStartDate).slice(0, 10) : "",
-      validUntil: contract.validUntil ? String(contract.validUntil).slice(0, 10) : "",
+      contractStartDate: keepDate(contract.contractStartDate),
+      validUntil: keepDate(contract.validUntil),
       paymentTerms: contract.paymentTerms || "",
       notes: contract.notes || "",
       currency: contract.currency || "INR",
@@ -21,7 +35,7 @@ function reverseMapContractToState(contract) {
       // before GST support) never had it, so projectAmount doubles as the base.
       contractAmount: contract.preTaxAmount ?? contract.projectAmount ?? "",
       amountReceived: contract.receivedAmount ?? "",
-      dueDate: contract.nextDueDate ? String(contract.nextDueDate).slice(0, 10) : "",
+      dueDate: keepDate(contract.nextDueDate),
       // Falls back to the first payment's method for contracts saved before
       // paymentMethod became its own top-level field.
       paymentMethod: contract.paymentMethod || contract.payments?.[0]?.method || "Cash",
@@ -42,9 +56,6 @@ function reverseMapContractToState(contract) {
 // received, due date), and nudges the project name so "SEO" reads as
 // "SEO Renewal" without doubling up on a contract already named that.
 function reverseMapContractToRenewalState(contract) {
-  const todayIso = new Date().toISOString().slice(0, 10);
-  const oneYearOut = new Date();
-  oneYearOut.setFullYear(oneYearOut.getFullYear() + 1);
 
   const baseName = contract.projectName || "";
   const projectName = /renewal/i.test(baseName) ? baseName : `${baseName} Renewal`;
@@ -53,9 +64,10 @@ function reverseMapContractToRenewalState(contract) {
     meta: {
       renewedFromContractId: contract._id,
       projectName,
+      packageType: contract.packageType || "",
       timeline: contract.timeline || "",
-      contractStartDate: todayIso,
-      validUntil: oneYearOut.toISOString().slice(0, 10),
+      contractStartDate: localDayIso(),
+      validUntil: localDayIso({ years: 1 }),
       paymentTerms: contract.paymentTerms || "",
       notes: contract.notes || "",
       currency: contract.currency || "INR",

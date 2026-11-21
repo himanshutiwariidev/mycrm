@@ -44,7 +44,10 @@ export default function useAdminDashboard() {
   });
   // A manager's Dashboard tab is disabled (see ROLE_TABS/TABS below), so
   // land them on Tasks instead of a section they can't click into.
-  const [tab, setTab] = useState(() => (localStorage.getItem("role") === "manager" ? "tasks" : "dashboard"));
+  // ?tab=clients (etc.) opens that section directly — e.g. "Back to Clients"
+  // from a client page lands here with the sidebar, not on a bare page.
+  const defaultTab = localStorage.getItem("role") === "manager" ? "tasks" : "dashboard";
+  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get("tab") || defaultTab);
   const [toast, setToast] = useState(null);
   const [showPw, setShowPw] = useState(false);
 
@@ -462,10 +465,26 @@ export default function useAdminDashboard() {
 
   const handleUpdateUser = async (e) => {
     e.preventDefault();
-    const payload = { name: editUserForm.name, email: editUserForm.email, role: editUserForm.role };
+    // Send only what actually changed. Re-sending the untouched name/role made
+    // a plain password reset fail whenever the existing name or role didn't
+    // pass the server's checks (e.g. "Priya Nair (Demo)").
+    const payload = {};
+    const name = editUserForm.name.trim();
+    const email = editUserForm.email.trim();
+    if (name !== (editUser.name || "")) payload.name = name;
+    if (email.toLowerCase() !== (editUser.email || "").toLowerCase()) payload.email = email;
+    if (editUserForm.role !== editUser.role) payload.role = editUserForm.role;
     if (editUserForm.password) payload.password = editUserForm.password;
-    try { await API.put(`/users/${editUser._id}`, payload); showToast("User updated successfully"); setEditUser(null); fetchUsers(); }
-    catch { showToast("Failed to update user", false); }
+    if (!Object.keys(payload).length) { setEditUser(null); showToast("No changes to save"); return; }
+    try {
+      await API.put(`/users/${editUser._id}`, payload);
+      showToast(Object.keys(payload).length === 1 && payload.password ? `Password updated for ${editUser.name}` : "User updated successfully");
+      setEditUser(null);
+      fetchUsers();
+    } catch (err) {
+      const data = err.response?.data;
+      showToast(data?.errors?.[0]?.message || data?.message || "Failed to update user", false);
+    }
   };
 
   const handleDeleteUser = async () => {
@@ -685,6 +704,19 @@ export default function useAdminDashboard() {
     : ROLE_TABS[role] || ALL_TABS; // fallback to admin-like access if role is missing/unknown
 
   const currentLabel = TABS.find(t => t.id === tab)?.label || "Dashboard";
+
+  // A ?tab= this role can't open (unknown, or disabled for a manager) falls
+  // back to the default; the current section is mirrored into the URL so a
+  // refresh or a link back keeps the user where they were.
+  const tabAllowed = TABS.some((t) => t.id === tab && !t.disabled);
+  useEffect(() => {
+    if (!tabAllowed) { setTab(defaultTab); return; }
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("tab") !== tab) {
+      url.searchParams.set("tab", tab);
+      window.history.replaceState(window.history.state, "", url);
+    }
+  }, [tab, tabAllowed, defaultTab]);
 
   return {
     users, tasks, clients, projects, contracts, reminders, expenses, meetings, activityLog, dashboardStats,

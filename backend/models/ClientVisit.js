@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { PHOTO_CATEGORIES } = require("../utils/visitPhotos");
 
 // One GPS fix shared from the sales person's browser. `at` is the SERVER's
 // receive time (authoritative — a device clock can be wrong or changed);
@@ -17,6 +18,20 @@ const LocationFixSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// A photo the sales person took at the meeting (with the client, their visiting
+// card, the office / factory …). The file lives in uploads/visit-photos under
+// a random name; `uploadedAt` is server time, so the admin can tell photos
+// taken during the meeting from ones added after it ended.
+const VisitPhotoSchema = new mongoose.Schema({
+  filename: { type: String, required: true },
+  originalname: { type: String, trim: true, maxlength: 200 },
+  mimetype: { type: String },
+  size: { type: Number, min: 0 },
+  category: { type: String, enum: PHOTO_CATEGORIES, default: "other" },
+  caption: { type: String, trim: true, maxlength: 200 },
+  uploadedAt: { type: Date, default: Date.now },
+});
+
 /**
  * A sales person's in-person client meeting: checked in on arrival with their
  * live location, checked out when leaving (second location + outcome). Only
@@ -32,6 +47,7 @@ const ClientVisitSchema = new mongoose.Schema(
     checkIn: { type: LocationFixSchema, required: true },
     checkOut: { type: LocationFixSchema },
     outcome: { type: String, trim: true, maxlength: 2000 },
+    photos: { type: [VisitPhotoSchema], default: [] },
   },
   { timestamps: true }
 );

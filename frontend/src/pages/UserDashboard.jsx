@@ -6,17 +6,22 @@ import {
   Clock, TrendingUp, Calendar, User, Shield, X,
   AlertCircle, CheckCheck, ListTodo, ChevronDown,
   CalendarDays, XCircle, Hourglass, FileText, Send,
-  Briefcase,
+  Briefcase, CalendarClock, FileBarChart2,
 } from "lucide-react";
 import logo from "../assets/logo.png";
 import { getAllClients, getWorkProgress } from "../services/clientApi";
 import ClientTaskDetail from "../components/ClientTaskDetail";
+import ClientsPage from "./ClientsPage";
 import {
   PieChart, Pie, Cell, Legend, Tooltip, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from "recharts";
 import { resolveDeliverableVisual } from "../config/serviceVisuals";
 import { formatDeliverableAmount } from "../config/deliverableUnits";
+import MonthFilter from "../components/MonthFilter";
+import { currentMonthKey, monthLabel, monthsForTasks, proofPeriod, taskMonthView } from "../utils/taskPeriods";
+import { ProofButton, ProofDialog, proofsForTaskItem, useDeliverableProofs } from "../components/DeliverableProofs";
+import { ClientReportsDialog } from "../components/ClientMonthlyReports";
 
 // ─── shared theme (identical to AdminDashboard) ───────────────────────────────
 const T = {
@@ -147,10 +152,16 @@ function CustomTooltip({ active, payload, label }) {
 // ─── DeliverableProgressRow ────────────────────────────────────────────────────
 // Lets the assignee record how much of a contract-generated deliverable they've
 // completed so far — updates persist to the same Task document the admin sees,
-// so progress made here shows up on the admin's Tasks page immediately.
-function DeliverableProgressRow({ taskId, d, busy, onUpdate }) {
-  const delivered = d.delivered || 0;
-  const quantity = d.quantity || 0;
+// so progress made here shows up on the admin's Tasks page immediately — and
+// attach proof of the work (screenshots / live links) for everyone who checks.
+// `row` is the item as seen in the selected month (utils/taskPeriods.js):
+// its target and count for that month (or the whole contract for one-time
+// items), what's still pending, and whether it can be changed (not a future
+// month, inside the contract period).
+function DeliverableProgressRow({ row, isPast, busy, onUpdate, proofs = [], onOpenProofs }) {
+  const d = row.item;
+  const delivered = row.delivered;
+  const quantity = row.target;
   const pct = quantity ? Math.min(100, Math.round((delivered / quantity) * 100)) : 0;
   const stepBtn = (disabled) => ({
     width: 26, height: 26, borderRadius: 7, border: `1.5px solid ${T.border}`,
@@ -170,17 +181,24 @@ function DeliverableProgressRow({ taskId, d, busy, onUpdate }) {
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 12.5, fontWeight: 600, color: T.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.title}</div>
-        <div style={{ fontSize: 10.5, color: T.textMuted, marginTop: 2 }}>
-          {formatDeliverableAmount(d)}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10.5, color: T.textMuted, marginTop: 2, flexWrap: "wrap" }}>
+          <span>{row.whole ? `${formatDeliverableAmount(d)} · whole contract` : formatDeliverableAmount(d)}</span>
+          {row.pending > 0 && row.editable && (
+            <span style={{ fontWeight: 700, color: isPast && !row.whole ? T.red : "#c2410c" }}>
+              {row.pending} {isPast && !row.whole ? "pending" : "left"}
+            </span>
+          )}
+          {row.target > 0 && row.pending === 0 && row.editable && <span style={{ fontWeight: 700, color: T.green }}>Done</span>}
         </div>
         <div style={{ height: 5, background: "#e8eaf0", borderRadius: 99, marginTop: 6, overflow: "hidden" }}>
           <div style={{ height: "100%", width: `${pct}%`, background: isGradient ? T.brand : visual.bg, borderRadius: 99, transition: "width .2s" }} />
         </div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 7, flexShrink: 0 }}>
-        <button disabled={busy || delivered <= 0} onClick={() => onUpdate(taskId, d._id, Math.max(0, delivered - 1))} style={stepBtn(busy || delivered <= 0)}>−</button>
+        <button disabled={busy || !row.editable || delivered <= 0} onClick={() => onUpdate(Math.max(0, delivered - 1))} style={stepBtn(busy || !row.editable || delivered <= 0)}>−</button>
         <span style={{ fontSize: 12.5, fontWeight: 700, color: T.textPrimary, minWidth: 42, textAlign: "center" }}>{busy ? "…" : `${delivered}/${quantity}`}</span>
-        <button disabled={busy || delivered >= quantity} onClick={() => onUpdate(taskId, d._id, Math.min(quantity, delivered + 1))} style={stepBtn(busy || delivered >= quantity)}>+</button>
+        <button disabled={busy || !row.editable || delivered >= quantity} onClick={() => onUpdate(Math.min(quantity, delivered + 1))} style={stepBtn(busy || !row.editable || delivered >= quantity)}>+</button>
+        {onOpenProofs && <ProofButton proofs={proofs} canAdd={row.editable} onClick={onOpenProofs} />}
       </div>
     </div>
   );
@@ -219,15 +237,27 @@ export default function UserDashboard() {
   const navigate = useNavigate();
   const [tasks, setTasks]   = useState([]);
   const [salarySlips, setSalarySlips] = useState([]);
-  const [tab, setTab]       = useState("dashboard");
+  // ?tab=clients (etc.) opens that section — "Back to Clients" from a client page lands here.
+  const [tab, setTab]       = useState(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    return ["dashboard", "tasks", "clients", "leave", "salary"].includes(requested) ? requested : "dashboard";
+  });
   const [toast, setToast]   = useState(null);
   const [updating, setUpdating] = useState(null); // taskId being updated
   const [updatingDeliverable, setUpdatingDeliverable] = useState(null); // deliverableId being updated
+  // Proof of work (screenshots / live links) on the deliverables of my tasks.
+  const { proofs, add: addProofs, remove: removeProof } = useDeliverableProofs({
+    taskIds: tasks.filter((t) => t.deliverables?.length).map((t) => t._id),
+  });
+  const [proofTarget, setProofTarget] = useState(null); // { task, item, period }
+  // Month-by-month deliverables: the month being viewed in My Tasks.
+  const [month, setMonth] = useState(() => currentMonthKey());
   const [leaves, setLeaves] = useState([]);
   const [leaveForm, setLeaveForm] = useState({ fromDate: "", toDate: "", reason: "" });
   const [submittingLeave, setSubmittingLeave] = useState(false);
   const [assignedClients, setAssignedClients] = useState([]);
   const [openClientTaskId, setOpenClientTaskId] = useState(null);
+  const [reportsFor, setReportsFor] = useState(null); // { clientId, clientName } — monthly reports dialog
 
   // pull name from localStorage (set at login)
   const userName = localStorage.getItem("userName") || "User";
@@ -310,17 +340,24 @@ await API.patch(
     }
   };
 
-  const handleDeliverableUpdate = async (taskId, deliverableId, delivered) => {
+  const handleDeliverableUpdate = async (taskId, deliverableId, delivered, period) => {
     setUpdatingDeliverable(deliverableId);
     try {
-      const { data } = await API.patch(`/tasks/${taskId}/deliverables/${deliverableId}`, { delivered });
+      const { data } = await API.patch(`/tasks/${taskId}/deliverables/${deliverableId}`, { delivered, period });
       // The PATCH response's task.clientId/contractId are raw (unpopulated)
       // ObjectIds — merge in just the updated deliverables array so the
       // already-populated client/contract name in local state survives.
       setTasks(prev => prev.map(t => t._id === taskId ? { ...t, deliverables: data.task.deliverables } : t));
+      // A server from before month-by-month tracking accepts the update but
+      // ignores the month — say so instead of a "success" that changes nothing.
+      const saved = data.task?.deliverables?.find((d) => d._id === deliverableId);
+      if (period && !saved?.progress?.some((p) => p.period === period)) {
+        showToast(`Not saved for ${monthLabel(period, true)} — the server is out of date. Please restart / update the backend.`, false);
+        return;
+      }
       showToast("Progress updated");
-    } catch {
-      showToast("Failed to update progress", false);
+    } catch (err) {
+      showToast(err.response?.data?.message || "Failed to update progress", false);
     } finally {
       setUpdatingDeliverable(null);
     }
@@ -611,7 +648,10 @@ await API.patch(
                     <p style={{ fontSize: 12.5, color: T.textMuted, marginTop: 3 }}>{total} task{total !== 1 ? "s" : ""} assigned to you</p>
                   </div>
                   {/* filter chips */}
-                  <div style={{ display: "flex", gap: 8 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    {tasks.some((t) => t.deliverables?.length) && (
+                      <MonthFilter value={month} onChange={setMonth} months={monthsForTasks(tasks.filter((t) => t.deliverables?.length))} />
+                    )}
                     {[
                       { label: `All (${total})`,        color: T.brand,  bg: T.brandLight  },
                       { label: `Done (${done})`,        color: T.green,  bg: T.greenBg     },
@@ -631,10 +671,35 @@ await API.patch(
                   </div>
                 ) : tasks.length === 0 ? null : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {(() => {
+                      // Month at a glance across every contract task.
+                      const views = tasks.filter((t) => t.deliverables?.length).map((t) => taskMonthView(t, month));
+                      if (!views.length) return null;
+                      const done = views.reduce((s, v) => s + v.done, 0);
+                      const target = views.reduce((s, v) => s + v.target, 0);
+                      const backlog = views.reduce((s, v) => s + v.backlogTotal, 0);
+                      const isPast = month < currentMonthKey();
+                      const stat = (label, value, color) => (
+                        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                          <span style={{ fontSize: 18, fontWeight: 800, color }}>{value}</span>
+                          <span style={{ fontSize: 12, color: T.textMuted }}>{label}</span>
+                        </div>
+                      );
+                      return (
+                        <div data-month-summary style={{ display: "flex", alignItems: "center", gap: 22, flexWrap: "wrap", padding: "12px 18px", borderRadius: 14, background: "#fff", border: `1.5px solid ${T.border}` }}>
+                          <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 14, color: T.textPrimary }}>{monthLabel(month, true)}</div>
+                          {stat(`of ${target} delivered`, done, T.green)}
+                          {stat(isPast ? "still pending" : "left this month", Math.max(0, target - done), isPast && target > done ? T.red : "#c2410c")}
+                          {stat("pending from earlier months", backlog, backlog ? T.red : T.textMuted)}
+                        </div>
+                      );
+                    })()}
                     {tasks.map((task, i) => {
                       const sm = STATUS[task.status] || STATUS.pending;
                       const pm = PRIORITY[task.priority] || PRIORITY.medium;
                       const isOverdue = task.dueDate && task.status !== "completed" && new Date(task.dueDate) < new Date();
+                      const view = task.deliverables?.length ? taskMonthView(task, month) : null;
+                      const monthIsPast = month < currentMonthKey();
 
                       return (
                         <div key={task._id} className="task-card card-in" style={{
@@ -673,33 +738,85 @@ await API.patch(
                               {/* deliverables progress */}
                               {task.deliverables?.length > 0 && (
                                 <div style={{ marginBottom: 14 }}>
-                                  <div style={{ fontSize: 11.5, fontWeight: 700, color: T.textSecondary, marginBottom: 7 }}>Deliverables Summary</div>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, fontWeight: 700, color: T.textSecondary, marginBottom: 7, flexWrap: "wrap" }}>
+                                    Deliverables — {monthLabel(month)}
+                                    {view.inRange && view.count && (
+                                      <span style={{ fontSize: 11, fontWeight: 700, color: "#2563eb", background: "#eff6ff", padding: "2px 8px", borderRadius: 99 }}>Month {view.index} of {view.count}</span>
+                                    )}
+                                    {view.inRange && view.target > 0 && (
+                                      <span style={{ fontSize: 11, fontWeight: 700, color: view.done >= view.target ? T.green : T.brand, background: view.done >= view.target ? T.greenBg : T.brandLight, padding: "2px 8px", borderRadius: 99 }}>
+                                        {view.done}/{view.target} done{monthIsPast && view.pending ? ` · ${view.pending} pending` : ""}
+                                      </span>
+                                    )}
+                                    {view.isFuture && view.inRange && <span style={{ fontSize: 11, fontWeight: 600, color: T.textMuted }}>Upcoming — can be updated once the month starts</span>}
+                                  </div>
+                                  {!view.inRange && view.items.some((r) => !r.whole) && (
+                                    <div style={{ fontSize: 12, color: T.textMuted, background: T.inputBg, borderRadius: 9, padding: "8px 12px", marginBottom: 6 }}>
+                                      This contract&apos;s monthly work doesn&apos;t run in {monthLabel(month, true)}.
+                                    </div>
+                                  )}
                                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                                    {task.deliverables.map((d) => (
+                                    {view.items.filter((row) => view.inRange || row.whole).map((row) => (
                                       <DeliverableProgressRow
-                                        key={d._id}
-                                        taskId={task._id}
-                                        d={d}
-                                        busy={updatingDeliverable === d._id}
-                                        onUpdate={handleDeliverableUpdate}
+                                        key={row.item._id}
+                                        row={row}
+                                        isPast={monthIsPast}
+                                        busy={updatingDeliverable === row.item._id}
+                                        onUpdate={(value) => handleDeliverableUpdate(task._id, row.item._id, value, row.whole ? undefined : row.period)}
+                                        proofs={proofsForTaskItem(proofs, row.item._id).filter((pr) => proofPeriod(pr, row.item) === row.period)}
+                                        onOpenProofs={() => setProofTarget({ task, item: row.item, period: row.period, row })}
                                       />
                                     ))}
                                   </div>
+                                  {view.backlogTotal > 0 && (
+                                    <div data-backlog style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 8, fontSize: 11.5, color: T.red, fontWeight: 600 }}>
+                                      {view.backlogTotal} pending from earlier months:
+                                      {view.backlog.map((b) => (
+                                        <button key={b.key} type="button" onClick={() => setMonth(b.key)} title={`Open ${monthLabel(b.key, true)}`}
+                                          style={{ padding: "2px 8px", borderRadius: 99, border: `1px solid ${T.redBorder}`, background: T.redBg, color: T.red, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                                          {monthLabel(b.key)} · {b.pending}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
                               )}
 
                               {/* meta + status row */}
                               <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
+                                {(() => {
+                                  // When the work started: the contract's start date (or when it was
+                                  // made) for contract tasks; when the task was created otherwise.
+                                  const started = task.contractId ? (task.contractId.contractStartDate || task.contractId.createdAt || task.createdAt) : task.createdAt;
+                                  return started && (
+                                    <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: T.textMuted }} title={task.contractId ? "Contract start date" : "Task created on"}>
+                                      <CalendarClock size={12} strokeWidth={1.8} />
+                                      {task.contractId ? "Started" : "Created"} {new Date(started).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                                    </span>
+                                  );
+                                })()}
                                 <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: isOverdue ? T.red : T.textMuted, fontWeight: isOverdue ? 600 : 400 }}>
                                   <Calendar size={12} strokeWidth={1.8} />
                                   {task.dueDate
-                                    ? new Date(task.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                                    ? `Due ${new Date(task.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
                                     : "No due date"}
                                 </span>
                                 <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: T.textMuted }}>
                                   <User size={12} strokeWidth={1.8} />
                                   Assigned to you
                                 </span>
+                                {task.contractId && task.clientId?._id && (
+                                  <button
+                                    type="button"
+                                    data-reports-btn
+                                    onClick={() => setReportsFor({ clientId: task.clientId._id, clientName: task.clientId.companyName || task.clientId.clientName })}
+                                    title="Add or view this client's monthly service reports"
+                                    style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "5px 11px", borderRadius: 8, border: `1.5px solid ${T.border}`, background: "#fff", color: T.textSecondary, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+                                  >
+                                    <FileBarChart2 size={13} color={T.brand} strokeWidth={2} />
+                                    Monthly reports
+                                  </button>
+                                )}
 
                                 {/* spacer */}
                                 <div style={{ flex: 1 }} />
@@ -940,6 +1057,26 @@ await API.patch(
               <ClientTaskDetail clientId={openClientTaskId} onClose={() => setOpenClientTaskId(null)} />
             </div>
           </div>
+        )}
+
+        {/* ── PROOF OF WORK (screenshots / live links) ─────────────────────── */}
+        {proofTarget && (
+          <ProofDialog
+            title={`${proofTarget.task.clientId?.companyName || proofTarget.task.clientId?.clientName || proofTarget.task.title} · ${proofTarget.item.title}`}
+            subtitle={`${proofTarget.row.whole ? "Whole contract" : monthLabel(proofTarget.period, true)} · ${proofTarget.row.delivered}/${proofTarget.row.target} done — add a screenshot or live link for the work you've delivered`}
+            proofs={proofsForTaskItem(proofs, proofTarget.item._id).filter((pr) => proofPeriod(pr, proofTarget.item) === proofTarget.period)}
+            task={proofTarget.task}
+            itemId={proofTarget.item._id}
+            period={proofTarget.row.whole ? undefined : proofTarget.period}
+            canAdd={proofTarget.row.editable}
+            onAdded={(added) => { addProofs(added); showToast(`Proof added (${added.length})`); }}
+            onRemoved={removeProof}
+            onClose={() => setProofTarget(null)}
+          />
+        )}
+
+        {reportsFor && (
+          <ClientReportsDialog clientId={reportsFor.clientId} clientName={reportsFor.clientName} onClose={() => setReportsFor(null)} />
         )}
 
         {/* ── TOAST ─────────────────────────────────────────────────────────── */}

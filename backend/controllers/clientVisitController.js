@@ -2,6 +2,10 @@ const mongoose = require("mongoose");
 const ClientVisit = require("../models/ClientVisit");
 const User = require("../models/User");
 const { logActivity } = require("../utils/activityLogger");
+const {
+  MAX_PHOTOS_PER_VISIT, PHOTO_CATEGORIES, PHOTO_EDIT_WINDOW_HOURS,
+  canEditPhotos, normalizePhoto, removeFiles, removePhotoFile,
+} = require("../utils/visitPhotos");
 
 const MAX_PAGE_SIZE = 200;
 
@@ -137,6 +141,117 @@ exports.getMyVisits = async (req, res) => {
   }
 };
 
+const PHOTO_CATEGORY_LABELS = {
+  "with-client": "with the client",
+  "business-card": "business card",
+  premises: "office / factory",
+  other: "other",
+};
+const lockedMessage = `Photos can only be added or removed during the meeting or within ${PHOTO_EDIT_WINDOW_HOURS} hours after it ends`;
+
+/**
+ * POST /api/client-visits/:id/photos (sales) — add photos (multipart `photos`,
+ * plus optional `category` and `caption` for the batch) to your own meeting.
+ */
+exports.addPhotos = async (req, res) => {
+  const files = req.files || [];
+  const reject = (status, message) => {
+    removeFiles(files);
+    return res.status(status).json({ message });
+  };
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return reject(404, "Meeting not found");
+    if (!files.length) return reject(400, "Choose at least one photo");
+
+    const visit = await ClientVisit.findOne({ _id: req.params.id, salesPerson: req.user.id }).select("status checkOut photos clientId");
+    if (!visit) return reject(404, "Meeting not found");
+    if (!canEditPhotos(visit)) return reject(403, lockedMessage);
+
+    // Any image format works: JPG/PNG/WebP are kept, everything else (iPhone
+    // HEIC, TIFF, AVIF, GIF, BMP …) is converted to JPEG. Files are replaced in
+    // place so `reject` always cleans up whatever is on disk right now.
+    for (let i = 0; i < files.length; i += 1) {
+      try {
+        files[i] = await normalizePhoto(files[i]);
+      } catch {
+        return reject(400, `"${files[i].originalname}" couldn't be read as a photo`);
+      }
+    }
+    const room = MAX_PHOTOS_PER_VISIT - (visit.photos?.length || 0);
+    if (files.length > room) {
+      return reject(400, room > 0
+        ? `You can add ${room} more photo${room === 1 ? "" : "s"} to this meeting (${MAX_PHOTOS_PER_VISIT} max)`
+        : `This meeting already has ${MAX_PHOTOS_PER_VISIT} photos — remove one to add another`);
+    }
+
+    const category = PHOTO_CATEGORIES.includes(req.body.category) ? req.body.category : "other";
+    const caption = typeof req.body.caption === "string" ? req.body.caption.trim().slice(0, 200) : "";
+    const uploadedAt = new Date();
+    const photos = files.map((f) => ({
+      filename: f.filename,
+      originalname: String(f.originalname || "").slice(0, 200),
+      mimetype: f.mimetype,
+      size: f.size,
+      category,
+      ...(caption ? { caption } : {}),
+      uploadedAt,
+    }));
+
+    // Re-check the cap atomically so two uploads at once can't overshoot it.
+    const updated = await ClientVisit.findOneAndUpdate(
+      {
+        _id: visit._id,
+        salesPerson: req.user.id,
+        $expr: { $lte: [{ $size: { $ifNull: ["$photos", []] } }, MAX_PHOTOS_PER_VISIT - photos.length] },
+      },
+      { $push: { photos: { $each: photos } } },
+      { returnDocument: "after", runValidators: true }
+    ).populate([POPULATE_CLIENT, POPULATE_SALES]);
+    if (!updated) return reject(409, `This meeting can have at most ${MAX_PHOTOS_PER_VISIT} photos`);
+
+    const n = photos.length;
+    await logActivity(
+      updated.clientId?._id || updated.clientId,
+      "visit_photos_added",
+      `${updated.salesPerson?.name || "Sales person"} added ${n} photo${n === 1 ? "" : "s"} from the client meeting (${PHOTO_CATEGORY_LABELS[category]}${caption ? ` — ${caption}` : ""})`,
+      { visitId: updated._id }
+    );
+
+    return res.status(201).json({ message: `${n} photo${n === 1 ? "" : "s"} added`, visit: updated });
+  } catch (error) {
+    removeFiles(files);
+    console.error("Error adding visit photos:", error);
+    return res.status(500).json({ message: error.message || "Failed to upload photos" });
+  }
+};
+
+/** DELETE /api/client-visits/:id/photos/:photoId (sales) — remove one of your meeting photos. */
+exports.deletePhoto = async (req, res) => {
+  try {
+    const { id, photoId } = req.params;
+    if (!mongoose.isValidObjectId(id) || !mongoose.isValidObjectId(photoId)) {
+      return res.status(404).json({ message: "Photo not found" });
+    }
+    const visit = await ClientVisit.findOne({ _id: id, salesPerson: req.user.id }).select("status checkOut photos");
+    if (!visit) return res.status(404).json({ message: "Meeting not found" });
+    if (!canEditPhotos(visit)) return res.status(403).json({ message: lockedMessage });
+    const photo = visit.photos.id(photoId);
+    if (!photo) return res.status(404).json({ message: "Photo not found" });
+
+    const updated = await ClientVisit.findOneAndUpdate(
+      { _id: id, salesPerson: req.user.id },
+      { $pull: { photos: { _id: photoId } } },
+      { returnDocument: "after" }
+    ).populate([POPULATE_CLIENT, POPULATE_SALES]);
+    removePhotoFile(photo.filename);
+
+    return res.json({ message: "Photo removed", visit: updated });
+  } catch (error) {
+    console.error("Error removing visit photo:", error);
+    return res.status(500).json({ message: error.message || "Failed to remove photo" });
+  }
+};
+
 /**
  * GET /api/client-visits (admin) — every sales person's visits.
  * Filters: salesPerson, clientId, status, from, to (check-in date, inclusive
@@ -175,6 +290,7 @@ exports.getAllVisits = async (req, res) => {
             clients: { $addToSet: "$clientId" },
             salesPeople: { $addToSet: "$salesPerson" },
             inProgress: { $sum: { $cond: [{ $eq: ["$status", "in-progress"] }, 1, 0] } },
+            photos: { $sum: { $size: { $ifNull: ["$photos", []] } } },
             totalMinutes: {
               $sum: {
                 $cond: [
@@ -201,6 +317,7 @@ exports.getAllVisits = async (req, res) => {
         activeSalesPeople: s ? s.salesPeople.length : 0,
         inProgress: s ? s.inProgress : 0,
         totalMinutes: s ? Math.round(s.totalMinutes) : 0,
+        totalPhotos: s ? s.photos : 0,
       },
     });
   } catch (error) {

@@ -1,11 +1,22 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import {
-  ArrowRight, Briefcase, Calendar, CheckCircle2, ChevronDown, ClipboardList,
-  FileText, Filter, MoreVertical, Pencil, Plus, Search, Trash2, User,
+  ArrowRight, Briefcase, Calendar, CalendarClock, CheckCircle2, ChevronDown, ClipboardList,
+  FileBarChart2, FileText, Filter, MoreVertical, Pencil, Plus, Search, Trash2, User,
 } from "lucide-react";
+import { ProofButton, ProofDialog, proofsForTaskItem, useDeliverableProofs } from "../../components/DeliverableProofs";
+import MonthFilter from "../../components/MonthFilter";
+import { ClientReportsDialog } from "../../components/ClientMonthlyReports";
+import { currentMonthKey, monthLabel, monthsForTasks, proofPeriod, taskMonthView } from "../../utils/taskPeriods";
 import { PRIORITY, STATUS, T } from "./shared";
 import { resolveDeliverableVisual } from "../../config/serviceVisuals";
 import { columnsForUnit, formatDeliverableProgress, summarizeTaskDeliverables } from "../../config/deliverableUnits";
+
+// Work-proof data for every task on the page, "open the proof dialog for this
+// item", and the month being viewed — shared with the cards and deliverables
+// tables without prop-drilling.
+const ProofsContext = createContext({ proofs: [], openProofs: () => {}, month: "", setMonth: () => {} });
+
+const fmtDay = (v) => (v ? new Date(v).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null);
 
 const AVATAR_PALETTE = ["#e8590c", "#0d9488", "#7c3aed", "#2563eb", "#db2777", "#ca8a04"];
 const ROW_PALETTE = ["#2563eb", "#16a34a", "#7c3aed", "#ea580c", "#db2777", "#0d9488"];
@@ -152,9 +163,13 @@ function extraCell(col, d) {
   }
 }
 
-function DeliverablesTable({ deliverables }) {
-  const columns = columnsForUnit(deliverables[0]?.unit);
-  const extraColumns = columns.filter((c) => !["Deliverable", "Platform", "Progress"].includes(c));
+function DeliverablesTable({ task, deliverables, view }) {
+  const { proofs, openProofs, month } = useContext(ProofsContext);
+  const isPast = month < currentMonthKey();
+  // Rows for the selected month; outside the contract period only one-time items remain.
+  const rows = view.items.filter((r) => view.inRange || r.whole);
+  const columns = [...columnsForUnit(deliverables[0]?.unit), "Proof"];
+  const extraColumns = columns.filter((c) => !["Deliverable", "Platform", "Progress", "Proof"].includes(c));
 
   return (
     <div style={{ marginTop: 14, marginBottom: 14, border: `1px solid ${T.borderLight}`, borderRadius: 12, overflow: "hidden" }}>
@@ -171,15 +186,16 @@ function DeliverablesTable({ deliverables }) {
             </tr>
           </thead>
           <tbody>
-            {deliverables.map((d, idx) => {
+            {rows.map((row) => {
+              const d = row.item;
               const visual = resolveDeliverableVisual(d.title, d.categoryId);
               const VisualIcon = visual.Icon;
-              const rowColor = ROW_PALETTE[idx % ROW_PALETTE.length];
-              const delivered = d.delivered || 0;
-              const quantity = d.quantity || 0;
+              const rowColor = ROW_PALETTE[deliverables.indexOf(d) % ROW_PALETTE.length];
+              const delivered = row.delivered;
+              const quantity = row.target;
               const pct = quantity ? Math.min(100, Math.round((delivered / quantity) * 100)) : 0;
               return (
-                <tr key={d._id || idx} style={{ borderTop: `1px solid ${T.borderLight}` }}>
+                <tr key={d._id} style={{ borderTop: `1px solid ${T.borderLight}` }}>
                   <td style={{ padding: "10px 14px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
                       <div style={{ width: 28, height: 28, borderRadius: 8, background: `${visual.bg}`.startsWith("linear") ? visual.bg : `${visual.bg}22`, display: "grid", placeItems: "center", flexShrink: 0 }}>
@@ -205,8 +221,13 @@ function DeliverablesTable({ deliverables }) {
                       <div style={{ flex: 1, height: 6, background: T.inputBg, borderRadius: 99, overflow: "hidden" }}>
                         <div style={{ height: "100%", width: `${pct}%`, background: rowColor, borderRadius: 99 }} />
                       </div>
-                      <span style={{ fontSize: 11, color: T.textMuted, whiteSpace: "nowrap" }}>{formatDeliverableProgress(d)}</span>
+                      <span style={{ fontSize: 11, color: T.textMuted, whiteSpace: "nowrap" }}>{formatDeliverableProgress({ ...d, delivered, quantity })}</span>
                     </div>
+                    {(row.whole || row.pending > 0) && (
+                      <div style={{ fontSize: 10.5, marginTop: 3, color: row.pending > 0 && isPast && !row.whole ? T.red : T.textMuted, fontWeight: row.pending > 0 && isPast && !row.whole ? 700 : 500 }}>
+                        {row.whole ? "Whole contract" : `${row.pending} ${isPast ? "pending" : "left"}`}
+                      </div>
+                    )}
                   </td>
                   {extraColumns.includes("Quantity") && (
                     <td style={{ padding: "10px 14px" }}>
@@ -215,6 +236,10 @@ function DeliverablesTable({ deliverables }) {
                       </span>
                     </td>
                   )}
+                  <td style={{ padding: "10px 14px" }}>
+                    {/* View only here — proof is added by the assignee from their My Tasks page. */}
+                    <ProofButton proofs={proofsForTaskItem(proofs, d._id).filter((p) => proofPeriod(p, d) === row.period)} onClick={() => openProofs(task, d, row)} />
+                  </td>
                 </tr>
               );
             })}
@@ -235,7 +260,17 @@ function TaskCard({ task, openEditTask, setDeleteTask }) {
   const avatarLabel = isContractTask ? (clientName || task.title) : task.title;
   const color = hashColor(avatarLabel);
   const displayTitle = contactName && task.title?.startsWith(`${contactName}: `) ? task.title.slice(contactName.length + 2) : task.title;
+  const { month, setMonth, openReports } = useContext(ProofsContext);
   const { count, label: totalsLabel, amount: totalsAmount } = summarizeTaskDeliverables(task.deliverables);
+  // The selected month: its target / done for monthly items, plus what's
+  // still pending from earlier months (utils/taskPeriods.js).
+  const view = task.deliverables?.length ? taskMonthView(task, month) : null;
+  const done = view?.done || 0;
+  const total = view?.target || 0;
+  const donePct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  // When the work started: the contract's start date (or when the contract was
+  // made) for contract tasks; when the task was created for manual ones.
+  const startedOn = isContractTask ? (task.contractId?.contractStartDate || task.contractId?.createdAt || task.createdAt) : task.createdAt;
   const pm = PRIORITY[task.priority] || PRIORITY.medium;
 
   return (
@@ -262,17 +297,54 @@ function TaskCard({ task, openEditTask, setDeleteTask }) {
               <div style={{ fontSize: 11.5, marginTop: 5, color: T.textMuted }}>
                 Contract: <span style={{ color: T.brand, fontWeight: 600 }}>{clientName}</span>
                 {contractName && <> &middot; <span style={{ color: T.brand, fontWeight: 600 }}>{contractName}</span></>}
+                {view?.inRange && view.count && (
+                  <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 700, color: "#2563eb", background: "#eff6ff", padding: "2px 8px", borderRadius: 99 }}>
+                    {monthLabel(month)} · Month {view.index} of {view.count}
+                  </span>
+                )}
               </div>
             )}
             {!isContractTask && task.description && (
               <p style={{ fontSize: 12.5, color: T.textMuted, lineHeight: 1.6, marginTop: 5 }}>{task.description}</p>
             )}
 
-            {task.deliverables?.length > 0 && <DeliverablesTable deliverables={task.deliverables} />}
+            {view && !view.inRange && view.items.some((r) => !r.whole) && (
+              <div style={{ marginTop: 12, fontSize: 12, color: T.textMuted, background: T.inputBg, borderRadius: 9, padding: "8px 12px" }}>
+                This contract&apos;s monthly work doesn&apos;t run in {monthLabel(month, true)}.
+              </div>
+            )}
+            {view && view.items.some((r) => view.inRange || r.whole) && <DeliverablesTable task={task} deliverables={task.deliverables} view={view} />}
+            {view?.backlogTotal > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6, fontSize: 11.5, color: T.red, fontWeight: 600 }}>
+                {view.backlogTotal} pending from earlier months:
+                {view.backlog.map((b) => (
+                  <button key={b.key} type="button" onClick={() => setMonth(b.key)} title={`Open ${monthLabel(b.key, true)}`}
+                    style={{ padding: "2px 8px", borderRadius: 99, border: `1px solid ${T.redBorder}`, background: T.redBg, color: T.red, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                    {monthLabel(b.key)} · {b.pending}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: T.textMuted, alignItems: "center", marginTop: 12 }}>
               <span style={{ display: "flex", alignItems: "center", gap: 5 }}><User size={12} strokeWidth={1.8} />{task.assignedTo?.name || "Unassigned"}</span>
-              <span style={{ display: "flex", alignItems: "center", gap: 5 }}><Calendar size={12} strokeWidth={1.8} />{task.dueDate ? new Date(task.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "No due date"}</span>
+              {startedOn && (
+                <span style={{ display: "flex", alignItems: "center", gap: 5 }} title={isContractTask ? "Contract start date" : "Task created on"}>
+                  <CalendarClock size={12} strokeWidth={1.8} />{isContractTask ? "Started" : "Created"} {fmtDay(startedOn)}
+                </span>
+              )}
+              <span style={{ display: "flex", alignItems: "center", gap: 5 }}><Calendar size={12} strokeWidth={1.8} />{task.dueDate ? `Due ${fmtDay(task.dueDate)}` : "No due date"}</span>
+              {isContractTask && task.clientId?._id && (
+                <button
+                  type="button"
+                  data-reports-btn
+                  onClick={() => openReports({ clientId: task.clientId._id, clientName })}
+                  title="View or add this client's monthly service reports"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: "#fff", color: T.textSecondary, fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+                >
+                  <FileBarChart2 size={12} color={T.brand} strokeWidth={2} />Monthly reports
+                </button>
+              )}
             </div>
           </div>
 
@@ -285,8 +357,19 @@ function TaskCard({ task, openEditTask, setDeleteTask }) {
               <div style={{ textAlign: "right", marginTop: 2 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: T.textPrimary }}>{count} Package{count !== 1 ? "s" : ""}</div>
                 <div style={{ fontSize: 10.5, color: T.textMuted }}>Total Deliverables</div>
-                <div style={{ fontSize: 15, fontWeight: 700, color, marginTop: 8 }}>{totalsAmount}</div>
-                <div style={{ fontSize: 10.5, color: T.textMuted }}>{totalsLabel}</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color, marginTop: 8 }} title={`${done} of ${total} completed`}>
+                  {done}<span style={{ color: T.textMuted, fontWeight: 600 }}>/{total}</span>
+                </div>
+                <div style={{ fontSize: 10.5, color: T.textMuted }}>{view?.inRange ? `Completed in ${monthLabel(month)}` : `Not running in ${monthLabel(month)}`}</div>
+                <div style={{ height: 5, borderRadius: 99, background: T.inputBg, marginTop: 5, overflow: "hidden" }}>
+                  <div style={{ width: `${donePct}%`, height: "100%", background: color, borderRadius: 99 }} />
+                </div>
+                {totalsLabel === "Total Budget" && (
+                  <>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: T.textPrimary, marginTop: 8 }}>{totalsAmount}</div>
+                    <div style={{ fontSize: 10.5, color: T.textMuted }}>{totalsLabel}</div>
+                  </>
+                )}
               </div>
             )}
 
@@ -352,6 +435,14 @@ function TaskGroup({ icon: Icon, iconColor, iconBg, title, subtitle, tasks, open
 export default function TasksSection({ tasks, setTab, openEditTask, setDeleteTask }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
+  // Work proof (screenshots / live links) on every contract task's deliverables.
+  const { proofs, remove: removeProof } = useDeliverableProofs({
+    taskIds: tasks.filter((t) => t.deliverables?.length).map((t) => t._id),
+  });
+  const [proofTarget, setProofTarget] = useState(null); // { task, item, row }
+  const [month, setMonth] = useState(() => currentMonthKey());
+  const [reportsFor, setReportsFor] = useState(null); // { clientId, clientName }
+  const proofsContext = { proofs, openProofs: (task, item, row) => setProofTarget({ task, item, row }), month, setMonth, openReports: setReportsFor };
 
   const byStatus = statusFilter === "all" ? tasks : tasks.filter((t) => (t.status || "pending") === statusFilter);
   const search = searchTerm.trim().toLowerCase();
@@ -377,6 +468,7 @@ export default function TasksSection({ tasks, setTab, openEditTask, setDeleteTas
   }).length;
 
   return (
+    <ProofsContext.Provider value={proofsContext}>
     <div className="fade-up">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
         <div>
@@ -394,6 +486,9 @@ export default function TasksSection({ tasks, setTab, openEditTask, setDeleteTas
               style={{ width: 220, padding: "9px 12px 9px 34px", border: `1.5px solid ${T.border}`, borderRadius: 10, fontSize: 13, fontFamily: "inherit", color: T.textPrimary, background: "#fff" }}
             />
           </div>
+          {tasks.some((t) => t.deliverables?.length) && (
+            <MonthFilter value={month} onChange={setMonth} months={monthsForTasks(tasks.filter((t) => t.deliverables?.length))} />
+          )}
           <FilterMenu value={statusFilter} onChange={setStatusFilter} />
           <button className="pri-btn" onClick={() => setTab("createTask")} style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 18px", background: "linear-gradient(135deg, #f7931e, #e8590c)", color: "#fff", borderRadius: 10, fontSize: 13, fontWeight: 600 }}>
             <Plus size={15} strokeWidth={2.5} /> New Task
@@ -443,5 +538,18 @@ export default function TasksSection({ tasks, setTab, openEditTask, setDeleteTas
         </>
       )}
     </div>
+    {proofTarget && (
+      <ProofDialog
+        title={`${proofTarget.task.clientId?.companyName || proofTarget.task.clientId?.clientName || ""}${proofTarget.task.clientId ? " · " : ""}${proofTarget.item.title}`}
+        subtitle={`${proofTarget.row.whole ? "Whole contract" : monthLabel(proofTarget.row.period, true)} · ${proofTarget.row.delivered}/${proofTarget.row.target} done${proofTarget.task.assignedTo?.name ? ` · assigned to ${proofTarget.task.assignedTo.name}` : ""}`}
+        proofs={proofsForTaskItem(proofs, proofTarget.item._id).filter((p) => proofPeriod(p, proofTarget.item) === proofTarget.row.period)}
+        onRemoved={removeProof}
+        onClose={() => setProofTarget(null)}
+      />
+    )}
+    {reportsFor && (
+      <ClientReportsDialog clientId={reportsFor.clientId} clientName={reportsFor.clientName} onClose={() => setReportsFor(null)} />
+    )}
+    </ProofsContext.Provider>
   );
 }

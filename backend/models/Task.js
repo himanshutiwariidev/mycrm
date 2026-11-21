@@ -24,8 +24,20 @@ deliverables:[{
   frequency:{type:String},
   // How much of this deliverable's quantity has been completed so far —
   // updated by the assignee (or admin) as work progresses, independent of
-  // the overall task status. Absent/0 on freshly-created tasks.
+  // the overall task status. Absent/0 on freshly-created tasks. For monthly
+  // items this is the latest month's count; the per-month history is in
+  // `progress` (see backend/utils/taskPeriods.js).
   delivered:{type:Number,default:0},
+  // Per-period progress: { period: "YYYY-MM", delivered } for monthly/weekly
+  // items (each month starts from 0), or a single { period: "all" } for
+  // one-time items. Lets the panels show any month's deliveries and what's
+  // still pending from earlier months.
+  progress:[{
+    _id:false,
+    period:{type:String,required:true},
+    delivered:{type:Number,default:0,min:0},
+    updatedAt:{type:Date},
+  }],
   // Mirrors Contract.deliverables' unit/metadata (see backend/models/Contract.js)
   // so a service-aware task card (e.g. "12 Pages", "₹50,000/month • 3 Campaigns")
   // doesn't need to look the originating contract up. Absent on legacy tasks

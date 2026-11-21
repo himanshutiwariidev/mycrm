@@ -1,4 +1,8 @@
 import API from "./api";
+import { uploadedFileUrl } from "../utils/uploads";
+
+// Shared with deliverable work proof — re-exported for existing imports.
+export { preparePhoto, PHOTO_ACCEPT } from "../utils/uploads";
 
 /**
  * Client meeting check-ins with live location.
@@ -11,6 +15,47 @@ export const checkOutClientVisit = (visitId, payload) => API.put(`/client-visits
 export const getMyClientVisits = (limit = 50) => API.get("/client-visits/mine", { params: { limit } });
 
 export const getAllClientVisits = (params) => API.get("/client-visits", { params });
+
+// ── Meeting photos (with the client, visiting card, office / factory …) ──────
+// Limits mirror backend/utils/visitPhotos.js.
+export const PHOTO_CATEGORIES = [
+  { value: "with-client", label: "With client" },
+  { value: "business-card", label: "Business card" },
+  { value: "premises", label: "Office / factory" },
+  { value: "other", label: "Other" },
+];
+export const photoCategoryLabel = (value) => PHOTO_CATEGORIES.find((c) => c.value === value)?.label || "Other";
+export const MAX_VISIT_PHOTOS = 12;
+export const MAX_PHOTOS_PER_UPLOAD = 6;
+export const PHOTO_EDIT_WINDOW_HOURS = 24;
+
+/** Uploads photos to your own meeting; `onProgress` gets 0–100. */
+export function addVisitPhotos(visitId, files, { category, caption } = {}, onProgress) {
+  const form = new FormData();
+  files.forEach((file) => form.append("photos", file, file.name));
+  if (category) form.append("category", category);
+  if (caption) form.append("caption", caption);
+  return API.post(`/client-visits/${visitId}/photos`, form, {
+    headers: { "Content-Type": "multipart/form-data" },
+    onUploadProgress: (e) => onProgress?.(e.total ? Math.round((e.loaded / e.total) * 100) : 0),
+  });
+}
+
+export const deleteVisitPhoto = (visitId, photoId) => API.delete(`/client-visits/${visitId}/photos/${photoId}`);
+
+export const visitPhotoUrl = (photo) => uploadedFileUrl("visit-photos", photo.filename);
+
+/** Same rule as the server: open meeting, or ended less than 24 hours ago. */
+export function canEditVisitPhotos(visit, now = Date.now()) {
+  if (!visit) return false;
+  if (visit.status === "in-progress") return true;
+  const endedAt = visit.checkOut?.at ? new Date(visit.checkOut.at).getTime() : NaN;
+  return Number.isFinite(endedAt) && now - endedAt <= PHOTO_EDIT_WINDOW_HOURS * 3600 * 1000;
+}
+
+/** True when the photo was added after the meeting had already ended. */
+export const addedAfterMeeting = (photo, visit) =>
+  Boolean(visit?.checkOut?.at && photo?.uploadedAt && new Date(photo.uploadedAt) > new Date(visit.checkOut.at));
 
 /**
  * Asks the browser for one fresh, high-accuracy location fix. Resolves to

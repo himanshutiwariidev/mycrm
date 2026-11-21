@@ -79,12 +79,30 @@ export default function DashboardModals({
           <form onSubmit={handleUpdateUser}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
               <FormField label="Full Name"><div style={{ position: "relative" }}><FieldIcon icon={User} /><input className="inp" style={baseInp} type="text" placeholder="Full name" value={editUserForm.name} onChange={e => setEditUserForm({ ...editUserForm, name: e.target.value })} required /></div></FormField>
-              <FormField label="Role"><div style={{ position: "relative" }}><FieldIcon icon={Shield} /><select className="inp" style={{ ...baseInp, appearance: "none" }} value={editUserForm.role} onChange={e => setEditUserForm({ ...editUserForm, role: e.target.value })}><option value="user">User</option><option value="admin">Admin</option></select></div></FormField>
+              <FormField label="Role">
+                <div style={{ position: "relative" }}>
+                  <FieldIcon icon={Shield} />
+                  {/* Same roles as Create User. "Admin" / "Client" are only listed for accounts
+                      that already have them (the server doesn't allow switching into them here);
+                      a manager can only manage "user" accounts, so their role stays fixed. */}
+                  <select className="inp" style={{ ...baseInp, appearance: "none" }} value={editUserForm.role}
+                    disabled={localStorage.getItem("role") === "manager"}
+                    onChange={e => setEditUserForm({ ...editUserForm, role: e.target.value })}>
+                    {editUser.role === "admin" && <option value="admin">Admin</option>}
+                    <option value="user">User</option>
+                    <option value="manager">Manager</option>
+                    <option value="hr">HR</option>
+                    <option value="sales">Sales</option>
+                    <option value="telecaller">Telecaller</option>
+                    {editUser.role === "client" && <option value="client">Client</option>}
+                  </select>
+                </div>
+              </FormField>
               <FormField label="Email Address" span2><div style={{ position: "relative" }}><FieldIcon icon={Mail} /><input className="inp" style={baseInp} type="email" placeholder="Email" value={editUserForm.email} onChange={e => setEditUserForm({ ...editUserForm, email: e.target.value })} required /></div></FormField>
               <FormField label="New Password (optional)" span2>
                 <div style={{ position: "relative" }}>
                   <FieldIcon icon={Lock} />
-                  <input className="inp" style={baseInp} type={showEditPw ? "text" : "password"} placeholder="Leave blank to keep current" value={editUserForm.password} onChange={e => setEditUserForm({ ...editUserForm, password: e.target.value })} />
+                  <input className="inp" style={baseInp} type={showEditPw ? "text" : "password"} placeholder="Leave blank to keep current" minLength={6} maxLength={128} autoComplete="new-password" value={editUserForm.password} onChange={e => setEditUserForm({ ...editUserForm, password: e.target.value })} />
                   <button type="button" onClick={() => setShowEditPw(p => !p)} style={{ position: "absolute", right: 13, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: T.textMuted, display: "flex", padding: 0 }}>
                     {showEditPw ? <EyeOff size={15} strokeWidth={1.8} /> : <Eye size={15} strokeWidth={1.8} />}
                   </button>

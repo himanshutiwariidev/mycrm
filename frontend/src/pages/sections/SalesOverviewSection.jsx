@@ -7,6 +7,7 @@ import {
 import { getSalesDashboard } from "../../services/clientApi";
 import { T, KpiCard, kpiGridStyle, fmtShortDate } from "./shared";
 import { fmtINR, Chip, Card, Segmented, Empty, th, td, linkBtn } from "./salesUi";
+import { ProofButton, ProofDialog, proofsForContractDeliverable, useDeliverableProofs } from "../../components/DeliverableProofs";
 
 function daysLabel(daysLeft) {
   if (daysLeft === 0) return "Today";
@@ -157,7 +158,7 @@ function BalanceDueCard({ balanceDue, total, overdueCount, openClient }) {
 }
 
 // ─── Deliverables ─────────────────────────────────────────────────────────
-function ContractDeliverables({ contract, items, expanded, onToggle, openClient }) {
+function ContractDeliverables({ contract, items, expanded, onToggle, openClient, proofs = [], onOpenProof }) {
   const pct = contract.total ? Math.round((contract.completed / contract.total) * 100) : 0;
   const Chevron = expanded ? ChevronDown : ChevronRight;
   return (
@@ -191,13 +192,14 @@ function ContractDeliverables({ contract, items, expanded, onToggle, openClient 
       </button>
       {expanded && (
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 620 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 720 }}>
             <thead>
               <tr>
                 <th style={th()}>Deliverable</th>
                 <th style={th()}>Assigned To</th>
                 <th style={th()}>Progress</th>
                 <th style={th()}>Status</th>
+                <th style={th()}>Proof</th>
               </tr>
             </thead>
             <tbody>
@@ -214,6 +216,9 @@ function ContractDeliverables({ contract, items, expanded, onToggle, openClient 
                   </td>
                   <td style={td({ color: T.textSecondary, whiteSpace: "nowrap" })}>{progressText(i)}</td>
                   <td style={td()}><Chip label={i.status} /></td>
+                  <td style={td()}>
+                    <ProofButton proofs={proofsForContractDeliverable(proofs, i._id)} onClick={() => onOpenProof(contract, i)} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -232,6 +237,9 @@ function ContractDeliverables({ contract, items, expanded, onToggle, openClient 
 function DeliverablesCard({ contracts, openClient }) {
   const [filter, setFilter] = useState("open");
   const [expandedId, setExpandedId] = useState(null);
+  // Proof of work (screenshots / live links) the team attached — view only here.
+  const { proofs } = useDeliverableProofs({ contractIds: contracts.map((c) => c.contractId) });
+  const [proofFor, setProofFor] = useState(null); // { contract, item }
 
   const matches = (i) =>
     filter === "all" ? true : filter === "open" ? i.status !== "Completed" : i.status === filter;
@@ -276,9 +284,19 @@ function DeliverablesCard({ contracts, openClient }) {
               expanded={effectiveExpanded === contract.contractId}
               onToggle={() => setExpandedId(effectiveExpanded === contract.contractId ? "" : contract.contractId)}
               openClient={openClient}
+              proofs={proofs}
+              onOpenProof={(c, item) => setProofFor({ contract: c, item })}
             />
           ))}
         </div>
+      )}
+      {proofFor && (
+        <ProofDialog
+          title={`${proofFor.contract.companyName || proofFor.contract.clientName} · ${proofFor.item.title.replace(/^.*? — /, "")}`}
+          subtitle={`${proofFor.contract.projectName} · ${progressText(proofFor.item)}`}
+          proofs={proofsForContractDeliverable(proofs, proofFor.item._id)}
+          onClose={() => setProofFor(null)}
+        />
       )}
     </Card>
   );

@@ -1,11 +1,10 @@
 import React from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import Login from "./pages/Login";
 import AdminRecovery from "./pages/AdminRecovery";
 import AdminDashboard from "./pages/AdminDashboard";
 import UserDashboard from "./pages/UserDashboard";
-import ClientsPage from "./pages/ClientsPage";
 import ClientDetailPage from "./pages/ClientDetailPage";
 import HrDashboard from "./pages/HrDashboard";
 import ManagerDashboard from "./pages/ManagerDashboard";
@@ -15,6 +14,14 @@ import ClientDashboard from "./pages/ClientDashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ContractBuilderPage from "./features/contract-builder/pages/ContractBuilderPage";
 
+
+// The client list lives inside each role's dashboard (admin sidebar, sales and
+// user tabs). The bare /clients URL just forwards there, so it never shows up
+// without its navigation.
+const CLIENTS_HOME = { admin: "/admin?tab=clients", sales: "/sales?view=clients", user: "/dashboard?tab=clients" };
+function ClientsHome() {
+  return <Navigate to={CLIENTS_HOME[localStorage.getItem("role")] || "/"} replace />;
+}
 
 function App() {
   return (
@@ -69,7 +76,7 @@ function App() {
           path="/clients"
           element={
             <ProtectedRoute roles={["admin", "sales", "user"]}>
-              <ClientsPage />
+              <ClientsHome />
             </ProtectedRoute>
           }
         />

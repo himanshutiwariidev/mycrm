@@ -25,7 +25,7 @@ export function computeCategorySubtotal(categorySelection) {
   }, 0);
 }
 
-/** Single source of truth for the contract grand total, used by PricingCalculator, ContractSummary and buildContractPayload. */
+/** Single source of truth for the contract grand total, used by ContractSummary and buildContractPayload. */
 export function computeGrandTotal(selectedServices = []) {
   return round2(
     selectedServices

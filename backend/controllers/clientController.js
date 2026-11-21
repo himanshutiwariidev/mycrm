@@ -1,4 +1,5 @@
 const bcrypt = require("bcryptjs");
+const { createWithContractNumber } = require("../utils/contractNumber");
 const mongoose = require("mongoose");
 const multer = require("multer");
 const path = require("path");
@@ -37,7 +38,7 @@ const resolveSalesPersonFields = async (value) => {
 
 exports.createClient = async (req, res) => {
   try {
-    const { clientName, email, phone, companyName, gstNo,tanNo,salesPerson,leadSource,clientType,projectType, projectName, address, city, state, country, zipCode, contactPerson, designation, status, activeStatus, notes, password } = req.body;
+    const { clientName, email, phone, companyName, gstNo,tanNo,salesPerson,leadSource,clientType,businessCategory,projectType, projectName, address, city, state, country, zipCode, contactPerson, designation, status, activeStatus, notes, password } = req.body;
 
     if (!clientName || !phone) {
       return res.status(400).json({ message: "Client name and phone are required" });
@@ -89,6 +90,7 @@ exports.createClient = async (req, res) => {
       salesPersonName: resolvedSalesPerson.salesPersonName,
       leadSource,
       clientType,
+      businessCategory: businessCategory || undefined,
       projectType,
       projectName,
       address,
@@ -619,7 +621,7 @@ async function createTasksFromDeliverables(contract, client, createdByUserId) {
 
 exports.createContract = async (req, res) => {
   try {
-    const { clientId, projectName, projectDescription, projectScope, timeline, contractStartDate, projectAmount, preTaxAmount, gstEnabled, gstPercent, gstAmount, tdsEnabled, tdsPercent, tdsAmount, currency, paymentMethod, paymentTerms, validUntil, notes, deliverables, nextDueDate, selectedServices, pricingSummary, payments, renewedFromContractId } = req.body;
+    const { clientId, projectName, packageType, projectDescription, projectScope, timeline, contractStartDate, projectAmount, preTaxAmount, gstEnabled, gstPercent, gstAmount, tdsEnabled, tdsPercent, tdsAmount, currency, paymentMethod, paymentTerms, validUntil, notes, deliverables, nextDueDate, selectedServices, pricingSummary, payments, renewedFromContractId } = req.body;
 
     if (!clientId || !projectName || !projectDescription || !projectAmount) {
       return res.status(400).json({ message: "Missing required fields: clientId, projectName, projectDescription, projectAmount" });
@@ -630,12 +632,11 @@ exports.createContract = async (req, res) => {
       return res.status(404).json({ message: "Client not found" });
     }
 
-    const contractNumber = clientService.buildContractNumber();
-
-    const contract = await Contract.create({
-      contractNumber,
+    // Short number: brand initials + date + time (IST), e.g. HT2011261653.
+    const contract = await createWithContractNumber(Contract, client.companyName || client.clientName, {
       clientId,
       projectName,
+      packageType: packageType || undefined,
       projectDescription,
       projectScope,
       timeline,
@@ -1046,8 +1047,7 @@ exports.importClients = async (req, res) => {
             }]
           : [];
 
-        const contract = await Contract.create({
-          contractNumber: clientService.buildContractNumber(),
+        const contract = await createWithContractNumber(Contract, client.companyName || client.clientName, {
           clientId: client._id,
           projectName,
           projectDescription,

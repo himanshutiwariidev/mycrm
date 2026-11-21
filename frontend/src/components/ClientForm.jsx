@@ -1,7 +1,92 @@
 import React, { useState, useEffect } from "react";
+import { toast } from "sonner";
+import {
+  UserRound, Building2, MapPin, NotebookPen, ChevronDown, FileSignature, Save, Loader2,
+} from "lucide-react";
 import { createClient, updateClient, getUsersByRole } from "../services/clientApi";
+import { CLIENT_CATEGORIES } from "../config/clientCategories";
 import "./ClientForm.css";
+import "./ClientFormSections.css";
 
+const LEAD_SOURCES = [
+  { value: "cold call", label: "Cold Call" },
+  { value: "visit", label: "Visit" },
+  { value: "self", label: "Self" },
+  { value: "telecaller", label: "Telecaller" },
+  { value: "client reference", label: "Client Reference" },
+  { value: "company reference", label: "Company Reference" },
+  { value: "other", label: "Other" },
+];
+
+const CLIENT_TYPES = [
+  { value: "pvt ltd", label: "Pvt Ltd" },
+  { value: "ltd", label: "Ltd" },
+  { value: "llp", label: "LLP" },
+  { value: "huf", label: "HUF" },
+  { value: "proprietor", label: "Proprietor" },
+  { value: "other", label: "Other" },
+];
+
+const labelOf = (list, value) => list.find((o) => o.value === value)?.label;
+
+/** One-tap choice chips (click the active chip again to clear an optional choice). */
+function Chips({ options, value, onChange, allowClear = true }) {
+  return (
+    <div className="cf-chips" role="radiogroup">
+      {options.map((o) => {
+        const active = value === o.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            className={`cf-chip${active ? " active" : ""}`}
+            onClick={() => onChange(active && allowClear ? "" : o.value)}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Collapsible group of fields; the header shows what's already filled. */
+function Section({ id, Icon, title, summary, open, onToggle, optional = true, children }) {
+  return (
+    <section className={`cf-section${open ? " open" : ""}`}>
+      <button type="button" className="cf-section-head" onClick={() => onToggle(id)} aria-expanded={open}>
+        <span className="cf-section-icon"><Icon size={16} strokeWidth={2.2} /></span>
+        <span className="cf-section-titles">
+          <span className="cf-section-title">
+            {title}
+            {optional && <span className="cf-optional">Optional</span>}
+          </span>
+          {!open && <span className="cf-section-summary">{summary || "Not filled yet — click to add"}</span>}
+        </span>
+        <ChevronDown size={17} className="cf-chevron" />
+      </button>
+      {open && <div className="cf-section-body">{children}</div>}
+    </section>
+  );
+}
+
+const Field = ({ label, required, hint, full, children }) => (
+  <div className={`cf-field${full ? " full" : ""}`}>
+    <label>{label}{required && <em> *</em>}</label>
+    {children}
+    {hint && <small>{hint}</small>}
+  </div>
+);
+
+/**
+ * Add / edit a client. Every field is kept, but grouped: the essentials are
+ * always visible, everything else sits in labelled sections that show what's
+ * filled (and open automatically when editing a client that has data there).
+ * For a new client, "Save & create contract" goes straight to the contract
+ * builder via onSuccess(savedClient, "contract").
+ */
 const ClientForm = ({ client, onSuccess, onCancel }) => {
   const [formData, setFormData] = useState({
     clientName: "",
@@ -13,6 +98,7 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     salesPerson: "",
     leadSource: "",
     clientType: "",
+    businessCategory: "",
     projectType: "service",
     address: "",
     city: "",
@@ -27,16 +113,18 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     // historical records instead of implying they're still being worked.
     activeStatus: "active",
     notes: "",
-    password: "",
   });
 
   const [loading, setLoading] = useState(false);
+  const [submitIntent, setSubmitIntent] = useState("save");
   const [error, setError] = useState("");
   const [salesUsers, setSalesUsers] = useState([]);
   const [salesUsersLoading, setSalesUsersLoading] = useState(true);
   // "Other" lets a name that isn't in the sales-user list be typed directly
   // instead of picked from the dropdown.
   const [useOtherSalesPerson, setUseOtherSalesPerson] = useState(false);
+  const isEdit = !!client?._id;
+  const [openSections, setOpenSections] = useState(() => new Set());
 
   // A logged-in Sales Person is always force-assigned to their own new
   // clients on the backend (see createClient), regardless of what this form
@@ -51,9 +139,16 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     if (client) {
       setFormData({
         ...client,
+        businessCategory: client.businessCategory || "",
         salesPerson: client.salesPerson?._id || client.salesPerson || client.salesPersonName || "",
-        password: "",
       });
+      // Editing: open every section that already has something in it.
+      const has = (...keys) => keys.some((k) => client[k]);
+      setOpenSections(new Set([
+        has("clientType", "leadSource", "gstNo", "tanNo") || client.activeStatus === "inactive" ? "business" : null,
+        has("address", "city", "state", "country", "zipCode") ? "address" : null,
+        has("notes") ? "notes" : null,
+      ].filter(Boolean)));
     } else if (isSalesUser) {
       setFormData((prev) => ({ ...prev, salesPerson: userId || "" }));
     }
@@ -96,20 +191,23 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-      // Clearing email disables the password field below — clear any
-      // already-typed password too, so a disabled input never shows a
-      // stale value that isn't actually going to be submitted.
-      ...(name === "email" && !value ? { password: "" } : {}),
-    }));
-  };
+  const setValue = (name, value) => setFormData((prev) => ({ ...prev, [name]: value }));
+  const handleChange = (e) => setValue(e.target.name, e.target.value);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const toggleSection = (id) =>
+    setOpenSections((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const handleSubmit = async (e, intent = "save") => {
+    e?.preventDefault();
+    if (!formData.clientName?.trim() || !formData.phone?.trim()) {
+      setError("Client name and phone number are required.");
+      return;
+    }
+    setSubmitIntent(intent);
     setLoading(true);
     setError("");
 
@@ -118,15 +216,20 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     const payload = { ...formData };
     if (!payload.leadSource) delete payload.leadSource;
     if (!payload.clientType) delete payload.clientType;
+    // Category is optional too: omit when blank — or, when editing a client
+    // that had one, send null so clearing it actually clears it.
+    if (!payload.businessCategory) {
+      if (isEdit && client?.businessCategory) payload.businessCategory = null;
+      else delete payload.businessCategory;
+    }
     if (!payload.salesPerson) delete payload.salesPerson;
     // Email is optional — an empty string would fail the backend's email
     // format validator (which only runs when the field is actually present),
     // so omit it entirely rather than sending "".
     if (!payload.email) delete payload.email;
-    // Portal login is keyed on email — the password field is disabled in the
-    // UI while email is blank, but guard here too in case a password was
-    // typed before the email field was cleared.
-    if (!formData.email) delete payload.password;
+    // Client portal login isn't set from this form — never send a password,
+    // so an existing client's login is left exactly as it is.
+    delete payload.password;
     // These are populated/relational/computed fields carried on `client` for display —
     // never echo them back on submit, or a populated object (e.g. assignedUser:{_id,name})
     // would get cast into its own ObjectId field and fail.
@@ -145,13 +248,10 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     delete payload.onboardedAt;
 
     try {
-      if (client?._id) {
-        await updateClient(client._id, payload);
-      } else {
-        await createClient(payload);
-      }
-      alert(client?._id ? "Client updated successfully" : "Client onboarded successfully");
-      onSuccess();
+      const response = isEdit ? await updateClient(client._id, payload) : await createClient(payload);
+      const saved = response?.data?.client || client;
+      toast.success(isEdit ? "Client updated" : intent === "contract" ? "Client added — now set up the contract" : "Client added");
+      onSuccess(saved, intent);
     } catch (err) {
       setError(err.response?.data?.message || "Failed to save client");
     } finally {
@@ -159,304 +259,171 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     }
   };
 
+  // ── Collapsed-section summaries ─────────────────────────────────────────
+  const join = (...parts) => parts.filter(Boolean).join(" · ");
+  const businessSummary = join(
+    labelOf(CLIENT_TYPES, formData.clientType),
+    labelOf(LEAD_SOURCES, formData.leadSource),
+    formData.activeStatus === "inactive" && "Dead",
+    formData.gstNo && `GST ${formData.gstNo}`,
+    formData.tanNo && `TAN ${formData.tanNo}`
+  );
+  const addressSummary = join(formData.address, formData.city, formData.state, formData.country, formData.zipCode);
+  const notesSummary = formData.notes ? formData.notes.slice(0, 80) : "";
+
   return (
-    <div className="client-form-container">
-      <h2>{client?._id ? "Edit Client" : "Onboard New Client"}</h2>
+    <div className="client-form-container cf-container">
+      <div className="cf-head">
+        <h2>{isEdit ? "Edit Client" : "Add New Client"}</h2>
+        <p>{isEdit ? "Update any section below." : "Only the starred fields are required — add the rest now or later."}</p>
+      </div>
 
       {error && <div className="error-message">{error}</div>}
 
-      <form onSubmit={handleSubmit} className="client-form">
-        <div className="form-row">
-            <div className="form-group">
-            <label>Company Name</label>
-            <input
-              type="text"
-              name="companyName"
-              value={formData.companyName}
-              onChange={handleChange}
-              placeholder="Enter company name"
-            />
+      <form onSubmit={(e) => handleSubmit(e, "save")} className="cf-form" noValidate>
+        {/* ── Essentials ───────────────────────────────────────────────── */}
+        <section className="cf-section open cf-essentials">
+          <div className="cf-section-head static">
+            <span className="cf-section-icon"><UserRound size={16} strokeWidth={2.2} /></span>
+            <span className="cf-section-titles"><span className="cf-section-title">Essentials</span></span>
           </div>
-          <div className="form-group">
-            <label>Email</label>
-            <input
-              type="email"
-              name="email"
-              value={formData.email}
-              onChange={handleChange}
-              
-              placeholder="Enter email"
-            />
-          </div>
-        </div>
-
-        <div className="form-row">
-          <div className="form-group">
-            <label>Phone *</label>
-            <input
-              type="tel"
-              name="phone"
-              value={formData.phone}
-              onChange={handleChange}
-              required
-              placeholder="Enter phone number"
-            />
-          </div>
-          <div className="form-group">
-            <label>Client Name *</label>
-            <input
-              type="text"
-              name="clientName"
-              value={formData.clientName}
-              onChange={handleChange}
-              required
-              placeholder="Enter client name"
-            />
-          </div>
-        
-        </div>
-
-        <div className="form-row">
-          <div className="form-group">
-            <label>Sales Person *</label>
-            {isSalesUser ? (
-              <input type="text" value={userName || "You"} disabled readOnly />
-            ) : useOtherSalesPerson ? (
-              <>
-                <input
-                  type="text"
-                  name="salesPerson"
-                  value={formData.salesPerson}
-                  onChange={handleChange}
-                  placeholder="Other"
-                  autoFocus
-                />
-                <small
-                  style={{ color: "#f7931e", fontSize: 12, cursor: "pointer", display: "inline-block", marginTop: 4 }}
-                  onClick={() => {
-                    setUseOtherSalesPerson(false);
-                    setFormData((prev) => ({ ...prev, salesPerson: "" }));
-                  }}
-                >
-                  ← Choose from list instead
-                </small>
-              </>
-            ) : (
-              <select
-                value={formData.salesPerson}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (value === "__other__") {
-                    setUseOtherSalesPerson(true);
-                    setFormData((prev) => ({ ...prev, salesPerson: "" }));
-                  } else {
-                    setFormData((prev) => ({ ...prev, salesPerson: value }));
-                  }
-                }}
-                disabled={salesUsersLoading}
-              >
-                <option value="">{salesUsersLoading ? "Loading sales users..." : "Select sales person"}</option>
-                {salesUsers.map((u) => (
-                  <option key={u._id} value={u._id}>{u.name}</option>
-                ))}
-                <option value="__other__">Other</option>
+          <div className="cf-section-body">
+            <Field label="Client Name" required>
+              <input type="text" name="clientName" value={formData.clientName} onChange={handleChange} required placeholder="Full name" autoFocus={!isEdit} />
+            </Field>
+            <Field label="Phone" required>
+              <input type="tel" name="phone" value={formData.phone} onChange={handleChange} required placeholder="Phone number" inputMode="tel" />
+            </Field>
+            <Field label="Company Name">
+              <input type="text" name="companyName" value={formData.companyName} onChange={handleChange} placeholder="Business / brand name" />
+            </Field>
+            <Field label="Email">
+              <input type="email" name="email" value={formData.email} onChange={handleChange} placeholder="name@company.com" />
+            </Field>
+            <Field label="Deals In" required>
+              <Chips
+                options={[{ value: "service", label: "Service" }, { value: "product", label: "Product" }]}
+                value={formData.projectType}
+                onChange={(v) => setValue("projectType", v)}
+                allowClear={false}
+              />
+            </Field>
+            <Field label="Category">
+              <select name="businessCategory" value={formData.businessCategory} onChange={handleChange}>
+                <option value="">Select category</option>
+                {CLIENT_CATEGORIES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
-            )}
+            </Field>
+            <Field label="Sales Person" required>
+              {isSalesUser ? (
+                <input type="text" value={userName || "You"} disabled readOnly />
+              ) : useOtherSalesPerson ? (
+                <>
+                  <input type="text" name="salesPerson" value={formData.salesPerson} onChange={handleChange} placeholder="Type the sales person's name" autoFocus />
+                  <button
+                    type="button"
+                    className="cf-link"
+                    onClick={() => {
+                      setUseOtherSalesPerson(false);
+                      setFormData((prev) => ({ ...prev, salesPerson: "" }));
+                    }}
+                  >
+                    ← Choose from list instead
+                  </button>
+                </>
+              ) : (
+                <select
+                  value={formData.salesPerson}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === "__other__") {
+                      setUseOtherSalesPerson(true);
+                      setFormData((prev) => ({ ...prev, salesPerson: "" }));
+                    } else {
+                      setFormData((prev) => ({ ...prev, salesPerson: value }));
+                    }
+                  }}
+                  disabled={salesUsersLoading}
+                >
+                  <option value="">{salesUsersLoading ? "Loading sales users..." : "Select sales person"}</option>
+                  {salesUsers.map((u) => (
+                    <option key={u._id} value={u._id}>{u.name}</option>
+                  ))}
+                  <option value="__other__">Other</option>
+                </select>
+              )}
+            </Field>
           </div>
-          <div className="form-group">
-            <label>Lead Source</label>
-            <select name="leadSource" value={formData.leadSource} onChange={handleChange}>
-              <option value="">Select lead source</option>
-              <option value="cold call">Cold Call</option>
-              <option value="visit">Visit</option>
-              <option value="self">Self</option>
-              <option value="telecaller">Telecaller</option>
-              <option value="client reference">Client Reference</option>
-              <option value="company reference">Company Reference</option>
-              <option value="other">Other</option>
-            </select>
-          </div>
-        </div>
+        </section>
 
-        <div className="form-row">
-          <div className="form-group">
-            <label>Client Type</label>
+        {/* ── Business & tax ───────────────────────────────────────────── */}
+        <Section id="business" Icon={Building2} title="Business & tax details" summary={businessSummary} open={openSections.has("business")} onToggle={toggleSection}>
+          <Field label="Client Type">
             <select name="clientType" value={formData.clientType} onChange={handleChange}>
               <option value="">Select client type</option>
-              <option value="pvt ltd">Pvt Ltd</option>
-              <option value="ltd">Ltd</option>
-              <option value="llp">LLP</option>
-              <option value="huf">HUF</option>
-              <option value="proprietor">Proprietor</option>
-              <option value="other">Other</option>
+              {CLIENT_TYPES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
-          </div>
-          <div className="form-group">
-            <label>Deals In *</label>
-            <select name="projectType" value={formData.projectType} onChange={handleChange} required>
-              <option value="service">Service</option>
-              <option value="product">Product</option>
+          </Field>
+          <Field label="Lead Source">
+            <select name="leadSource" value={formData.leadSource} onChange={handleChange}>
+              <option value="">Select lead source</option>
+              {LEAD_SOURCES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
-          </div>
-        </div>
-
-        <div className="form-row">
-          <div className="form-group">
-            <label>Client Status</label>
+          </Field>
+          <Field label="Client Status" hint='Mark past clients as "Dead" when adding historical records.'>
             <select name="activeStatus" value={formData.activeStatus} onChange={handleChange}>
               <option value="active">Active</option>
               <option value="inactive">Dead</option>
             </select>
-            <small style={{ color: "#6b7280", fontSize: 12 }}>
-              Mark past clients as "Dead" when adding historical records.
-            </small>
-          </div>
-        </div>
+          </Field>
+          <Field label="GST No.">
+            <input type="text" name="gstNo" value={formData.gstNo} onChange={handleChange} placeholder="e.g. 27AAAAA0000A1Z5" />
+          </Field>
+          <Field label="TAN No.">
+            <input type="text" name="tanNo" value={formData.tanNo} onChange={handleChange} placeholder="e.g. PNEA12345B" />
+          </Field>
+        </Section>
 
-        <div className="form-row">
-          <div className="form-group">
-            <label>TAN No.</label>
-            <input
-              type="text"
-              name="tanNo"
-              value={formData.tanNo}
-              onChange={handleChange}
-              placeholder="Enter TAN No."
-            />
-          </div>
-        </div>
+        {/* ── Address ─────────────────────────────────────────────────── */}
+        <Section id="address" Icon={MapPin} title="Address" summary={addressSummary} open={openSections.has("address")} onToggle={toggleSection}>
+          <Field label="Address" full>
+            <input type="text" name="address" value={formData.address} onChange={handleChange} placeholder="Street, building, area" />
+          </Field>
+          <Field label="City">
+            <input type="text" name="city" value={formData.city} onChange={handleChange} placeholder="City" />
+          </Field>
+          <Field label="State">
+            <input type="text" name="state" value={formData.state} onChange={handleChange} placeholder="State" />
+          </Field>
+          <Field label="Country">
+            <input type="text" name="country" value={formData.country} onChange={handleChange} placeholder="Country" />
+          </Field>
+          <Field label="Zip Code">
+            <input type="text" name="zipCode" value={formData.zipCode} onChange={handleChange} placeholder="PIN / ZIP" inputMode="numeric" />
+          </Field>
+        </Section>
 
-        <div className="form-row">
-          <div className="form-group">
-            <label>Contact Person</label>
-            <input
-              type="text"
-              name="contactPerson"
-              value={formData.contactPerson}
-              onChange={handleChange}
-              placeholder="Enter contact person name"
-            />
-          </div>
-          <div className="form-group">
-            <label>Designation</label>
-            <input
-              type="text"
-              name="designation"
-              value={formData.designation}
-              onChange={handleChange}
-              placeholder="Enter designation"
-            />
-          </div>
-        </div>
+        {/* ── Notes ───────────────────────────────────────────────────── */}
+        <Section id="notes" Icon={NotebookPen} title="Notes" summary={notesSummary} open={openSections.has("notes")} onToggle={toggleSection}>
+          <Field label="Notes" full>
+            <textarea name="notes" value={formData.notes} onChange={handleChange} placeholder="Add any additional notes" rows="3" />
+          </Field>
+        </Section>
 
-        <div className="form-row">
-          <div className="form-group">
-            <label>Address</label>
-            <input
-              type="text"
-              name="address"
-              value={formData.address}
-              onChange={handleChange}
-              placeholder="Enter address"
-            />
+        <div className="cf-footer">
+          <button type="button" onClick={onCancel} className="cf-btn cf-btn-ghost">Cancel</button>
+          <div className="cf-footer-actions">
+            <button type="submit" disabled={loading} className={`cf-btn ${isEdit ? "cf-btn-primary" : "cf-btn-secondary"}`}>
+              {loading && submitIntent === "save" ? <Loader2 size={15} className="cf-spin" /> : <Save size={15} />}
+              {isEdit ? "Update Client" : "Save client"}
+            </button>
+            {!isEdit && (
+              <button type="button" disabled={loading} className="cf-btn cf-btn-primary" onClick={(e) => handleSubmit(e, "contract")}>
+                {loading && submitIntent === "contract" ? <Loader2 size={15} className="cf-spin" /> : <FileSignature size={15} />}
+                Save &amp; create contract
+              </button>
+            )}
           </div>
-          <div className="form-group">
-            <label>City</label>
-            <input
-              type="text"
-              name="city"
-              value={formData.city}
-              onChange={handleChange}
-              placeholder="Enter city"
-            />
-          </div>
-        </div>
-
-        <div className="form-row">
-          <div className="form-group">
-            <label>State</label>
-            <input
-              type="text"
-              name="state"
-              value={formData.state}
-              onChange={handleChange}
-              placeholder="Enter state"
-            />
-          </div>
-          <div className="form-group">
-            <label>Country</label>
-            <input
-              type="text"
-              name="country"
-              value={formData.country}
-              onChange={handleChange}
-              placeholder="Enter country"
-            />
-          </div>
-          <div className="form-group">
-            <label>Zip Code</label>
-            <input
-              type="text"
-              name="zipCode"
-              value={formData.zipCode}
-              onChange={handleChange}
-              placeholder="Enter zip code"
-            />
-          </div>
-          <div className="form-group">
-            <label>GST No.</label>
-            <input
-              type="text"
-              name="gstNo"
-              value={formData.gstNo}
-              onChange={handleChange}
-              placeholder="Enter Gst No."
-            />
-          </div>
-        </div>
-
-        <div className="form-group">
-          <label>Notes</label>
-          <textarea
-            name="notes"
-            value={formData.notes}
-            onChange={handleChange}
-            placeholder="Add any additional notes"
-            rows="4"
-          />
-        </div>
-
-        <div className="form-group">
-          <label>Client Login Password {client?.hasLoginAccess && "(leave blank to keep unchanged)"}</label>
-          <input
-            type="text"
-            name="password"
-            value={formData.password}
-            onChange={handleChange}
-            minLength={6}
-            disabled={!formData.email}
-            placeholder={
-              !formData.email
-                ? "Add an email above to enable portal login"
-                : client?.hasLoginAccess
-                ? "Set a new password to reset"
-                : "Set a password so this client can log in and view their project"
-            }
-          />
-          <small style={{ color: "#6b7280", fontSize: 12 }}>
-            {!formData.email
-              ? "Portal login is tied to the client's email — add one to set a password."
-              : "Must be at least 6 characters. Setting a password creates a login account for this client (role: client) so they can sign in on the main login page and see only their own project, deliverables, and payments."}
-          </small>
-        </div>
-
-        <div className="form-actions">
-          <button type="submit" disabled={loading} className="btn-submit">
-            {loading ? "Saving..." : client?._id ? "Update Client" : "Onboard Client"}
-          </button>
-          <button type="button" onClick={onCancel} className="btn-cancel">
-            Cancel
-          </button>
         </div>
       </form>
     </div>

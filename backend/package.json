@@ -12,7 +12,9 @@
     "seed:sample-dashboard": "node seedSampleDashboard.js",
     "seed:sample-telecalling": "node seedSampleTelecalling.js",
     "seed:demo": "node seedDemo.js",
-    "migrate:clients": "node migrations/migrateClientsCollection.js"
+    "migrate:clients": "node migrations/migrateClientsCollection.js",
+    "migrate:task-progress": "node migrations/backfillTaskProgress.js",
+    "migrate:contract-numbers": "node migrations/shortenContractNumbers.js"
   },
   "keywords": [],
   "author": "",
@@ -28,6 +30,7 @@
     "express-mongo-sanitize": "^2.2.0",
     "express-rate-limit": "^8.5.2",
     "express-validator": "^7.3.2",
+    "heic-convert": "2.1.0",
     "helmet": "^8.2.0",
     "hpp": "^0.2.3",
     "jsonwebtoken": "^9.0.3",
@@ -36,6 +39,7 @@
     "multer": "^2.2.0",
     "nodemailer": "^8.0.4",
     "pdfkit": "^0.18.0",
+    "sharp": "0.35.5",
     "xlsx": "^0.18.5",
     "xss-clean": "^0.1.4"
   }

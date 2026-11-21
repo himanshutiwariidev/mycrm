@@ -25,6 +25,8 @@ export function buildContractPayload(state) {
   return {
     clientId: state.meta.clientId,
     projectName: state.meta.projectName,
+    // null (not "") when unset, so clearing it on an edit really clears it.
+    packageType: state.meta.packageType || null,
     projectDescription: generateProjectDescription(enabledCategories),
     projectScope: generateProjectScope(enabledCategories),
     deliverables: flattenDeliverables(enabledCategories),

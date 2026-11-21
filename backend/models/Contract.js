@@ -18,6 +18,11 @@ const ContractSchema = new mongoose.Schema(
       required: [true, "Project name is required"],
       trim: true,
     },
+    // Package tier sold to the client ("Package type" in the contract builder). Optional.
+    packageType: {
+      type: String,
+      enum: ["starter", "standard", "business"],
+    },
     projectDescription: {
       type: String,
       required: [true, "Project description is required"],

@@ -5,3 +5,12 @@ node_modules/
 .env
 .env.*
 !.env.example
+
+# Client-meeting photos uploaded by sales people (customer photos — never commit)
+backend/uploads/visit-photos/
+
+# Deliverable work-proof screenshots uploaded by the team (client work — never commit)
+backend/uploads/deliverable-proofs/
+
+# Monthly client reports (private business documents — never commit)
+backend/storage/

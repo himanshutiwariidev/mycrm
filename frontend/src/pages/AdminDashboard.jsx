@@ -299,9 +299,10 @@ export default function AdminDashboard() {
           </header>
 
           {/* The dashboard is sized to fit one screen (see DashboardSection.css,
-              which assumes this 16px top/bottom padding); other sections keep
-              the roomier default. */}
-          <main style={{ padding: tab === "dashboard" ? "16px 28px" : "30px 36px 64px", flex: 1 }}>
+              which assumes this 16px top/bottom padding); Clients uses the same
+              compact spacing so the two pages match. Other sections keep the
+              roomier default. */}
+          <main style={{ padding: tab === "dashboard" ? "16px 28px" : tab === "clients" ? "16px 28px 40px" : "30px 36px 64px", flex: 1 }}>
             {renderSection()}
           </main>
         </div>

@@ -1,27 +1,40 @@
-import React, { useRef, useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import {
-  ArrowLeft, Users, FileText, Wallet, Plus, Search,
-  Package, Pencil, Trash2, X, CheckCircle2, UserCheck, BellRing,
-  Inbox, Activity, XCircle, Calendar, ChevronRight, ChevronLeft,
-  TrendingUp, TrendingDown, LayoutGrid, List, Download, Upload,
-  BarChart3, MoreHorizontal, Mail, Phone, User, Trophy, Zap,
+  ArrowRight, ArrowUpRight, BarChart3, Calendar, CheckCircle2, ChevronLeft, ChevronRight, Download,
+  FileText, Inbox, LayoutGrid, List, Mail, MapPin, Phone, PieChart as PieIcon, Plus, Search,
+  Snowflake, Trash2, Trophy, Upload, UserCheck, Users, X,
 } from "lucide-react";
-import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 import {
-  getAllClients,
-  getAllContracts,
-  importClients,
-  deleteContract,
-  getAllReminders,
-  deletePaymentReminder,
-  bulkDeleteClients,
-} from "../services/clientApi";
+  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from "recharts";
+import { getAllClients, importClients, bulkDeleteClients } from "../services/clientApi";
 import ClientForm from "../components/ClientForm";
-import PaymentReminderForm from "../components/PaymentReminderForm";
-import ContractDetail from "./ContractDetail";
+import ContractClientPicker from "../components/ContractClientPicker";
 import DateRangePicker, { computeRangeForPreset } from "../components/DateRangePicker";
+import { CLIENT_CATEGORIES, clientCategoryLabel } from "../config/clientCategories";
+// ClientsPage.css also styles shared classes other pages use (.btn-primary,
+// .data-table, .modal-overlay, .status …) — keep importing it.
 import "./ClientsPage.css";
+import "./ClientsOverview.css";
+
+const PAGE_SIZE = 24;
+const VIEW_STORAGE_KEY = "crm_clients_view";
+const MONTHS_SHOWN = 6;
+
+// One palette for every status, used by the KPI cards, donut, bar chart and chips.
+const STATUS_META = {
+  open: { label: "Open Leads", short: "Open", color: "#2563eb", bg: "#e8efff" },
+  converted: { label: "Converted", short: "Converted", color: "#16a34a", bg: "#dcfce7" },
+  cold: { label: "Cold", short: "Cold", color: "#7c3aed", bg: "#f1ebff" },
+  ni: { label: "Not Interested", short: "Not Interested", color: "#e11d48", bg: "#ffe4e9" },
+};
+const STATUS_KEYS = Object.keys(STATUS_META);
+
+const CLIENT_TYPE_OPTIONS = ["pvt ltd", "ltd", "llp", "huf", "proprietor", "other"];
+const TYPE_LABELS = { "pvt ltd": "Pvt Ltd", ltd: "Ltd", llp: "LLP", huf: "HUF", proprietor: "Proprietor", other: "Other" };
+const titleCase = (v = "") => v.replace(/\b\w/g, (c) => c.toUpperCase());
 
 const initials = (name = "") =>
   name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("") || "?";
@@ -30,74 +43,43 @@ const fmtDate = (value) => {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return date.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 };
 
-const CLIENT_TYPE_OPTIONS = ["pvt ltd", "ltd", "llp", "huf", "proprietor", "other"];
+const plural = (n, word) => `${n.toLocaleString("en-IN")} ${word}${n === 1 ? "" : "s"}`;
 
-// Rotating accent per client card — a deterministic hash of the client's id
-// so the same client always gets the same color, without every card in the
-// grid looking identical.
-const CARD_ACCENTS = ["#f7931e", "#2563eb", "#7c3aed", "#16a34a", "#db2777", "#0891b2"];
+// Deterministic avatar colour per client, so the same client always looks the same.
+const AVATAR_COLORS = ["#ea580c", "#2563eb", "#7c3aed", "#16a34a", "#db2777", "#0891b2"];
 function accentFor(id = "") {
   let hash = 0;
   for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash);
-  return CARD_ACCENTS[Math.abs(hash) % CARD_ACCENTS.length];
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
-
-// Purely decorative trend swoosh — not tied to real per-day figures (we
-// don't have that granularity client-side), so it carries no axis, labels,
-// or numbers that could be mistaken for actual data.
-function Sparkline({ id, color }) {
-  return (
-    <svg className="kpi-sparkline" viewBox="0 0 100 36" preserveAspectRatio="none" aria-hidden="true">
-      <defs>
-        <linearGradient id={`spark-fill-${id}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.32" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <path d="M0,30 C10,32 16,14 26,18 C36,22 40,8 52,12 C64,16 68,26 80,20 C88,16 92,6 100,10 L100,36 L0,36 Z" fill={`url(#spark-fill-${id})`} />
-      <path d="M0,30 C10,32 16,14 26,18 C36,22 40,8 52,12 C64,16 68,26 80,20 C88,16 92,6 100,10" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-const STATUS_DONUT_META = {
-  converted: { label: "Converted", color: "#16a34a" },
-  open: { label: "Open", color: "#2563eb" },
-  cold: { label: "Cold", color: "#7c3aed" },
-  ni: { label: "Ni", color: "#db2777" },
-};
 
 const clientDate = (c) => new Date(c.onboardedAt || c.createdAt);
+const salesKey = (c) => c.salesPerson?._id || (c.salesPersonName ? `name:${c.salesPersonName}` : null);
+const salesName = (c) => c.salesPerson?.name || c.salesPersonName || "";
 
-// "From last month" trend — counts clients (optionally matching a status predicate)
-// onboarded in the current calendar month vs the previous one, using the same
-// onboardedAt/createdAt field already used by the date-range filter on this page.
-const monthOverMonthTrend = (clients, predicate = () => true) => {
-  const now = new Date();
-  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+/** Month buckets (oldest → current) for the trend charts. */
+function lastMonths(now, count = MONTHS_SHOWN) {
+  return Array.from({ length: count }, (_, i) => {
+    const start = new Date(now.getFullYear(), now.getMonth() - (count - 1 - i), 1);
+    const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+    return { start, end, label: start.toLocaleDateString("en-IN", { month: "short" }) };
+  });
+}
 
-  const thisMonthCount = clients.filter((c) => predicate(c) && clientDate(c) >= thisMonthStart).length;
-  const lastMonthCount = clients.filter((c) => predicate(c) && clientDate(c) >= lastMonthStart && clientDate(c) < thisMonthStart).length;
-
-  if (lastMonthCount === 0) return thisMonthCount > 0 ? { percent: 100, up: true } : { percent: 0, up: true };
-  const percent = Math.round(((thisMonthCount - lastMonthCount) / lastMonthCount) * 100);
-  return { percent: Math.abs(percent), up: percent >= 0 };
-};
-
-const exportClientsToCsv = (clients) => {
-  const headers = ["Client Name", "Company", "Email", "Phone", "Status", "Sales Person", "Onboarded"];
-  const rows = clients.map((c) => [
-    c.clientName, c.companyName || "", c.email, c.phone, c.status,
-    c.salesPerson?.name || c.salesPersonName || "", c.onboardedAt || c.createdAt || "",
+const exportClientsToCsv = (rows) => {
+  const headers = ["Client Name", "Company", "Email", "Phone", "Status", "Client Type", "Category", "Lead Source", "Sales Person", "City", "Onboarded"];
+  const data = rows.map((c) => [
+    c.clientName, c.companyName || "", c.email || "", c.phone || "", STATUS_META[c.status]?.label || c.status || "",
+    TYPE_LABELS[c.clientType] || c.clientType || "", clientCategoryLabel(c.businessCategory), c.leadSource || "", salesName(c), c.city || "",
+    c.onboardedAt || c.createdAt ? clientDate(c).toISOString().slice(0, 10) : "",
   ]);
-  const csv = [headers, ...rows]
+  const csv = [headers, ...data]
     .map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","))
     .join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -108,58 +90,148 @@ const exportClientsToCsv = (clients) => {
   window.URL.revokeObjectURL(url);
 };
 
-// `embedded`: rendered as the "Clients" tab inside AdminDashboard's own
-// sidebar/topbar shell, instead of as its own standalone routed page — so
-// it skips the page's own padding/background and "Back to Dashboard" link
-// (redundant when the dashboard sidebar is already on screen).
+// ── Small building blocks ───────────────────────────────────────────────────
+function CardTitle({ Icon, color, bg, children, sub }) {
+  return (
+    <div className="cl-card-title">
+      <span className="cl-icon-box" style={{ background: bg }}><Icon size={15} color={color} strokeWidth={2.2} /></span>
+      <span className="cl-card-title-text">
+        {children}
+        {sub && <small>{sub}</small>}
+      </span>
+    </div>
+  );
+}
+
+function StatusChip({ status }) {
+  const meta = STATUS_META[status] || { short: status || "—", color: "#64748b", bg: "#f1f5f9" };
+  return (
+    <span className="cl-status" style={{ color: meta.color, background: meta.bg }}>
+      <i style={{ background: meta.color }} />{meta.short}
+    </span>
+  );
+}
+
+function Avatar({ client, size = 34 }) {
+  const color = accentFor(client._id);
+  return (
+    <span className="cl-avatar" style={{ width: size, height: size, color, background: `${color}17`, fontSize: size * 0.36 }}>
+      {initials(client.companyName || client.clientName)}
+    </span>
+  );
+}
+
+/** Client type on top, lead source under it; either one alone if the other is blank. */
+function TypeSource({ client }) {
+  const type = TYPE_LABELS[client.clientType] || (client.clientType ? titleCase(client.clientType) : "");
+  const source = client.leadSource ? titleCase(client.leadSource) : "";
+  if (!type && !source) return <span className="cl-muted">—</span>;
+  return (
+    <div className="cl-stack">
+      <span>{type || source}</span>
+      {type && source && <span className="cl-muted">{source}</span>}
+    </div>
+  );
+}
+
+function Sparkline({ data, color, id }) {
+  if (!data.some((d) => d.value)) return null;
+  return (
+    <div className="cl-spark" aria-hidden="true">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 5, right: 5, left: 3, bottom: 1 }}>
+          <defs>
+            <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity={0.3} />
+              <stop offset="100%" stopColor={color} stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          <Area
+            type="monotone" dataKey="value" stroke={color} strokeWidth={2.4} strokeLinejoin="round"
+            fill={`url(#${id})`} dot={{ r: 2.6, fill: color, stroke: color, strokeWidth: 0 }} activeDot={false}
+            baseValue={0} isAnimationActive={false}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function KpiHero({ tone, Icon, iconColor, iconBg, label, value, added, trend, sparkColor, active, onClick }) {
+  return (
+    <button type="button" className={`cl-hero cl-hero-${tone}${active ? " is-active" : ""}`} onClick={onClick} aria-pressed={active}>
+      <span className="cl-hero-icon" style={{ background: iconBg }}><Icon size={22} color={iconColor} strokeWidth={2.2} /></span>
+      <span className="cl-hero-body">
+        <span className="cl-hero-label">{label}</span>
+        <span className="cl-hero-main">
+          <span className="cl-hero-figures">
+            <span className="cl-hero-value">{value.toLocaleString("en-IN")}</span>
+            <span className={`cl-hero-meta${added ? " is-up" : ""}`}>
+              {added > 0 && <ArrowUpRight size={13} strokeWidth={2.4} />}
+              <b>+{added}</b> this month
+            </span>
+          </span>
+          <Sparkline data={trend} color={sparkColor} id={`clSpark-${tone}`} />
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function MonthTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  const total = payload.reduce((sum, p) => sum + (p.value || 0), 0);
+  return (
+    <div className="cl-tooltip">
+      <div className="cl-tooltip-title">{label} · {plural(total, "client")}</div>
+      {[...payload].reverse().map((p) => (
+        <div key={p.dataKey} className="cl-tooltip-row">
+          <i style={{ background: p.color }} />{STATUS_META[p.dataKey]?.label}<b>{p.value}</b>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Page ────────────────────────────────────────────────────────────────────
+// `embedded`: rendered inside AdminDashboard's shell (which already supplies
+// padding/background). Sales and staff dashboards render it without.
 const ClientsPage = ({ embedded = false } = {}) => {
   const navigate = useNavigate();
   const importInputRef = useRef(null);
-  const [activeTab, setActiveTab] = useState("clients");
-  const [showForm, setShowForm] = useState(false);
-  const [formType, setFormType] = useState(null);
-  const [selectedClient, setSelectedClient] = useState(null);
-  const [selectedReminder, setSelectedReminder] = useState(null);
-  const [manageContractId, setManageContractId] = useState(null);
+  const directoryRef = useRef(null);
+  const [now] = useState(() => new Date());
+  const [isSalesView] = useState(() => localStorage.getItem("role") === "sales");
 
   const [clients, setClients] = useState([]);
-  const [contracts, setContracts] = useState([]);
-  const [reminders, setReminders] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [clientTypeFilter, setClientTypeFilter] = useState("all");
-  const [salesPersonFilter, setSalesPersonFilter] = useState("all");
-  const [dateFilterActive, setDateFilterActive] = useState(false);
-  const [dateRange, setDateRange] = useState({ ...computeRangeForPreset("thisMonth"), presetKey: "thisMonth" });
-  const [viewMode, setViewMode] = useState("grid");
-  const [showAllSalesPersons, setShowAllSalesPersons] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [showContractPicker, setShowContractPicker] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
+
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [clientTypeFilter, setClientTypeFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [salesPersonFilter, setSalesPersonFilter] = useState("all");
+  const [dateRange, setDateRange] = useState(() => ({ ...computeRangeForPreset("thisMonth"), presetKey: "all" }));
+  const [viewMode, setViewMode] = useState(() => {
+    try { return localStorage.getItem(VIEW_STORAGE_KEY) === "grid" ? "grid" : "list"; } catch { return "list"; }
+  });
+  const [donutRange, setDonutRange] = useState("all");
+  const [showAllSalesPersons, setShowAllSalesPersons] = useState(false);
   const [selectedClientIds, setSelectedClientIds] = useState(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
-  const [clientsPage, setClientsPage] = useState(1);
-  const CLIENTS_PAGE_SIZE = 24;
-  const [donutRange, setDonutRange] = useState("month");
-  const [openKpiMenu, setOpenKpiMenu] = useState(null);
 
-  useEffect(() => {
-    if (activeTab === "clients") {
-      loadClients();
-    } else if (activeTab === "contracts") {
-      loadContracts();
-    } else if (activeTab === "reminders") {
-      loadReminders();
-    }
-  }, [activeTab]);
+  // The page number belongs to one set of filters: change any filter and the
+  // list starts again from page 1.
+  const filterKey = [searchTerm, statusFilter, clientTypeFilter, categoryFilter, salesPersonFilter, dateRange.presetKey, +dateRange.start, +dateRange.end].join("|");
+  const [pageState, setPageState] = useState({ key: filterKey, page: 1 });
+  const page = pageState.key === filterKey ? pageState.page : 1;
+  const setPage = (p) => setPageState({ key: filterKey, page: p });
 
-  // Any filter/search change re-slices the result set, so a page number
-  // that made sense before may now be out of range (or just confusing) —
-  // jump back to page 1 whenever the filters themselves change.
-  useEffect(() => {
-    setClientsPage(1);
-  }, [searchTerm, statusFilter, clientTypeFilter, salesPersonFilter, dateFilterActive, dateRange]);
+  const dateFilterActive = dateRange.presetKey !== "all";
 
   const loadClients = async () => {
     setLoading(true);
@@ -168,949 +240,580 @@ const ClientsPage = ({ embedded = false } = {}) => {
       setClients(response.data.clients || []);
     } catch (error) {
       console.error("Error loading clients:", error);
+      toast.error(error.response?.data?.message || "Couldn't load clients");
     } finally {
       setLoading(false);
     }
   };
 
-  const loadContracts = async () => {
-    setLoading(true);
-    try {
-      const response = await getAllContracts();
-      setContracts(response.data.contracts || []);
-    } catch (error) {
-      console.error("Error loading contracts:", error);
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => { loadClients(); }, []);
+
+  const changeView = (mode) => {
+    setViewMode(mode);
+    try { localStorage.setItem(VIEW_STORAGE_KEY, mode); } catch { /* per-browser convenience only */ }
   };
 
-  const loadReminders = async () => {
-    setLoading(true);
-    try {
-      const response = await getAllReminders();
-      setReminders(response.data.reminders || []);
-    } catch (error) {
-      console.error("Error loading reminders:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const scrollToDirectory = () =>
+    requestAnimationFrame(() => directoryRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
 
-  const handleAddClient = () => {
-    setSelectedClient(null);
-    setFormType("client");
-    setShowForm(true);
-  };
+  const filterByStatus = (status) => { setStatusFilter(status); scrollToDirectory(); };
+  const filterBySalesPerson = (id) => { setSalesPersonFilter(id); scrollToDirectory(); };
+
+  const handleAddClient = () => setShowForm(true);
+  const handleAddContract = () => setShowContractPicker(true);
 
   const handleImportFile = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-
     setImporting(true);
     setImportResult(null);
     try {
       const response = await importClients(file);
       setImportResult({ ok: true, ...response.data.summary });
-      await Promise.all([loadClients(), loadContracts()]);
+      await loadClients();
     } catch (error) {
-      setImportResult({
-        ok: false,
-        message: error.response?.data?.message || "Import failed",
-      });
+      setImportResult({ ok: false, message: error.response?.data?.message || "Import failed" });
     } finally {
       setImporting(false);
       event.target.value = "";
     }
   };
 
-
-  const handleAddContract = () => {
-    setActiveTab("clients");
-    alert("Select a client to create a contract for.");
-  };
-
-  const handleEditContract = (contract) => {
-    const contractClientId = contract.clientId?._id || contract.clientId;
-    navigate(`/clients/${contractClientId}/contracts/${contract._id}/edit`);
-  };
-
-  const handleDeleteContract = async (id) => {
-    if (window.confirm("Are you sure you want to delete this contract?")) {
-      try {
-        await deleteContract(id);
-        alert("Contract deleted successfully");
-        loadContracts();
-      } catch (error) {
-        alert("Error deleting contract");
-      }
+  const handleFormSuccess = (savedClient, intent) => {
+    setShowForm(false);
+    // "Save & create contract" — continue straight into the contract builder.
+    if (intent === "contract" && savedClient?._id) {
+      navigate(`/clients/${savedClient._id}/contracts/new`);
+      return;
     }
+    loadClients();
   };
 
-  const handleAddReminder = (clientId = null) => {
-    setSelectedReminder(null);
-    setSelectedClient(clientId ? { _id: clientId } : null);
-    setFormType("reminder");
-    setShowForm(true);
+  // ── Derived data ──────────────────────────────────────────────────────────
+  const counts = useMemo(() => {
+    const c = { all: clients.length };
+    STATUS_KEYS.forEach((k) => { c[k] = clients.filter((cl) => cl.status === k).length; });
+    return c;
+  }, [clients]);
+
+  const months = useMemo(() => lastMonths(now), [now]);
+  const thisMonthStart = months[months.length - 1].start;
+
+  // KPI cards: running total at the end of each month (ends at the big number),
+  // so the last rise of the sparkline is exactly the "+N this month" beside it.
+  const kpi = useMemo(() => {
+    const build = (pred) => ({
+      value: clients.filter(pred).length,
+      added: clients.filter((c) => pred(c) && clientDate(c) >= thisMonthStart).length,
+      trend: months.map((m) => ({ value: clients.filter((c) => pred(c) && clientDate(c) < m.end).length })),
+    });
+    return {
+      total: build(() => true),
+      open: build((c) => c.status === "open"),
+      converted: build((c) => c.status === "converted"),
+      lost: build((c) => c.status === "cold" || c.status === "ni"),
+    };
+  }, [clients, months, thisMonthStart]);
+
+  const monthlyAdds = useMemo(() => months.map((m) => {
+    const row = { label: m.label };
+    STATUS_KEYS.forEach((k) => {
+      row[k] = clients.filter((c) => c.status === k && clientDate(c) >= m.start && clientDate(c) < m.end).length;
+    });
+    return row;
+  }), [clients, months]);
+  const addedInWindow = monthlyAdds.reduce((sum, r) => sum + STATUS_KEYS.reduce((s, k) => s + r[k], 0), 0);
+
+  const donutClients = useMemo(() => clients.filter((c) => {
+    if (donutRange === "all") return true;
+    const d = clientDate(c);
+    if (donutRange === "year") return d.getFullYear() === now.getFullYear();
+    return d >= thisMonthStart;
+  }), [clients, donutRange, now, thisMonthStart]);
+  const statusBreakdown = STATUS_KEYS.map((key) => ({ key, ...STATUS_META[key], count: donutClients.filter((c) => c.status === key).length }));
+  const donutTotal = statusBreakdown.reduce((sum, s) => sum + s.count, 0);
+  const conversionRate = donutTotal ? Math.round(((statusBreakdown.find((s) => s.key === "converted")?.count || 0) / donutTotal) * 100) : 0;
+
+  const salesPersonOptions = useMemo(() => Array.from(
+    new Map(clients.map((c) => (salesKey(c) ? [salesKey(c), salesName(c)] : null)).filter(Boolean)).entries()
+  ).sort((a, b) => a[1].localeCompare(b[1])), [clients]);
+
+  const leaderboard = useMemo(() => Array.from(
+    clients.reduce((map, c) => {
+      const key = salesKey(c);
+      if (!key) return map;
+      const entry = map.get(key) || { id: key, name: salesName(c), count: 0, converted: 0 };
+      entry.count += 1;
+      if (c.status === "converted") entry.converted += 1;
+      map.set(key, entry);
+      return map;
+    }, new Map()).values()
+  ).sort((a, b) => b.count - a.count || b.converted - a.converted), [clients]);
+  const unassignedCount = clients.filter((c) => !salesKey(c)).length;
+  const showLeaderboard = leaderboard.length > 1;
+  const visibleLeaders = showAllSalesPersons ? leaderboard : leaderboard.slice(0, 5);
+  const topCount = leaderboard[0]?.count || 1;
+
+  const filteredClients = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    return clients.filter((client) => {
+      const matchesSearch = !q || [client.clientName, client.companyName, client.email, client.phone, client.city]
+        .some((v) => (v || "").toLowerCase().includes(q));
+      const matchesStatus = statusFilter === "all" || client.status === statusFilter
+        || (statusFilter === "lost" && (client.status === "cold" || client.status === "ni"));
+      const matchesType = clientTypeFilter === "all" || client.clientType === clientTypeFilter;
+      const matchesCategory = categoryFilter === "all" || client.businessCategory === categoryFilter;
+      const matchesSales = salesPersonFilter === "all"
+        || (salesPersonFilter === "none" ? !salesKey(client) : salesKey(client) === salesPersonFilter);
+      const matchesDate = !dateFilterActive || (clientDate(client) >= dateRange.start && clientDate(client) <= dateRange.end);
+      return matchesSearch && matchesStatus && matchesType && matchesCategory && matchesSales && matchesDate;
+    });
+  }, [clients, searchTerm, statusFilter, clientTypeFilter, categoryFilter, salesPersonFilter, dateFilterActive, dateRange]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredClients.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageClients = filteredClients.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const allPageSelected = pageClients.length > 0 && pageClients.every((c) => selectedClientIds.has(c._id));
+  const allFilteredSelected = filteredClients.length > 0 && filteredClients.every((c) => selectedClientIds.has(c._id));
+  const filtersActive = Boolean(searchTerm.trim()) || statusFilter !== "all" || clientTypeFilter !== "all" || categoryFilter !== "all" || salesPersonFilter !== "all" || dateFilterActive;
+
+  const clearFilters = () => {
+    setSearchTerm("");
+    setStatusFilter("all");
+    setClientTypeFilter("all");
+    setCategoryFilter("all");
+    setSalesPersonFilter("all");
+    setDateRange((r) => ({ ...r, presetKey: "all" }));
   };
 
-  const handleEditReminder = (reminder) => {
-    setSelectedReminder(reminder);
-    setFormType("reminder");
-    setShowForm(true);
-  };
-
-  const handleDeleteReminder = async (id) => {
-    if (window.confirm("Are you sure you want to delete this reminder?")) {
-      try {
-        await deletePaymentReminder(id);
-        alert("Reminder deleted successfully");
-        loadReminders();
-      } catch (error) {
-        alert("Error deleting reminder");
-      }
-    }
-  };
-
+  // ── Selection / bulk delete ─────────────────────────────────────────────────
   const toggleClientSelected = (id) => {
     setSelectedClientIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   };
 
-  // "Select all" is scoped to the current page, not every filtered result —
-  // with lists running into the hundreds, a single checkbox silently
-  // queuing all of them for deletion would be an easy way to nuke far more
-  // than intended.
-  const toggleSelectAllVisible = () => {
-    setSelectedClientIds((prev) => {
-      const allVisibleSelected = paginatedClients.length > 0 && paginatedClients.every((c) => prev.has(c._id));
-      if (allVisibleSelected) return new Set();
-      return new Set(paginatedClients.map((c) => c._id));
-    });
-  };
-
-  // Explicit opt-in (a separate click after the page is fully selected) to
-  // select every client matching the current filters, not just this page.
-  const selectAllFilteredClients = () => {
-    setSelectedClientIds(new Set(filteredClients.map((c) => c._id)));
+  // "Select all" covers the current page only; selecting every matching client
+  // is a separate, explicit click — so one checkbox can't queue hundreds for deletion.
+  const toggleSelectPage = () => {
+    setSelectedClientIds((prev) => (allPageSelected ? new Set([...prev].filter((id) => !pageClients.some((c) => c._id === id))) : new Set([...prev, ...pageClients.map((c) => c._id)])));
   };
 
   const handleBulkDeleteClients = async () => {
     const count = selectedClientIds.size;
     if (count === 0) return;
-    if (!window.confirm(`Delete ${count} selected client${count === 1 ? "" : "s"}? This also removes their contracts, reminders, and activity history. This cannot be undone.`)) {
-      return;
-    }
+    if (!window.confirm(`Delete ${count} selected client${count === 1 ? "" : "s"}? This also removes their contracts, reminders, and activity history. This cannot be undone.`)) return;
     setBulkDeleting(true);
     try {
-      // The backend caps a single request at 200 ids (so a bulk-select-all
-      // UI can't fire one unbounded, slow, all-or-nothing delete) — chunk
-      // larger selections into sequential batches instead of raising that cap.
+      // The backend caps one request at 200 ids — send larger selections in batches.
       const allIds = Array.from(selectedClientIds);
-      const BATCH_SIZE = 200;
       let deletedCount = 0;
       const failedIds = [];
-      for (let i = 0; i < allIds.length; i += BATCH_SIZE) {
-        const batch = allIds.slice(i, i + BATCH_SIZE);
-        const { data } = await bulkDeleteClients(batch);
+      for (let i = 0; i < allIds.length; i += 200) {
+        const { data } = await bulkDeleteClients(allIds.slice(i, i + 200));
         deletedCount += data.deletedCount || 0;
         if (data.failedIds?.length) failedIds.push(...data.failedIds);
       }
-      alert(`${deletedCount} client${deletedCount === 1 ? "" : "s"} deleted${failedIds.length ? `, ${failedIds.length} failed` : ""}`);
+      const message = `${plural(deletedCount, "client")} deleted${failedIds.length ? `, ${failedIds.length} failed` : ""}`;
+      if (failedIds.length) toast.warning(message); else toast.success(message);
       setSelectedClientIds(new Set());
       await loadClients();
     } catch (error) {
-      alert(error.response?.data?.message || "Error deleting clients");
+      toast.error(error.response?.data?.message || "Error deleting clients");
     } finally {
       setBulkDeleting(false);
     }
   };
 
-  const handleFormSuccess = () => {
-    setShowForm(false);
-    if (formType === "client") {
-      loadClients();
-    } else if (formType === "reminder") {
-      loadReminders();
-    }
-  };
+  const openClient = (id) => navigate(`/clients/${id}`);
+  const subtitleFor = (c) => [c.companyName ? c.clientName : null, c.city].filter(Boolean).join(" · ");
 
-  // Sales person can be a real User (keyed by _id) or a free-text name typed
-  // for someone not added as a User yet (keyed by "name:<name>" so it can't
-  // collide with an ObjectId) — both need to show up as filterable options.
-  const salesPersonOptions = Array.from(
-    new Map(
-      clients
-        .map((c) => (c.salesPerson ? [c.salesPerson._id, c.salesPerson.name] : c.salesPersonName ? [`name:${c.salesPersonName}`, c.salesPersonName] : null))
-        .filter(Boolean)
-    ).entries()
-  );
-
-  const filteredClients = clients.filter((client) => {
-    const q = searchTerm.toLowerCase();
-    const matchesSearch = !q
-      || client.clientName.toLowerCase().includes(q)
-      || client.email.toLowerCase().includes(q)
-      || (client.companyName || "").toLowerCase().includes(q)
-      || (client.phone || "").toLowerCase().includes(q);
-    const matchesStatus = statusFilter === "all" || client.status === statusFilter;
-    const matchesClientType = clientTypeFilter === "all" || client.clientType === clientTypeFilter;
-    const matchesSalesPerson = salesPersonFilter === "all"
-      || client.salesPerson?._id === salesPersonFilter
-      || `name:${client.salesPersonName}` === salesPersonFilter;
-    const matchesDate = !dateFilterActive || (() => {
-      const onboarded = new Date(client.onboardedAt || client.createdAt);
-      return onboarded >= dateRange.start && onboarded <= dateRange.end;
-    })();
-    return matchesSearch && matchesStatus && matchesClientType && matchesSalesPerson && matchesDate;
-  });
-
-  // Rendering all matching clients at once (this list can run into the
-  // hundreds) made the page one long unbroken scroll — page it instead.
-  const clientsTotalPages = Math.max(1, Math.ceil(filteredClients.length / CLIENTS_PAGE_SIZE));
-  const paginatedClients = filteredClients.slice(
-    (clientsPage - 1) * CLIENTS_PAGE_SIZE,
-    clientsPage * CLIENTS_PAGE_SIZE
-  );
-  const allPageSelected = paginatedClients.length > 0 && paginatedClients.every((c) => selectedClientIds.has(c._id));
-  const allFilteredSelected = filteredClients.length > 0 && filteredClients.every((c) => selectedClientIds.has(c._id));
-
-  const openLeadsCount = clients.filter((c) => c.status === "open").length;
-  const convertedClientsCount = clients.filter((c) => c.status === "converted").length;
-  const activeClientsCount = clients.filter((c) => c.status === "converted" && c.activeStatus === "active").length;
-  const closedLeadsCount = clients.filter((c) =>  c.status === "ni").length;
-  const coldLeadsCount = clients.filter((c)=> c.status ==="cold").length;
-  const pendingRemindersCount = reminders.filter((r) => r.reminderStatus !== "paid").length;
-  const portalAccessCount = clients.filter((c) => c.hasLoginAccess).length;
-
-  const totalTrend = monthOverMonthTrend(clients);
-  const openTrend = monthOverMonthTrend(clients, (c) => c.status === "open");
-  const convertedTrend = monthOverMonthTrend(clients, (c) => c.status === "converted");
-  const coldTrend = monthOverMonthTrend(clients, (c) => c.status === "cold");
-
-  // "This Month" / "This Year" / "All Time" narrows the donut to clients
-  // onboarded in that window — a real filter, not a decorative label.
-  const donutScopedClients = clients.filter((c) => {
-    if (donutRange === "all") return true;
-    const d = clientDate(c);
-    const now = new Date();
-    if (donutRange === "year") return d.getFullYear() === now.getFullYear();
-    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-  });
-  const statusBreakdown = Object.keys(STATUS_DONUT_META)
-    .map((key) => ({
-      key,
-      ...STATUS_DONUT_META[key],
-      count: donutScopedClients.filter((c) => c.status === key).length,
-    }))
-    .filter((s) => s.count > 0);
-  const statusBreakdownTotal = statusBreakdown.reduce((sum, s) => sum + s.count, 0);
-
-  const salesPersonLeaderboard = Array.from(
-    clients.reduce((map, c) => {
-      const key = c.salesPerson?._id || (c.salesPersonName ? `name:${c.salesPersonName}` : null);
-      const name = c.salesPerson?.name || c.salesPersonName;
-      if (!key || !name) return map;
-      map.set(key, { name, count: (map.get(key)?.count || 0) + 1 });
-      return map;
-    }, new Map())
-  )
-    .map(([id, v]) => ({ id, ...v }))
-    .sort((a, b) => b.count - a.count);
-  const salesPersonLeaderboardTotal = salesPersonLeaderboard.reduce((sum, sp) => sum + sp.count, 0);
-  const visibleSalesPersons = showAllSalesPersons ? salesPersonLeaderboard : salesPersonLeaderboard.slice(0, 3);
-  const LEADERBOARD_BAR_COLORS = ["#16a34a", "#2563eb", "#7c3aed", "#db2777", "#0891b2", "#f7931e"];
-
-  const filteredContracts = contracts.filter(
-    (contract) =>
-      contract.projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      contract.clientId?.clientName?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const filteredReminders = reminders.filter(
-    (reminder) =>
-      reminder.invoiceNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      reminder.clientId?.clientName?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const tabs = [{ key: "all", label: "All Clients", color: "#0f172a" }, ...STATUS_KEYS.map((k) => ({ key: k, label: STATUS_META[k].label, color: STATUS_META[k].color }))];
 
   return (
-    <div className={embedded ? "clients-page clients-page-embedded" : "clients-page"}>
-      <div className="page-header">
-        {!embedded && (
-          <Link to="/admin" className="back-link">
-            <ArrowLeft size={15} strokeWidth={2.2} /> Back to Dashboard
-          </Link>
-        )}
-        <div className="page-header-row">
-          <div>
-            <div className="page-eyebrow">Client Management</div>
-            <h1>Clients Overview</h1>
-            <p>Manage your clients, send contracts, and track payments — all in one place.</p>
-          </div>
+    <div className={`cl-page${embedded ? "" : " cl-page-standalone"}`}>
+      <input ref={importInputRef} type="file" accept=".csv,.xls,.xlsx,.numbers" onChange={handleImportFile} style={{ display: "none" }} />
+
+      {/* ── Header ── */}
+      <div className="cl-header">
+        <div className="cl-title">
+          <h2>Clients Overview</h2>
+          <p>
+            {loading ? "Loading your clients…" : <>{plural(counts.all, "client")} · <b>{kpi.total.added}</b> added this month · {conversionRate}% converted</>}
+          </p>
         </div>
-      </div>
-
-      <div className="overview-layout">
-        <div className="overview-main">
-          <div className="kpi-grid kpi-trend-grid">
-            {[
-              { key: "orange", Icon: Users, label: "Total Clients", value: clients.length, trend: totalTrend },
-              { key: "blue", Icon: Inbox, label: "Open Leads", value: openLeadsCount, trend: openTrend },
-              { key: "green", Icon: UserCheck, label: "Converted Clients", value: convertedClientsCount, trend: convertedTrend },
-              { key: "pink", Icon: Activity, label: "Cold Clients", value: coldLeadsCount, trend: coldTrend },
-            ].map(({ key, Icon, label, value, trend }) => (
-              <div key={key} className={`kpi-card kpi-${key}`}>
-                <div className="kpi-card-top">
-                  <div className="kpi-icon"><Icon size={19} strokeWidth={2} /></div>
-                  <div className="kpi-menu-wrap">
-                    <button
-                      type="button"
-                      className="kpi-menu-btn"
-                      onClick={() => setOpenKpiMenu((m) => (m === key ? null : key))}
-                    >
-                      <MoreHorizontal size={15} strokeWidth={2.2} />
-                    </button>
-                    {openKpiMenu === key && (
-                      <div className="kpi-menu-dropdown" onMouseLeave={() => setOpenKpiMenu(null)}>
-                        <button type="button" onClick={() => { exportClientsToCsv(clients); setOpenKpiMenu(null); }}>
-                          <Download size={13} strokeWidth={2.2} /> Export list
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="kpi-value">{value}</div>
-                <div className="kpi-label">{label}</div>
-                <div className={`kpi-trend ${trend.up ? "trend-up" : "trend-down"}`}>
-                  {trend.up ? <TrendingUp size={12} strokeWidth={2.4} /> : <TrendingDown size={12} strokeWidth={2.4} />}
-                  {trend.percent}% from last month
-                </div>
-                <Sparkline id={key} color={{ orange: "#f7931e", blue: "#2563eb", green: "#16a34a", pink: "#db2777" }[key]} />
-              </div>
-            ))}
-          </div>
-
-      {showForm && (
-        <div className="modal-overlay" onClick={() => setShowForm(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="close-btn" onClick={() => setShowForm(false)}>
-              <X size={18} strokeWidth={2} />
-            </button>
-            {formType === "client" && (
-              <ClientForm
-                client={selectedClient}
-                onSuccess={handleFormSuccess}
-                onCancel={() => setShowForm(false)}
-              />
-            )}
-            {formType === "reminder" && (
-              <PaymentReminderForm
-                clientId={selectedClient?._id}
-                reminder={selectedReminder}
-                onSuccess={handleFormSuccess}
-                onCancel={() => setShowForm(false)}
-              />
-            )}
-          </div>
-        </div>
-      )}
-
-      {manageContractId && (
-        <div className="modal-overlay" onClick={() => setManageContractId(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="close-btn" onClick={() => setManageContractId(null)}>
-              <X size={18} strokeWidth={2} />
-            </button>
-            <ContractDetail contractId={manageContractId} onClose={() => setManageContractId(null)} />
-          </div>
-        </div>
-      )}
-
-      <div className="status-pills">
-        {[
-          { key: "all", label: "All Clients", count: clients.length },
-          { key: "converted", label: "Converted", count: convertedClientsCount },
-          { key: "open", label: "Open Leads", count: openLeadsCount },
-          { key: "cold", label: "Cold Clients", count: coldLeadsCount },
-        ].map((p) => (
-          <button
-            key={p.key}
-            className={`status-pill ${statusFilter === p.key ? "active" : ""}`}
-            onClick={() => setStatusFilter(p.key)}
-          >
-            {p.label} <span className="status-pill-count">{p.count}</span>
+        <div className="cl-actions">
+          <button type="button" className="cl-btn" onClick={() => exportClientsToCsv(filteredClients)} disabled={!filteredClients.length}
+            title={filtersActive ? `Export the ${filteredClients.length} clients matching your filters` : "Export all clients to CSV"}>
+            <Download size={15} strokeWidth={2.2} /> Export
           </button>
-        ))}
-      </div>
-
-      <div className="tab-content">
-        {/* CLIENTS TAB */}
-        {activeTab === "clients" && (
-          <div className="clients-section">
-            <div className="section-header">
-              <div className="search-box">
-                <Search size={15} strokeWidth={2.2} className="search-icon" />
-                <input
-                  type="text"
-                  placeholder="Search clients by name or email..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-              <button className="btn-primary" onClick={handleAddClient}>
-                <Plus size={15} strokeWidth={2.4} /> Add New Client
-              </button>
-              <input
-                ref={importInputRef}
-                type="file"
-                accept=".csv,.xls,.xlsx,.numbers"
-                onChange={handleImportFile}
-                style={{ display: "none" }}
-              />
-              <button className="btn-secondary import-clients-btn" onClick={() => importInputRef.current?.click()} disabled={importing}>
-                <Upload size={15} strokeWidth={2.4} /> {importing ? "Importing..." : "Import"}
-              </button>
-            </div>
-
-            {importResult && (
-              <div className={`import-result ${importResult.ok ? "success" : "error"}`}>
-                {importResult.ok ? (
-                  <>
-                    <div className="import-result-title">Import completed</div>
-                    <div className="import-result-grid">
-                      <span>Total rows: <strong>{importResult.totalRows}</strong></span>
-                      <span>Clients created: <strong>{importResult.clientsCreated}</strong></span>
-                      <span>Existing used: <strong>{importResult.existingClientsUsed}</strong></span>
-                      <span>Contracts created: <strong>{importResult.contractsCreated}</strong></span>
-                      <span>Skipped: <strong>{importResult.skippedRows}</strong></span>
-                    </div>
-                    {importResult.errors?.length > 0 && (
-                      <div className="import-errors">
-                        {importResult.errors.slice(0, 5).map((error) => (
-                          <div key={`${error.row}-${error.message}`}>Row {error.row}: {error.message}</div>
-                        ))}
-                        {importResult.errors.length > 5 && <div>+{importResult.errors.length - 5} more rows skipped</div>}
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div>{importResult.message}</div>
-                )}
-              </div>
-            )}
-
-            <div className="filter-bar">
-              <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-                <option value="all">All Status</option>
-                <option value="open">Open</option>
-                <option value="converted">Converted</option>
-                <option value="cold">Cold</option>
-                <option value="ni">Not Interested</option>
-              </select>
-              <select className="filter-select" value={clientTypeFilter} onChange={(e) => setClientTypeFilter(e.target.value)}>
-                <option value="all">All Client Types</option>
-                {CLIENT_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
-              <select className="filter-select" value={salesPersonFilter} onChange={(e) => setSalesPersonFilter(e.target.value)}>
-                <option value="all">All Sales Persons</option>
-                {salesPersonOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-              </select>
-              <div className="filter-date">
-                <DateRangePicker value={dateRange} onChange={(range) => { setDateRange(range); setDateFilterActive(true); }} />
-                {dateFilterActive && (
-                  <button className="filter-date-clear" onClick={() => setDateFilterActive(false)}>
-                    <X size={12} strokeWidth={2.4} /> Clear date
-                  </button>
-                )}
-              </div>
-              <div className="view-toggle">
-                <button
-                  className={`view-toggle-btn ${viewMode === "grid" ? "active" : ""}`}
-                  title="Grid view"
-                  onClick={() => setViewMode("grid")}
-                >
-                  <LayoutGrid size={15} strokeWidth={2.2} />
-                </button>
-                <button
-                  className={`view-toggle-btn ${viewMode === "list" ? "active" : ""}`}
-                  title="List view"
-                  onClick={() => setViewMode("list")}
-                >
-                  <List size={15} strokeWidth={2.2} />
-                </button>
-              </div>
-            </div>
-
-            {paginatedClients.length > 0 && (
-              <label className="select-all-row">
-                <input
-                  type="checkbox"
-                  checked={paginatedClients.length > 0 && paginatedClients.every((c) => selectedClientIds.has(c._id))}
-                  onChange={toggleSelectAllVisible}
-                />
-                Select all {paginatedClients.length} on this page
-                {allPageSelected && filteredClients.length > paginatedClients.length && (
-                  allFilteredSelected ? (
-                    <button type="button" className="select-all-expand" onClick={() => setSelectedClientIds(new Set())}>
-                      All {filteredClients.length} selected — Clear
-                    </button>
-                  ) : (
-                    <button type="button" className="select-all-expand" onClick={selectAllFilteredClients}>
-                      Select all {filteredClients.length} matching clients
-                    </button>
-                  )
-                )}
-              </label>
-            )}
-
-            {selectedClientIds.size > 0 && (
-              <div className="bulk-action-bar">
-                <span className="bulk-action-bar-count">
-                  
-                  {selectedClientIds.size} client{selectedClientIds.size === 1 ? "" : "s"} selected
-                </span>
-                <div className="bulk-action-bar-actions">
-                  <button className="bulk-action-bar-clear" onClick={() => setSelectedClientIds(new Set())}>
-                    Clear selection
-                  </button>
-                  <button className="btn-danger" onClick={handleBulkDeleteClients} disabled={bulkDeleting}>
-                    <Trash2 size={14} strokeWidth={2.2} /> {bulkDeleting ? "Deleting..." : "Delete Selected"}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {loading ? (
-              <div className="loading">Loading clients...</div>
-            ) : filteredClients.length === 0 ? (
-              <div className="empty-state">
-                <p>No clients found. Start by adding a new client!</p>
-              </div>
-            ) : viewMode === "grid" ? (
-              <div className="clients-grid">
-                {paginatedClients.map((client) => (
-                  <div
-                    key={client._id}
-                    className="client-card client-card-clickable"
-                    style={{ "--card-accent": accentFor(client._id) }}
-                    onClick={() => navigate(`/clients/${client._id}`)}
-                  >
-                    <div className="card-header">
-                      <div className="client-identity">
-                        <div className="client-avatar">{initials(client.clientName)}</div>
-                        <div>
-                          <h3>{client.companyName || client.clientName}</h3>
-                          {client.companyName && <div className="client-company">{client.clientName}</div>}
-                          {client.clientType && <div className="client-type">{client.clientType.replace(/\b\w/g, (c) => c.toUpperCase())}</div>}
-                        </div>
-                      </div>
-                      <div className="card-header-actions">
-                        <span className={`status ${client.status}`}><i className="status-dot" />{client.status}</span>
-                        <input
-                          type="checkbox"
-                          className="client-select-checkbox"
-                          checked={selectedClientIds.has(client._id)}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={() => toggleClientSelected(client._id)}
-                        />
-                      </div>
-                    </div>
-                    <div className="card-body">
-                      {client.contactPerson && (
-                        <p><User size={13} strokeWidth={2} /> {client.contactPerson}</p>
-                      )}
-                      <p><Mail size={13} strokeWidth={2} /> {client.email}</p>
-                      <p><Phone size={13} strokeWidth={2} /> {client.phone}</p>
-                      {client.hasLoginAccess && (
-                        <p className="login-access-badge">
-                          <CheckCircle2 size={13} strokeWidth={2.4} /> Portal access enabled
-                        </p>
-                      )}
-                    </div>
-                    <div className="card-footer card-footer-meta">
-                      <span className="last-updated"><Calendar size={12} strokeWidth={2} /> Updated {fmtDate(client.updatedAt)}</span>
-                      <span className="card-arrow">
-                        View details <ChevronRight size={13} strokeWidth={2.4} />
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="table-container">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th className="checkbox-col">
-                        <input
-                          type="checkbox"
-                          className="list-select-checkbox"
-                          checked={paginatedClients.length > 0 && paginatedClients.every((c) => selectedClientIds.has(c._id))}
-                          onChange={toggleSelectAllVisible}
-                        />
-                      </th>
-                      <th>Client</th>
-                      <th>Contact</th>
-                      <th>Email</th>
-                      <th>Phone</th>
-                      <th>Status</th>
-                      <th>Portal</th>
-                      <th>Updated</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginatedClients.map((client) => (
-                      <tr key={client._id} className="data-row" onClick={() => navigate(`/clients/${client._id}`)} style={{ cursor: "pointer" }}>
-                        <td className="checkbox-col" onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            className="list-select-checkbox"
-                            checked={selectedClientIds.has(client._id)}
-                            onChange={() => toggleClientSelected(client._id)}
-                          />
-                        </td>
-                        <td>
-                          <div className="client-identity">
-                            <div className="client-avatar" style={{ width: 32, height: 32, fontSize: 12 }}>{initials(client.clientName)}</div>
-                            <div>
-                              <div style={{ fontWeight: 700, color: "#0f172a" }}>{client.companyName || client.clientName}</div>
-                              {client.companyName && <div className="client-company">{client.clientName}</div>}
-                            </div>
-                          </div>
-                        </td>
-                        <td>{client.contactPerson || "—"}</td>
-                        <td>{client.email}</td>
-                        <td>{client.phone}</td>
-                        <td><span className={`status ${client.status}`}>{client.status}</span></td>
-                        <td>{client.hasLoginAccess ? <CheckCircle2 size={15} strokeWidth={2.2} color="#16a34a" /> : "—"}</td>
-                        <td>{fmtDate(client.updatedAt)}</td>
-                        <td><span className="card-arrow">View details <ChevronRight size={13} strokeWidth={2.4} /></span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {!loading && filteredClients.length > CLIENTS_PAGE_SIZE && (
-              <div className="clients-pagination">
-                <span className="clients-pagination-summary">
-                  Showing {(clientsPage - 1) * CLIENTS_PAGE_SIZE + 1}–{Math.min(clientsPage * CLIENTS_PAGE_SIZE, filteredClients.length)} of {filteredClients.length}
-                </span>
-                <div className="clients-pagination-controls">
-                  <button
-                    className="pagination-btn"
-                    disabled={clientsPage === 1}
-                    onClick={() => setClientsPage((p) => Math.max(1, p - 1))}
-                  >
-                    <ChevronLeft size={14} strokeWidth={2.4} /> Previous
-                  </button>
-                  <span className="clients-pagination-page">Page {clientsPage} of {clientsTotalPages}</span>
-                  <button
-                    className="pagination-btn"
-                    disabled={clientsPage === clientsTotalPages}
-                    onClick={() => setClientsPage((p) => Math.min(clientsTotalPages, p + 1))}
-                  >
-                    Next <ChevronRight size={14} strokeWidth={2.4} />
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* CONTRACTS TAB */}
-        {activeTab === "contracts" && (
-          <div className="contracts-section">
-            <div className="section-header">
-              <div className="search-box">
-                <Search size={15} strokeWidth={2.2} className="search-icon" />
-                <input
-                  type="text"
-                  placeholder="Search contracts by name..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-              <button className="btn-primary" onClick={() => handleAddContract()}>
-                <Plus size={15} strokeWidth={2.4} />Add New Contract
-              </button>
-            </div>
-
-            {loading ? (
-              <div className="loading">Loading contracts...</div>
-            ) : filteredContracts.length === 0 ? (
-              <div className="empty-state">
-                <p>No contracts found. Create one to get started!</p>
-              </div>
-            ) : (
-              <div className="table-container">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Contract #</th>
-                      <th>Project</th>
-                      <th>Client</th>
-                      <th>Amount</th>
-                      <th>Status</th>
-                      <th>Valid Until</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredContracts.map((contract) => (
-                      <tr key={contract._id}>
-                        <td>{contract.contractNumber}</td>
-                        <td>{contract.projectName}</td>
-                        <td>{contract.clientId?.clientName || "N/A"}</td>
-                        <td>
-                          {contract.projectAmount} {contract.currency}
-                        </td>
-                        <td>
-                          <span className={`status ${contract.contractStatus}`}>
-                            {contract.contractStatus}
-                          </span>
-                        </td>
-                        <td>
-                          {contract.validUntil
-                            ? new Date(contract.validUntil).toLocaleDateString("en-IN")
-                            : "N/A"}
-                        </td>
-                        <td>
-                          <div className="action-buttons">
-                            <button
-                              className="btn-small"
-                              onClick={() => setManageContractId(contract._id)}
-                              title="Manage Deliverables & Payments"
-                            >
-                              <Package size={15} strokeWidth={2.1} />
-                            </button>
-                            <button
-                              className="btn-small"
-                              onClick={() => handleEditContract(contract)}
-                              title="Edit"
-                            >
-                              <Pencil size={15} strokeWidth={2.1} />
-                            </button>
-                            <button
-                              className="btn-small"
-                              onClick={() => handleDeleteContract(contract._id)}
-                              title="Delete"
-                            >
-                              <Trash2 size={15} strokeWidth={2.1} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* REMINDERS TAB */}
-        {activeTab === "reminders" && (
-          <div className="reminders-section">
-            <div className="section-header">
-              <div className="search-box">
-                <Search size={15} strokeWidth={2.2} className="search-icon" />
-                <input
-                  type="text"
-                  placeholder="Search reminders..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-              <button className="btn-primary" onClick={() => handleAddReminder()}>
-                <Plus size={15} strokeWidth={2.4} /> Create Reminder
-              </button>
-            </div>
-
-            {loading ? (
-              <div className="loading">Loading reminders...</div>
-            ) : filteredReminders.length === 0 ? (
-              <div className="empty-state">
-                <p>No payment reminders found. Create one to track payments!</p>
-              </div>
-            ) : (
-              <div className="table-container">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Reminder #</th>
-                      <th>Invoice #</th>
-                      <th>Client</th>
-                      <th>Amount</th>
-                      <th>Due Date</th>
-                      <th>Type</th>
-                      <th>Status</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredReminders.map((reminder) => (
-                      <tr key={reminder._id}>
-                        <td>{reminder.reminderId}</td>
-                        <td>{reminder.invoiceNumber}</td>
-                        <td>{reminder.clientId?.clientName || "N/A"}</td>
-                        <td>
-                          {reminder.amountDue} {reminder.currency}
-                        </td>
-                        <td>
-                          {reminder.dueDate
-                            ? new Date(reminder.dueDate).toLocaleDateString("en-IN")
-                            : "On Demand"}
-                        </td>
-                        <td>
-                          <span className="reminder-type">
-                            {reminder.reminderType.replace("-", " ")}
-                          </span>
-                        </td>
-                        <td>
-                          <span className={`status ${reminder.reminderStatus}`}>
-                            {reminder.reminderStatus}
-                          </span>
-                        </td>
-                        <td>
-                          <div className="action-buttons">
-                            <button
-                              className="btn-small"
-                              onClick={() => handleEditReminder(reminder)}
-                              title="Edit"
-                            >
-                              <Pencil size={15} strokeWidth={2.1} />
-                            </button>
-                            <button
-                              className="btn-small"
-                              onClick={() => handleDeleteReminder(reminder._id)}
-                              title="Delete"
-                            >
-                              <Trash2 size={15} strokeWidth={2.1} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+          <button type="button" className="cl-btn" onClick={() => importInputRef.current?.click()} disabled={importing}>
+            <Upload size={15} strokeWidth={2.2} /> {importing ? "Importing…" : "Import"}
+          </button>
+          <button type="button" className="cl-btn cl-btn-soft" onClick={handleAddContract}>
+            <FileText size={15} strokeWidth={2.2} /> New Contract
+          </button>
+          <button type="button" className="cl-btn cl-btn-primary" onClick={handleAddClient}>
+            <Plus size={16} strokeWidth={2.5} /> Add Client
+          </button>
         </div>
+      </div>
 
-        <aside className="overview-sidebar">
-          <div className="sidebar-panel">
-            <div className="sidebar-panel-header">
-              <h3 className="sidebar-panel-title">Clients by Status</h3>
-              <select className="donut-range-select" value={donutRange} onChange={(e) => setDonutRange(e.target.value)}>
-                <option value="month">This Month</option>
-                <option value="year">This Year</option>
-                <option value="all">All Time</option>
-              </select>
-            </div>
-            {statusBreakdownTotal === 0 ? (
-              <div className="empty-state" style={{ padding: "28px 14px" }}>
-                <p>No client data yet</p>
-              </div>
-            ) : (
-              <div className="donut-wrap">
-                <div className="donut-chart">
-                  <ResponsiveContainer width="100%" height={160}>
-                    <PieChart>
-                      <Pie
-                        data={statusBreakdown}
-                        dataKey="count"
-                        nameKey="label"
-                        innerRadius={48}
-                        outerRadius={72}
-                        paddingAngle={2}
-                        startAngle={90}
-                        endAngle={-270}
-                      >
-                        {statusBreakdown.map((s) => <Cell key={s.key} fill={s.color} />)}
-                      </Pie>
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="donut-center">
-                    <span className="donut-center-value">{statusBreakdownTotal}</span>
-                    <span className="donut-center-label">Total</span>
-                  </div>
-                </div>
-                <div className="donut-legend">
-                  {statusBreakdown.map((s) => (
-                    <div key={s.key} className="donut-legend-row">
-                      <span className="donut-legend-dot" style={{ background: s.color }} />
-                      <span className="donut-legend-label">{s.label}</span>
-                      <span className="donut-legend-count">
-                        {s.count} ({Math.round((s.count / statusBreakdownTotal) * 100)}%)
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="sidebar-panel">
-            <h3 className="sidebar-panel-title">Quick Actions</h3>
-            <div className="quick-actions-list">
-              <button className="quick-action-btn" onClick={handleAddClient}>
-                <span className="quick-action-icon quick-action-orange"><Users size={16} strokeWidth={2.1} /></span>
-                Add New Client
-              </button>
-              <button className="quick-action-btn" onClick={() => importInputRef.current?.click()} disabled={importing}>
-                <span className="quick-action-icon quick-action-green"><Upload size={16} strokeWidth={2.1} /></span>
-                {importing ? "Importing..." : "Import Clients"}
-              </button>
-              <button className="quick-action-btn" onClick={() => exportClientsToCsv(clients)}>
-                <span className="quick-action-icon quick-action-green"><Download size={16} strokeWidth={2.1} /></span>
-                Export Clients
-              </button>
-              <button className="quick-action-btn" onClick={() => alert("Client Reports is coming soon")}>
-                <span className="quick-action-icon quick-action-blue"><BarChart3 size={16} strokeWidth={2.1} /></span>
-                Client Reports
-              </button>
-            </div>
-          </div>
-
-          <div className="sidebar-panel">
-            <h3 className="sidebar-panel-title">Top Sales Persons</h3>
-            {salesPersonLeaderboard.length === 0 ? (
-              <div className="empty-state" style={{ padding: "28px 14px" }}>
-                <p>No sales persons assigned yet</p>
-              </div>
-            ) : (
+      {importResult && (
+        <div className={`cl-banner ${importResult.ok ? "is-ok" : "is-error"}`}>
+          <div className="cl-banner-body">
+            {importResult.ok ? (
               <>
-                <div className="leaderboard-list">
-                  {visibleSalesPersons.map((sp, i) => (
-                    <div key={sp.id} className="leaderboard-row">
-                      <span className="leaderboard-rank">{i + 1}</span>
-                      <div>
-                        <div className="leaderboard-name">{sp.name}</div>
-                        <div className="leaderboard-count">{sp.count} Client{sp.count !== 1 ? "s" : ""}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {salesPersonLeaderboard.length > 3 && (
-                  <button className="sidebar-view-all" onClick={() => setShowAllSalesPersons((v) => !v)}>
-                    {showAllSalesPersons ? "Show less" : "View All"} <ChevronRight size={13} strokeWidth={2.4} />
-                  </button>
+                <b>Import completed</b>
+                <span>{importResult.totalRows} rows · {importResult.clientsCreated} clients created · {importResult.existingClientsUsed} existing used · {importResult.contractsCreated} contracts created · {importResult.skippedRows} skipped</span>
+                {importResult.errors?.length > 0 && (
+                  <ul>
+                    {importResult.errors.slice(0, 5).map((error) => <li key={`${error.row}-${error.message}`}>Row {error.row}: {error.message}</li>)}
+                    {importResult.errors.length > 5 && <li>+{importResult.errors.length - 5} more rows skipped</li>}
+                  </ul>
                 )}
               </>
+            ) : (
+              <><b>Import failed</b><span>{importResult.message}</span></>
             )}
           </div>
-        </aside>
+          <button type="button" className="cl-banner-close" onClick={() => setImportResult(null)} aria-label="Dismiss"><X size={15} /></button>
+        </div>
+      )}
+
+      {/* ── KPI cards ── */}
+      <div className="cl-row cl-row-kpi">
+        <KpiHero tone="orange" Icon={Users} iconColor="#ea580c" iconBg="#ffe2c7" label="Total Clients"
+          value={kpi.total.value} added={kpi.total.added} trend={kpi.total.trend} sparkColor="#f08a2c"
+          active={false} onClick={() => filterByStatus("all")} />
+        <KpiHero tone="blue" Icon={Inbox} iconColor="#2563eb" iconBg="#d9e6fd" label="Open Leads"
+          value={kpi.open.value} added={kpi.open.added} trend={kpi.open.trend} sparkColor="#2563eb"
+          active={statusFilter === "open"} onClick={() => filterByStatus("open")} />
+        <KpiHero tone="green" Icon={UserCheck} iconColor="#16a34a" iconBg="#d3f5df" label="Converted Clients"
+          value={kpi.converted.value} added={kpi.converted.added} trend={kpi.converted.trend} sparkColor="#16a34a"
+          active={statusFilter === "converted"} onClick={() => filterByStatus("converted")} />
+        <KpiHero tone="purple" Icon={Snowflake} iconColor="#7c3aed" iconBg="#e9ddff" label="Cold / Not Interested"
+          value={kpi.lost.value} added={kpi.lost.added} trend={kpi.lost.trend} sparkColor="#8b5cf6"
+          active={statusFilter === "lost"} onClick={() => filterByStatus("lost")} />
       </div>
+
+      {/* ── Insights ── */}
+      <div className={`cl-row cl-row-insights${showLeaderboard ? "" : " no-leaders"}`}>
+        <div className="cl-card">
+          <div className="cl-card-head">
+            <CardTitle Icon={PieIcon} color="#2563eb" bg="#e8efff">Clients by Status</CardTitle>
+            <select className="cl-pill-select" value={donutRange} onChange={(e) => setDonutRange(e.target.value)} aria-label="Period">
+              <option value="all">All Time</option>
+              <option value="year">This Year</option>
+              <option value="month">This Month</option>
+            </select>
+          </div>
+          <div className="cl-donut-body">
+            <div className="cl-donut">
+              <PieChart width={124} height={124}>
+                <Pie
+                  data={donutTotal ? statusBreakdown.filter((s) => s.count) : [{ key: "empty", count: 1 }]}
+                  dataKey="count" cx="50%" cy="50%" innerRadius={45} outerRadius={62}
+                  startAngle={90} endAngle={-270} stroke="none" paddingAngle={donutTotal ? 2 : 0} isAnimationActive={false}
+                >
+                  {(donutTotal ? statusBreakdown.filter((s) => s.count) : [{ key: "empty" }]).map((s) => (
+                    <Cell key={s.key} fill={s.color || "#e2e8f0"} />
+                  ))}
+                </Pie>
+              </PieChart>
+              <div className="cl-donut-center">
+                <b>{donutTotal.toLocaleString("en-IN")}</b>
+                <span>Clients</span>
+              </div>
+            </div>
+            <div className="cl-legend">
+              {statusBreakdown.map((s) => (
+                <button key={s.key} type="button" className="cl-legend-row" onClick={() => filterByStatus(s.key)} title={`Show ${s.label.toLowerCase()}`}>
+                  <i style={{ background: s.color }} />
+                  <span className="cl-legend-label">{s.label}</span>
+                  <span className="cl-legend-value">
+                    <b>{s.count}</b>
+                    <span>{donutTotal ? Math.round((s.count / donutTotal) * 100) : 0}%</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="cl-card">
+          <div className="cl-card-head">
+            <CardTitle Icon={BarChart3} color="#16a34a" bg="#dcfce7" sub={`${plural(addedInWindow, "client")} in ${MONTHS_SHOWN} months`}>New Clients by Month</CardTitle>
+            <span className="cl-pill">Last {MONTHS_SHOWN} months</span>
+          </div>
+          <div className="cl-bars">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={monthlyAdds} margin={{ top: 8, right: 4, left: -18, bottom: 0 }} barCategoryGap="32%">
+                <CartesianGrid vertical={false} stroke="#eef0f5" />
+                <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: "#cbd5e1" }} tick={{ fill: "#64748b", fontSize: 11.5 }} />
+                <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: "#94a3b8", fontSize: 11 }} width={40} />
+                <Tooltip content={<MonthTooltip />} cursor={{ fill: "rgba(37,99,235,.06)" }} />
+                {STATUS_KEYS.map((k, i) => (
+                  <Bar key={k} dataKey={k} stackId="m" fill={STATUS_META[k].color} maxBarSize={34}
+                    radius={i === STATUS_KEYS.length - 1 ? [4, 4, 0, 0] : 0} isAnimationActive={false} />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="cl-mini-legend">
+            {STATUS_KEYS.map((k) => <span key={k}><i style={{ background: STATUS_META[k].color }} />{STATUS_META[k].short}</span>)}
+          </div>
+        </div>
+
+        {showLeaderboard && (
+          <div className="cl-card">
+            <div className="cl-card-head">
+              <CardTitle Icon={Trophy} color="#d97706" bg="#fef3c7">Top Sales Persons</CardTitle>
+              {leaderboard.length > 5 && (
+                <button type="button" className="cl-link" onClick={() => setShowAllSalesPersons((v) => !v)}>
+                  {showAllSalesPersons ? "Show less" : `View all ${leaderboard.length}`} <ArrowRight size={13} />
+                </button>
+              )}
+            </div>
+            <div className={`cl-leaders${showAllSalesPersons ? " is-expanded" : ""}`}>
+              {visibleLeaders.map((sp, i) => (
+                <button key={sp.id} type="button" className={`cl-leader${salesPersonFilter === sp.id ? " is-active" : ""}`} onClick={() => filterBySalesPerson(sp.id)} title={`Show ${sp.name}'s clients`}>
+                  <span className={`cl-rank cl-rank-${i + 1}`}>{i + 1}</span>
+                  <span className="cl-leader-body">
+                    <span className="cl-leader-top">
+                      <span className="cl-leader-name">{sp.name}</span>
+                      <span className="cl-leader-count"><b>{sp.count}</b> {sp.count === 1 ? "client" : "clients"} · {sp.converted} won</span>
+                    </span>
+                    <span className="cl-leader-bar"><span style={{ width: `${Math.max(6, (sp.count / topCount) * 100)}%` }} /></span>
+                  </span>
+                </button>
+              ))}
+            </div>
+            {unassignedCount > 0 && (
+              <button type="button" className="cl-unassigned" onClick={() => filterBySalesPerson("none")}>
+                {plural(unassignedCount, "client")} without a sales person <ArrowRight size={12} />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Directory ── */}
+      <div className="cl-card cl-directory" ref={directoryRef}>
+        <div className="cl-card-head cl-dir-head">
+          <CardTitle Icon={Users} color="#2563eb" bg="#e8efff"
+            sub={loading ? "Loading…" : filtersActive ? `${filteredClients.length.toLocaleString("en-IN")} ${filteredClients.length === 1 ? "match" : "matches"} of ${counts.all.toLocaleString("en-IN")}` : plural(counts.all, "client")}>
+            Client Directory
+          </CardTitle>
+          <div className="cl-view-toggle" role="group" aria-label="View">
+            <button type="button" className={viewMode === "list" ? "is-active" : ""} title="List view" onClick={() => changeView("list")}><List size={15} strokeWidth={2.2} /></button>
+            <button type="button" className={viewMode === "grid" ? "is-active" : ""} title="Card view" onClick={() => changeView("grid")}><LayoutGrid size={15} strokeWidth={2.2} /></button>
+          </div>
+        </div>
+
+        <div className="cl-tabs" role="tablist">
+          {tabs.map((t) => {
+            // The "Cold / Not Interested" card filters to both statuses at once.
+            const selected = statusFilter === t.key || (statusFilter === "lost" && (t.key === "cold" || t.key === "ni"));
+            return (
+            <button key={t.key} type="button" role="tab" aria-selected={selected}
+              className={`cl-tab${selected ? " is-active" : ""}`} onClick={() => setStatusFilter(t.key)}
+              style={{ "--tab-color": t.color }}>
+              {t.key !== "all" && <i style={{ background: t.color }} />}
+              {t.label}
+              <span className="cl-tab-count">{counts[t.key] ?? 0}</span>
+            </button>
+            );
+          })}
+        </div>
+
+        <div className="cl-toolbar">
+          <label className="cl-search">
+            <Search size={15} strokeWidth={2.2} />
+            <input type="text" placeholder="Search name, company, email, phone or city…" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+            {searchTerm && <button type="button" onClick={() => setSearchTerm("")} aria-label="Clear search"><X size={14} /></button>}
+          </label>
+          <select className={`cl-select${clientTypeFilter !== "all" ? " is-set" : ""}`} value={clientTypeFilter} onChange={(e) => setClientTypeFilter(e.target.value)} aria-label="Client type">
+            <option value="all">All client types</option>
+            {CLIENT_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{TYPE_LABELS[t]}</option>)}
+          </select>
+          <select className={`cl-select${categoryFilter !== "all" ? " is-set" : ""}`} value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} aria-label="Category">
+            <option value="all">All categories</option>
+            {CLIENT_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
+          {salesPersonOptions.length > 1 && (
+            <select className={`cl-select${salesPersonFilter !== "all" ? " is-set" : ""}`} value={salesPersonFilter} onChange={(e) => setSalesPersonFilter(e.target.value)} aria-label="Sales person">
+              <option value="all">All sales persons</option>
+              {salesPersonOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+              {unassignedCount > 0 && <option value="none">No sales person</option>}
+            </select>
+          )}
+          <div className={`cl-date${dateFilterActive ? " is-set" : ""}`} title="Filter by onboarding date">
+            <DateRangePicker value={dateRange} onChange={setDateRange} allLabel="Any onboarding date" />
+          </div>
+          {filtersActive && (
+            <button type="button" className="cl-clear" onClick={clearFilters}><X size={13} strokeWidth={2.4} /> Clear filters</button>
+          )}
+        </div>
+
+        {selectedClientIds.size > 0 && (
+          <div className="cl-bulk">
+            <span className="cl-bulk-count"><CheckCircle2 size={15} /> {plural(selectedClientIds.size, "client")} selected</span>
+            {allPageSelected && filteredClients.length > pageClients.length && !allFilteredSelected && (
+              <button type="button" className="cl-link" onClick={() => setSelectedClientIds(new Set(filteredClients.map((c) => c._id)))}>
+                Select all {filteredClients.length} matching
+              </button>
+            )}
+            <span className="cl-bulk-actions">
+              <button type="button" className="cl-btn cl-btn-ghost" onClick={() => setSelectedClientIds(new Set())}>Clear</button>
+              <button type="button" className="cl-btn cl-btn-danger" onClick={handleBulkDeleteClients} disabled={bulkDeleting}>
+                <Trash2 size={14} strokeWidth={2.2} /> {bulkDeleting ? "Deleting…" : "Delete selected"}
+              </button>
+            </span>
+          </div>
+        )}
+
+        {loading ? (
+          <div className="cl-skeleton">
+            {Array.from({ length: 6 }, (_, i) => <div key={i} className="cl-skeleton-row" />)}
+          </div>
+        ) : filteredClients.length === 0 ? (
+          <div className="cl-empty">
+            <span className="cl-empty-icon"><Search size={20} /></span>
+            <b>{clients.length ? "No clients match these filters" : "No clients yet"}</b>
+            <p>{clients.length ? "Try a different search or clear the filters." : "Add your first client or import a spreadsheet to get started."}</p>
+            {clients.length
+              ? <button type="button" className="cl-btn" onClick={clearFilters}>Clear filters</button>
+              : <button type="button" className="cl-btn cl-btn-primary" onClick={handleAddClient}><Plus size={15} /> Add Client</button>}
+          </div>
+        ) : viewMode === "list" ? (
+          <div className="cl-table-wrap">
+            <table className="cl-table">
+              <thead>
+                <tr>
+                  <th className="cl-col-check">
+                    <input type="checkbox" className="cl-check" checked={allPageSelected} onChange={toggleSelectPage} aria-label="Select all on this page" />
+                  </th>
+                  <th>Client</th>
+                  <th>Contact</th>
+                  {!isSalesView && <th>Sales Person</th>}
+                  <th className="cl-col-type">Type / Source</th>
+                  <th>Status</th>
+                  <th className="cl-col-date">Onboarded</th>
+                  <th aria-label="Open" />
+                </tr>
+              </thead>
+              <tbody>
+                {pageClients.map((client) => (
+                  <tr key={client._id} className={selectedClientIds.has(client._id) ? "is-selected" : ""} onClick={() => openClient(client._id)}>
+                    <td className="cl-col-check" onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" className="cl-check" checked={selectedClientIds.has(client._id)} onChange={() => toggleClientSelected(client._id)} aria-label={`Select ${client.clientName}`} />
+                    </td>
+                    <td>
+                      <div className="cl-identity">
+                        <Avatar client={client} />
+                        <div className="cl-identity-text">
+                          <div className="cl-name" title={client.companyName || client.clientName}>
+                            {client.companyName || client.clientName}
+                            {client.hasLoginAccess && <CheckCircle2 size={13} color="#16a34a" strokeWidth={2.4} aria-label="Portal access" />}
+                          </div>
+                          {subtitleFor(client) && <div className="cl-sub">{subtitleFor(client)}</div>}
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="cl-contact">
+                        <span><Phone size={12} />{client.phone || "—"}</span>
+                        {client.email && <span className="cl-muted" title={client.email}><Mail size={12} />{client.email}</span>}
+                      </div>
+                    </td>
+                    {!isSalesView && (
+                      <td>{salesName(client) ? <span className="cl-person">{salesName(client)}</span> : <span className="cl-muted">Unassigned</span>}</td>
+                    )}
+                    <td className="cl-col-type"><TypeSource client={client} /></td>
+                    <td><StatusChip status={client.status} /></td>
+                    <td className="cl-nowrap cl-col-date">{fmtDate(client.onboardedAt || client.createdAt)}</td>
+                    <td className="cl-col-go"><ChevronRight size={16} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <>
+            <label className="cl-select-page">
+              <input type="checkbox" className="cl-check" checked={allPageSelected} onChange={toggleSelectPage} />
+              Select all {pageClients.length} on this page
+            </label>
+            <div className="cl-grid">
+              {pageClients.map((client) => (
+                <div key={client._id} role="button" tabIndex={0}
+                  className={`cl-client-card${selectedClientIds.has(client._id) ? " is-selected" : ""}`}
+                  onClick={() => openClient(client._id)}
+                  onKeyDown={(e) => { if (e.key === "Enter") openClient(client._id); }}>
+                  <div className="cl-cc-top">
+                    <Avatar client={client} size={40} />
+                    <div className="cl-identity-text">
+                      <div className="cl-name" title={client.companyName || client.clientName}>{client.companyName || client.clientName}</div>
+                      {subtitleFor(client) && <div className="cl-sub">{subtitleFor(client)}</div>}
+                    </div>
+                    <input type="checkbox" className="cl-check" checked={selectedClientIds.has(client._id)}
+                      onClick={(e) => e.stopPropagation()} onChange={() => toggleClientSelected(client._id)} aria-label={`Select ${client.clientName}`} />
+                  </div>
+                  <div className="cl-cc-tags">
+                    <StatusChip status={client.status} />
+                    {client.clientType && <span className="cl-tag">{TYPE_LABELS[client.clientType] || titleCase(client.clientType)}</span>}
+                    {client.businessCategory && <span className="cl-tag">{clientCategoryLabel(client.businessCategory)}</span>}
+                    {client.hasLoginAccess && <span className="cl-tag cl-tag-green"><CheckCircle2 size={11} /> Portal</span>}
+                  </div>
+                  <div className="cl-cc-lines">
+                    <span><Phone size={13} />{client.phone || "—"}</span>
+                    <span title={client.email}><Mail size={13} />{client.email || <em>No email</em>}</span>
+                    {(client.city || client.state) && <span><MapPin size={13} />{[client.city, client.state].filter(Boolean).join(", ")}</span>}
+                  </div>
+                  <div className="cl-cc-foot">
+                    {isSalesView
+                      ? <span title="Lead source">{client.leadSource ? titleCase(client.leadSource) : "—"}</span>
+                      : <span title="Sales person"><Users size={12} />{salesName(client) || "Unassigned"}</span>}
+                    <span title="Onboarded"><Calendar size={12} />{fmtDate(client.onboardedAt || client.createdAt)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {!loading && filteredClients.length > PAGE_SIZE && (
+          <div className="cl-pager">
+            <span>Showing <b>{(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filteredClients.length)}</b> of {filteredClients.length}</span>
+            <div className="cl-pager-controls">
+              <button type="button" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={15} /> Prev</button>
+              <span>Page {currentPage} of {totalPages}</span>
+              <button type="button" disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)}>Next <ChevronRight size={15} /></button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {showContractPicker && (
+        <ContractClientPicker
+          onClose={() => setShowContractPicker(false)}
+          onAddClient={() => { setShowContractPicker(false); handleAddClient(); }}
+        />
+      )}
+
+      {showForm && (
+        <div className="modal-overlay">
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <button className="close-btn" onClick={() => setShowForm(false)} aria-label="Close">
+              <X size={18} strokeWidth={2} />
+            </button>
+            <ClientForm client={null} onSuccess={handleFormSuccess} onCancel={() => setShowForm(false)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

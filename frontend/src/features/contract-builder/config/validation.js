@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { fieldToZodSchema } from "./fieldDefinitions";
 import { COMMON_FIELDS } from "./commonFields";
+import { getCategoryMeta } from "./serviceCategories";
 
 export const step1Schema = z.object({
   clientId: z.string().min(1, "Client is required"),
@@ -29,8 +30,21 @@ export const step1Schema = z.object({
 );
 
 export function validateStep2(selectedServices) {
-  const hasCategory = (selectedServices || []).some((cat) => cat.enabled);
-  return hasCategory ? { success: true } : { success: false, message: "Select at least one service to continue" };
+  const enabled = (selectedServices || []).filter((cat) => cat.enabled);
+  if (!enabled.length) return { success: false, message: "Select at least one service to continue" };
+  // A picked service with no package switched on adds nothing to the
+  // contract (and an all-empty contract is rejected by the server with an
+  // unhelpful "missing projectDescription") — say exactly what to fix instead.
+  const empty = enabled.filter((cat) => !(cat.selections || []).length);
+  if (empty.length) {
+    const names = empty.map((cat) => getCategoryMeta(cat.categoryId)?.label || cat.categoryId);
+    const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
+    return {
+      success: false,
+      message: `Turn on at least one package in ${list} — or tap ${names.length > 1 ? "them" : "it"} above to remove.`,
+    };
+  }
+  return { success: true };
 }
 
 /** Builds a Zod object for one enabled leaf's values+advanced fields, from its own config. */

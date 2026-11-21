@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { MapPin, Navigation, LogOut as EndIcon, History, Loader2, ShieldCheck } from "lucide-react";
+import { MapPin, Navigation, LogOut as EndIcon, History, Loader2, ShieldCheck, ImagePlus } from "lucide-react";
 import { getAllClients } from "../../services/clientApi";
 import {
-  checkInClientVisit, checkOutClientVisit, getMyClientVisits, getCurrentLocation, mapUrl,
+  checkInClientVisit, checkOutClientVisit, getMyClientVisits, getCurrentLocation, mapUrl, canEditVisitPhotos,
 } from "../../services/clientVisitApi";
-import { T } from "./shared";
+import { T, Modal } from "./shared";
+import { VisitPhotoManager, PhotoStrip, PhotoLightbox } from "./VisitPhotos";
 import { Card, Chip, Empty, th, td } from "./salesUi";
 import { fmtDateTime, fmtTime, fmtDuration, visitMinutes, hasFix, clientLabel } from "./visitFormat";
 
@@ -44,7 +45,7 @@ function FixLink({ fix, label }) {
 }
 
 // ─── Open meeting ─────────────────────────────────────────────────────────
-function OpenMeetingCard({ visit, onEnded }) {
+function OpenMeetingCard({ visit, onEnded, onUpdated }) {
   const [outcome, setOutcome] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -92,6 +93,10 @@ function OpenMeetingCard({ visit, onEnded }) {
         <FixLink fix={visit.checkIn} label="Location shared" />
       </div>
       {visit.purpose && <div style={{ marginTop: 8, fontSize: 13, color: T.textSecondary }}>Purpose: {visit.purpose}</div>}
+
+      <div style={{ marginTop: 16 }}>
+        <VisitPhotoManager visit={visit} onUpdated={onUpdated} />
+      </div>
 
       <div style={{ marginTop: 16 }}>
         <Label>Meeting outcome (optional)</Label>
@@ -231,6 +236,15 @@ export default function SalesVisitsSection() {
 
   const upsertVisit = (visit) =>
     setVisits((prev) => [visit, ...prev.filter((v) => v._id !== visit._id)]);
+  // Photo changes: update the row in place (don't reorder the history).
+  const replaceVisit = (visit) => {
+    setVisits((prev) => prev.map((v) => (v._id === visit._id ? visit : v)));
+    setOpen((o) => (o && o._id === visit._id ? visit : o));
+  };
+  const [now] = useState(() => Date.now());
+  const [photoVisitId, setPhotoVisitId] = useState(null);
+  const [viewer, setViewer] = useState(null); // { visit, index }
+  const photoVisit = visits.find((v) => v._id === photoVisitId);
 
   return (
     <div>
@@ -252,6 +266,7 @@ export default function SalesVisitsSection() {
             key={open._id}
             visit={open}
             onEnded={(visit) => { setOpen(null); upsertVisit(visit); }}
+            onUpdated={replaceVisit}
           />
         ) : (
           <StartMeetingCard
@@ -269,13 +284,14 @@ export default function SalesVisitsSection() {
           <Empty>No client meetings yet</Empty>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 640 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 760 }}>
               <thead>
                 <tr>
                   <th style={th()}>Date</th>
                   <th style={th()}>Client</th>
                   <th style={th()}>Duration</th>
                   <th style={th()}>Location</th>
+                  <th style={th()}>Photos</th>
                   <th style={th()}>Status</th>
                 </tr>
               </thead>
@@ -300,6 +316,17 @@ export default function SalesVisitsSection() {
                         {v.status === "completed" && <FixLink fix={v.checkOut} label="Check-out" />}
                       </div>
                     </td>
+                    <td style={td()}>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+                        <PhotoStrip visit={v} size={30} onOpen={(index) => setViewer({ visit: v, index })} />
+                        {v.status === "completed" && canEditVisitPhotos(v, now) && (
+                          <button type="button" onClick={() => setPhotoVisitId(v._id)}
+                            style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: 0, border: "none", background: "none", color: T.brand, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                            <ImagePlus size={12} /> {v.photos?.length ? "Add / manage" : "Add photos"}
+                          </button>
+                        )}
+                      </div>
+                    </td>
                     <td style={td()}><Chip label={v.status === "completed" ? "Completed" : "In Meeting"} /></td>
                   </tr>
                 ))}
@@ -308,6 +335,20 @@ export default function SalesVisitsSection() {
           </div>
         )}
       </Card>
+
+      {photoVisit && (
+        <Modal title={`Photos — ${clientLabel(photoVisit.clientId)}`} onClose={() => setPhotoVisitId(null)} width={560}>
+          <VisitPhotoManager visit={photoVisit} onUpdated={replaceVisit} />
+        </Modal>
+      )}
+      {viewer && (
+        <PhotoLightbox
+          visit={visits.find((v) => v._id === viewer.visit._id) || viewer.visit}
+          startIndex={viewer.index}
+          title={`${clientLabel(viewer.visit.clientId)} · ${fmtDateTime(viewer.visit.checkIn?.at)}`}
+          onClose={() => setViewer(null)}
+        />
+      )}
     </div>
   );
 }

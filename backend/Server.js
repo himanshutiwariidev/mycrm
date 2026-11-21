@@ -35,6 +35,8 @@ const expenseRoutes = require("./routes/expenseRoutes");
 const meetingRoutes = require("./routes/meetingRoutes");
 const clientVisitRoutes = require("./routes/clientVisitRoutes");
 const telecallingRoutes = require("./routes/telecallingRoutes");
+const deliverableProofRoutes = require("./routes/deliverableProofRoutes");
+const clientReportRoutes = require("./routes/clientReportRoutes");
 
 // ── Controllers used directly on Server-level routes ───────────────────────
 const { loginUser, logoutUser } = require("./controllers/userController");
@@ -132,7 +134,19 @@ if (process.env.NODE_ENV === "production") {
 }
 
 // ── Static files (uploaded PI attachments — public, UUID filenames) ─────────
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+// Client-meeting photos (uploads/visit-photos, random 128-bit names) are shown
+// as <img> in the dashboards, which may run on another origin than the API in
+// development — so they're allowed cross-origin (helmet defaults to
+// same-origin) and, being immutable, cached for a long time.
+app.use("/uploads", express.static(path.join(__dirname, "uploads"), {
+  setHeaders: (res, filePath) => {
+    // …and the same for deliverable work-proof screenshots (uploads/deliverable-proofs).
+    if (filePath.includes(`${path.sep}visit-photos${path.sep}`) || filePath.includes(`${path.sep}deliverable-proofs${path.sep}`)) {
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    }
+  },
+}));
 
 // ════════════════════════════════════════════════════════════════════════════
 //  API ROUTES
@@ -150,6 +164,8 @@ app.use("/api/expenses", expenseRoutes);
 app.use("/api/meetings", meetingRoutes);
 app.use("/api/client-visits", clientVisitRoutes);
 app.use("/api/telecalling", telecallingRoutes);
+app.use("/api/deliverable-proofs", deliverableProofRoutes);
+app.use("/api/client-reports", clientReportRoutes);
 
 // ── Shared login entry-point (rate-limited + validated) ──────────────────────
 // This route is also exposed at POST /api/users/login (inside userRoutes) for
