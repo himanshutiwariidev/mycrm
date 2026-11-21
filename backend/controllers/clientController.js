@@ -1326,25 +1326,78 @@ exports.deleteDeliverable = async (req, res) => {
 
 // ============= PAYMENT OPERATIONS =============
 
+const round2 = (n) => Math.round(n * 100) / 100;
+const inr = (n) => `₹${Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+
+/**
+ * Optional GST / TDS on a payment, from the entered amount A:
+ *   GST excluded → taxable = A, GST = A × g% added on top
+ *   GST included → GST = A × g / (100 + g) already inside A, taxable = A − GST
+ *   TDS = taxable × t%
+ *   TDS excluded → added on top: counted = taxable + GST + TDS, bank got taxable + GST
+ *   TDS included → deducted:     counted = taxable + GST,       bank got that − TDS
+ * Mirrors splitPayment() in frontend/src/components/PaymentManager.jsx.
+ */
+function paymentTaxes(entered, body) {
+  const tax = (on, value, modeValue, label) => {
+    if (on !== true && on !== "true") return { percent: 0 };
+    const percent = Number(value);
+    if (!Number.isFinite(percent) || percent <= 0 || percent > 100) return { error: `Enter a ${label} % between 0 and 100` };
+    const mode = modeValue === undefined || modeValue === "" ? "excluded" : modeValue;
+    if (!["excluded", "included"].includes(mode)) return { error: `${label} must be included or excluded` };
+    return { percent, mode };
+  };
+  const gst = tax(body.gstEnabled, body.gstPercent, body.gstMode, "GST");
+  if (gst.error) return gst;
+  const tds = tax(body.tdsEnabled, body.tdsPercent, body.tdsMode, "TDS");
+  if (tds.error) return tds;
+
+  const gstAmount = gst.percent
+    ? round2(gst.mode === "included" ? (entered * gst.percent) / (100 + gst.percent) : (entered * gst.percent) / 100)
+    : 0;
+  const taxable = gst.percent && gst.mode === "included" ? round2(entered - gstAmount) : entered;
+  const invoice = round2(taxable + gstAmount);
+  const tdsAmount = tds.percent ? round2((taxable * tds.percent) / 100) : 0;
+  const counted = tds.percent && tds.mode === "excluded" ? round2(invoice + tdsAmount) : invoice;
+  return {
+    amount: counted,
+    fields: {
+      ...(gst.percent || tds.percent ? { taxableAmount: taxable } : {}),
+      ...(gst.percent ? { gstPercent: gst.percent, gstAmount, gstMode: gst.mode } : {}),
+      ...(tds.percent ? { tdsPercent: tds.percent, tdsAmount, tdsMode: tds.mode } : {}),
+    },
+  };
+}
+
 exports.addPayment = async (req, res) => {
   try {
-    const { amount, paymentDate, method, notes, nextDueDate } = req.body;
-    if (!amount) {
+    const { paymentDate, method, notes, nextDueDate } = req.body;
+    const entered = Number(req.body.amount);
+    if (!req.body.amount || !Number.isFinite(entered) || entered <= 0) {
       return res.status(400).json({ message: "Amount is required" });
     }
+    const taxes = paymentTaxes(entered, req.body);
+    if (taxes.error) return res.status(400).json({ message: taxes.error });
+    const { amount } = taxes; // what counts against the due, after adding any excluded tax
 
     const contract = await Contract.findById(req.params.id);
     if (!contract) {
       return res.status(404).json({ message: "Contract not found" });
     }
 
-    contract.payments.push({ amount, paymentDate, method, notes });
+    contract.payments.push({ amount, paymentDate, method, notes, ...taxes.fields });
     if (nextDueDate) {
       contract.nextDueDate = nextDueDate;
     }
     await contract.save();
 
-    await logActivity(contract.clientId, "payment_added", `Payment of ₹${amount} recorded on "${contract.projectName}"`, { contractId: contract._id, amount, method });
+    const { gstAmount, gstPercent, gstMode, tdsAmount, tdsPercent, tdsMode } = taxes.fields;
+    const taxNote = [
+      gstAmount ? `GST ${gstPercent}% ${inr(gstAmount)} ${gstMode === "included" ? "included" : "added"}` : "",
+      tdsAmount ? `TDS ${tdsPercent}% ${inr(tdsAmount)} ${tdsMode === "included" ? "deducted" : "added"}` : "",
+      tdsAmount ? `${inr(amount - tdsAmount)} in bank` : "",
+    ].filter(Boolean).join(", ");
+    await logActivity(contract.clientId, "payment_added", `Payment of ${inr(amount)}${taxNote ? ` (${taxNote})` : ""} recorded on "${contract.projectName}"`, { contractId: contract._id, amount, method, ...taxes.fields });
 
     return res.status(201).json({ message: "Payment recorded successfully", contract: decorateContract(contract) });
   } catch (error) {

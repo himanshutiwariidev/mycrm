@@ -1180,6 +1180,13 @@ a.cdx-kv-value:hover {
   text-transform: capitalize;
 }
 
+.cdx-pay-tax {
+  display: block;
+  font-size: 11px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
 .cdx-scroll thead th {
   position: sticky;
   top: 0;

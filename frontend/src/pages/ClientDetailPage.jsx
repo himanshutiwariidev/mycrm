@@ -813,7 +813,14 @@ export default function ClientDetailPage() {
                     <tr key={p._id} className="data-row" onClick={() => { setManageContractId(p._contractId); setManageContractTab("payments"); }} style={{ cursor: "pointer" }}>
                       <td>{fmtDate(p.paymentDate)}</td>
                       <td>{p._contractName}</td>
-                      <td>{fmtINR(p.amount)}</td>
+                      <td>
+                        {fmtINR(p.amount)}
+                        {(p.gstAmount > 0 || p.tdsAmount > 0) && (
+                          <span className="cdx-pay-tax">
+                            {[p.gstAmount > 0 && `GST ${fmtINR(p.gstAmount)}`, p.tdsAmount > 0 && `TDS ${fmtINR(p.tdsAmount)}`].filter(Boolean).join(" · ")}
+                          </span>
+                        )}
+                      </td>
                       <td>{p.method || "—"}</td>
                       <td>{p.notes || "—"}</td>
                     </tr>

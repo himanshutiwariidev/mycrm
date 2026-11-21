@@ -5,6 +5,13 @@
   min-width: 600px;
 }
 
+/* Phones: fit the screen instead of scrolling the whole modal sideways. */
+@media (max-width: 640px) {
+  .contract-detail {
+    min-width: 0;
+  }
+}
+
 .contract-detail-header {
   display: flex;
   justify-content: space-between;
