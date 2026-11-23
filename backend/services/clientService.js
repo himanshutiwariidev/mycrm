@@ -198,7 +198,10 @@ const generateInvoicePdf = async ({ client, contract }) => {
       doc.text(label, totalsX + 16, totalsY + offsetY, { width: totalsWidth - 80 });
       doc.text(formatCurrencyForPdf(value, contract.currency), totalsX + 16, totalsY + offsetY, { width: totalsWidth - 32, align: "right" });
     };
-    totalsRow("Total", contract.projectAmount, 16);
+    // GST not charged on payments received without GST (cash) comes off the
+    // total, so Total − Received = Due still adds up.
+    const gstNotCharged = (contract.payments || []).reduce((sum, p) => sum + (p.gstNotCharged || 0), 0);
+    totalsRow("Total", (contract.projectAmount || 0) - gstNotCharged, 16);
     totalsRow("Received", contract.receivedAmount, 40);
     totalsRow("Due", contract.dueAmount, 64, true);
 

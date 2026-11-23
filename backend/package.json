@@ -15,7 +15,8 @@
     "migrate:clients": "node migrations/migrateClientsCollection.js",
     "migrate:task-progress": "node migrations/backfillTaskProgress.js",
     "migrate:contract-numbers": "node migrations/shortenContractNumbers.js",
-    "migrate:gst-payments": "node migrations/recountGstPayments.js"
+    "migrate:gst-payments": "node migrations/recountGstPayments.js",
+    "migrate:cash-without-gst": "node migrations/cashWithoutGst.js"
   },
   "keywords": [],
   "author": "",

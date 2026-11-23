@@ -21,8 +21,9 @@ export function buildContractPayload(state) {
 
   const { baseAmount, gstEnabled, gstPercent, gstAmount, finalAmount, tdsEnabled, tdsPercent, tdsAmount } =
     computeContractTaxSummary(state.meta);
-  // Received WITH GST → the server splits it (GST included) and, on a contract
-  // without GST, counts only the taxable part (backend/utils/paymentTaxes.js).
+  // Received with GST → the server splits it (GST included); received without
+  // GST on a contract with GST (e.g. cash) → the GST on it isn't charged
+  // (backend/utils/paymentTaxes.js, same maths as computeReceivedSplit).
   const received = computeReceivedSplit(state.meta);
 
   return {
@@ -74,6 +75,7 @@ export function buildContractPayload(state) {
             paymentDate: state.meta.paymentDate || undefined,
             notes: "Recorded at contract creation",
             ...(received.gstPercent > 0 ? { gstEnabled: true, gstPercent: received.gstPercent, gstMode: "included" } : {}),
+            ...(received.gstNotCharged > 0 ? { withoutGst: true } : {}),
           }],
         }
       : {}),
@@ -84,9 +86,10 @@ export function buildContractPayload(state) {
     // listed in the Payments tab. updateContract's findByIdAndUpdate persists
     // these as-is; only contract.save() (used by add/delete payment) recomputes
     // them from the payments ledger, so a later payment change will still
-    // override this value back to the ledger's true total.
+    // override this value back to the ledger's true total. GST not charged on
+    // cash payments (received.counted includes it) still comes off the due.
     ...(!isNewContract
-      ? { receivedAmount: amountReceived, dueAmount: Math.max(finalAmount - amountReceived, 0) }
+      ? { receivedAmount: amountReceived, dueAmount: Math.max(Math.round((finalAmount - received.counted) * 100) / 100, 0) }
       : {}),
   };
 }

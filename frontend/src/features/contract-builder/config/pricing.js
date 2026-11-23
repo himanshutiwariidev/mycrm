@@ -85,20 +85,51 @@ export function computeContractTaxSummary(meta = {}) {
 }
 
 /**
- * The "Amount Received" entered while creating a contract, optionally marked
- * as received WITH GST (the GST is inside the amount — e.g. a cheque against
- * a GST invoice). Counted toward the contract: the whole amount when the
- * contract's value includes GST, otherwise only the taxable part (the GST is
- * recorded separately). Mirrors backend/utils/paymentTaxes.js.
+ * The "Amount Received" entered while creating a contract, received with or
+ * without GST (receivedHasGst). What it takes off the contract — the same
+ * maths as backend/utils/paymentTaxes.js:
+ *   contract with GST,    received with GST    → the whole amount
+ *   contract with GST,    received without GST → amount + GST% on it: it comes
+ *     off the amount before GST, so that GST is never charged (`gstNotCharged`)
+ *     — ₹1,01,000 + 18% GST, ₹6,000 cash → ₹95,000 + GST = ₹1,12,100 left
+ *   contract without GST, received with GST    → only the taxable part
+ *   contract without GST, received without GST → the whole amount
  */
 export function computeReceivedSplit(meta = {}) {
   const entered = Number(meta.amountReceived) || 0;
-  const withGst = !meta.contractId && !!meta.receivedWithGst;
-  const gstPercent = withGst ? Number(meta.receivedGstPercent) || 0 : 0;
+  // Editing: the field is a plain override of what was received. GST not
+  // charged on earlier cash payments still comes off the due.
+  if (meta.contractId) {
+    const gstNotCharged = Number(meta.gstNotChargedTotal) || 0;
+    return { entered, withGst: false, gstPercent: 0, gstAmount: 0, gstNotCharged, taxable: entered, counted: round2(entered + gstNotCharged) };
+  }
+  const contractGst = meta.gstEnabled ? Number(meta.gstPercent) || 0 : 0;
+  const withGst = receivedHasGst(meta);
+  // On a GST contract the GST inside is the contract's own rate.
+  const gstPercent = withGst ? (meta.gstEnabled ? contractGst : Number(meta.receivedGstPercent) || 0) : 0;
   const gstAmount = gstPercent > 0 ? round2((entered * gstPercent) / (100 + gstPercent)) : 0;
   const taxable = round2(entered - gstAmount);
-  const counted = meta.gstEnabled ? entered : taxable;
-  return { entered, withGst, gstPercent, gstAmount, taxable, counted };
+  const gstNotCharged = !withGst && contractGst > 0 ? round2((entered * contractGst) / 100) : 0;
+  const counted = meta.gstEnabled ? round2(entered + gstNotCharged) : taxable;
+  return { entered, withGst, gstPercent, gstAmount, gstNotCharged, taxable, counted };
+}
+
+/**
+ * Was the amount received with GST? The admin's choice when they flipped the
+ * switch; otherwise cash counts as received without GST, and any other method
+ * as with GST on a contract that has GST (without, on one that doesn't).
+ */
+export function receivedHasGst(meta = {}) {
+  if (meta.receivedGst === "with") return true;
+  if (meta.receivedGst === "without") return false;
+  return !!meta.gstEnabled && meta.paymentMethod !== "Cash";
+}
+
+/** The amount to enter so that `counted` comes off the contract (inverse of computeReceivedSplit). */
+export function receivedAmountFor(meta, counted) {
+  if (meta.contractId) return Math.max(counted - (Number(meta.gstNotChargedTotal) || 0), 0);
+  if (meta.gstEnabled) return receivedHasGst(meta) ? counted : counted / (1 + (Number(meta.gstPercent) || 0) / 100);
+  return receivedHasGst(meta) ? counted * (1 + (Number(meta.receivedGstPercent) || 0) / 100) : counted;
 }
 
 const CURRENCY_SYMBOLS = { INR: "₹", USD: "$", EUR: "€" };

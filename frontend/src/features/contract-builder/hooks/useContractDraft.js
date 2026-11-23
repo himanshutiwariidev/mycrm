@@ -35,6 +35,9 @@ function reverseMapContractToState(contract) {
       // before GST support) never had it, so projectAmount doubles as the base.
       contractAmount: contract.preTaxAmount ?? contract.projectAmount ?? "",
       amountReceived: contract.receivedAmount ?? "",
+      // GST not charged on payments received without GST (cash) — it comes
+      // off the due on top of what was received (config/pricing.js).
+      gstNotChargedTotal: (contract.payments || []).reduce((sum, p) => sum + (p.gstNotCharged || 0), 0),
       dueDate: keepDate(contract.nextDueDate),
       // Falls back to the first payment's method for contracts saved before
       // paymentMethod became its own top-level field.

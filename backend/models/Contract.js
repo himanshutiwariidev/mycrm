@@ -184,7 +184,7 @@ const ContractSchema = new mongoose.Schema(
         paymentDate: { type: Date, default: Date.now },
         method: {
           type: String,
-          // "Bank Transfer", "Card", and "Razorpay" are kept in the enum only
+          // "Bank Transfer", "Card", "Razorpay" and "3 Parts" are kept in the enum only
           // so older payment records already saved with those values still pass
           // validation — the UI no longer offers them.
           enum: ["NEFT", "RTGS", "Bank Draft", "UPI", "Cash", "Cheque", "Card Swap", "3 Parts", "P Account", "Other", "Bank Transfer", "Card", "Razorpay"],
@@ -206,6 +206,9 @@ const ContractSchema = new mongoose.Schema(
         tdsPercent: { type: Number, min: 0, max: 100 },
         tdsAmount: { type: Number, min: 0 },
         tdsMode: { type: String, enum: ["excluded", "included"] },
+        // Received WITHOUT GST (e.g. cash) on a contract whose value includes
+        // GST: the GST on this part isn't charged, and `amount` includes it.
+        gstNotCharged: { type: Number, min: 0 },
       },
     ],
     receivedAmount: {
@@ -248,11 +251,15 @@ ContractSchema.pre("save", function () {
   // weekly/monthly scope) so they're computed on read via utils/deliverableStats.js
   // instead of being persisted here.
 
-  this.receivedAmount = this.payments.reduce(
-    (sum, payment) => sum + (payment.amount || 0),
-    0
-  );
-  this.dueAmount = (this.projectAmount || 0) - this.receivedAmount;
+  // `amount` is what each payment takes off the due. A payment received
+  // without GST on a GST contract also takes off the GST that's no longer
+  // charged (`gstNotCharged`) — that part was never received, so it's left
+  // out of receivedAmount: ₹1,19,180 contract, ₹6,000 cash → received
+  // ₹6,000, due ₹1,12,100.
+  const counted = this.payments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
+  const notCharged = this.payments.reduce((sum, payment) => sum + (payment.gstNotCharged || 0), 0);
+  this.receivedAmount = Math.round((counted - notCharged) * 100) / 100;
+  this.dueAmount = Math.round(((this.projectAmount || 0) - counted) * 100) / 100;
   // Nothing left to collect → no next due date (otherwise a fully paid
   // contract could still show up as "Payment Overdue").
   if (this.dueAmount <= 0 && this.nextDueDate) this.nextDueDate = undefined;

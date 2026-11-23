@@ -1,6 +1,6 @@
 const bcrypt = require("bcryptjs");
 const { createWithContractNumber } = require("../utils/contractNumber");
-const { buildPayment, describePayment, sensibleDate } = require("../utils/paymentTaxes");
+const { buildPayment, describePayment, collectedOf, sensibleDate } = require("../utils/paymentTaxes");
 const mongoose = require("mongoose");
 const multer = require("multer");
 const path = require("path");
@@ -637,7 +637,7 @@ exports.createContract = async (req, res) => {
     // the same way as a later payment (utils/paymentTaxes.js).
     const initialPayments = [];
     for (const p of Array.isArray(payments) ? payments : []) {
-      const built = buildPayment(p || {}, { contractHasGst: !!gstEnabled });
+      const built = buildPayment(p || {}, { contractHasGst: !!gstEnabled, contractGstPercent: gstPercent });
       if (built.error) return res.status(400).json({ message: `Amount received: ${built.error}` });
       initialPayments.push(built.payment);
     }
@@ -742,7 +742,7 @@ const CLIENT_ENUMS = {
   activeStatus: ["active", "inactive"],
 };
 
-const PAYMENT_METHODS = ["NEFT", "RTGS", "Bank Draft", "UPI", "Cash", "Cheque", "Card Swap", "3 Parts", "P Account", "Other"];
+const PAYMENT_METHODS = ["NEFT", "RTGS", "Bank Draft", "UPI", "Cash", "Cheque", "Card Swap", "P Account", "Other"];
 
 const normalizeImportHeader = (value) =>
   String(value || "")
@@ -1348,7 +1348,7 @@ exports.addPayment = async (req, res) => {
     }
 
     // GST / TDS split; on a contract without GST only the taxable value counts (utils/paymentTaxes.js).
-    const built = buildPayment(req.body, { contractHasGst: !!contract.gstEnabled });
+    const built = buildPayment(req.body, { contractHasGst: !!contract.gstEnabled, contractGstPercent: contract.gstPercent });
     if (built.error) return res.status(400).json({ message: built.error });
 
     contract.payments.push(built.payment);
@@ -1630,13 +1630,13 @@ exports.getDashboardStats = async (req, res) => {
         if (!payment.paymentDate) return;
         const paidOn = new Date(payment.paymentDate);
         if (paidOn >= periodStart && paidOn <= periodEnd) {
-          collectedThisMonth += payment.amount || 0;
+          collectedThisMonth += collectedOf(payment);
 
           if (contract.renewedFromContractId) {
-            renewalCaseRevenue += payment.amount || 0;
+            renewalCaseRevenue += collectedOf(payment);
             renewalCaseContractIds.add(String(contract._id));
           } else {
-            newCaseRevenue += payment.amount || 0;
+            newCaseRevenue += collectedOf(payment);
             newCaseContractIds.add(String(contract._id));
           }
 
@@ -1646,8 +1646,8 @@ exports.getDashboardStats = async (req, res) => {
           // digital/bank-settled money, so it's bucketed as "Bank".
           const bucket = payment.method === "Cash" ? "Cash" : "Bank";
           if (!paymentModeFilter || paymentModeFilter === bucket) {
-            if (bucket === "Cash") cashCollection += payment.amount || 0;
-            else bankCollection += payment.amount || 0;
+            if (bucket === "Cash") cashCollection += collectedOf(payment);
+            else bankCollection += collectedOf(payment);
           }
         }
       });
@@ -1742,7 +1742,7 @@ exports.getDashboardStats = async (req, res) => {
     const collectedBetween = (from, to) => allContracts.reduce((sum, contract) => sum + contract.payments.reduce((s, payment) => {
       if (!payment.paymentDate) return s;
       const paidOn = new Date(payment.paymentDate);
-      return paidOn >= from && paidOn <= to ? s + (payment.amount || 0) : s;
+      return paidOn >= from && paidOn <= to ? s + collectedOf(payment) : s;
     }, 0), 0);
     const expensesBetween = (from, to) => allExpenses.reduce((sum, expense) => {
       if (!expense.expenseDate) return sum;
@@ -1777,7 +1777,7 @@ exports.getDashboardStats = async (req, res) => {
         const paidOn = new Date(payment.paymentDate);
         if (paidOn >= periodStart && paidOn <= periodEnd) {
           const pb = periodBucketFor(paidOn);
-          if (pb) pb.collected += payment.amount || 0;
+          if (pb) pb.collected += collectedOf(payment);
         }
       });
     });
@@ -1818,8 +1818,9 @@ exports.getDashboardStats = async (req, res) => {
     const balanceDue = allContracts
       .filter((contract) => contract.nextDueDate)
       .map((contract) => {
-        const totalPaid = contract.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
-        const balance = Math.max(Math.round(((contract.projectAmount || 0) - totalPaid) * 100) / 100, 0);
+        const counted = contract.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+        const totalPaid = contract.payments.reduce((sum, p) => sum + collectedOf(p), 0);
+        const balance = Math.max(Math.round(((contract.projectAmount || 0) - counted) * 100) / 100, 0);
         const dueDay = new Date(contract.nextDueDate.getFullYear(), contract.nextDueDate.getMonth(), contract.nextDueDate.getDate());
         return { contract, totalPaid, balance, dueDay };
       })
@@ -1922,7 +1923,7 @@ exports.getDashboardStats = async (req, res) => {
       contract.payments.forEach((payment) => {
         if (!payment.paymentDate) return;
         const bucket = bucketFor(new Date(payment.paymentDate));
-        if (bucket) bucket.collected += payment.amount || 0;
+        if (bucket) bucket.collected += collectedOf(payment);
       });
       const createdBucket = bucketFor(new Date(contract.createdAt));
       if (createdBucket) createdBucket.outstanding += contract.dueAmount || 0;
@@ -1965,7 +1966,7 @@ exports.getDashboardStats = async (req, res) => {
         if (!payment.paymentDate) return;
         const d = new Date(payment.paymentDate);
         if (d.getFullYear() === priorYearMonthYear && d.getMonth() === priorYearMonthMonth) {
-          priorYearMonthCollected += payment.amount || 0;
+          priorYearMonthCollected += collectedOf(payment);
         }
       });
     });
@@ -1998,7 +1999,7 @@ exports.getDashboardStats = async (req, res) => {
       contract.payments.forEach((payment) => {
         if (!payment.paymentDate) return;
         const bucket = dayBucketFor(new Date(payment.paymentDate));
-        if (bucket) bucket.collected += payment.amount || 0;
+        if (bucket) bucket.collected += collectedOf(payment);
       });
     });
 
@@ -2011,7 +2012,7 @@ exports.getDashboardStats = async (req, res) => {
       contract.payments.forEach((payment) => {
         if (!payment.paymentDate) return;
         const year = new Date(payment.paymentDate).getFullYear();
-        yearTotals.set(year, (yearTotals.get(year) || 0) + (payment.amount || 0));
+        yearTotals.set(year, (yearTotals.get(year) || 0) + collectedOf(payment));
       });
     });
     const yearlyBreakup = Array.from(yearTotals.entries())

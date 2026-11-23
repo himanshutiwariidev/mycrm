@@ -5,10 +5,10 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { cn } from "@/lib/utils";
 import DateField from "../engine/DateField";
 import { useContractWizard } from "../context/useContractWizard";
-import { formatCurrency, computeContractTaxSummary, computeReceivedSplit } from "../config/pricing";
+import { formatCurrency, computeContractTaxSummary, computeReceivedSplit, receivedAmountFor } from "../config/pricing";
 import { Field, MoneyInput, QuickChips, SectionCard, SECTION_IDS } from "./ui";
 
-const PAYMENT_METHODS = ["NEFT", "RTGS", "Bank Draft", "UPI", "Cash", "Cheque", "Card Swap", "3 Parts", "P Account", "Other"];
+const PAYMENT_METHODS = ["NEFT", "RTGS", "Bank Draft", "UPI", "Cash", "Cheque", "Card Swap", "P Account", "Other"];
 
 /**
  * GST / TDS: the switch sits on the label line; the % box only appears when
@@ -70,22 +70,23 @@ export default function ValueSection({ errors = {}, done }) {
   const isEdit = !!m.contractId;
   const setField = (field, value) => dispatch({ type: ACTIONS.SET_META_FIELD, payload: { field, value } });
 
-  const { baseAmount, gstEnabled, gstAmount, finalAmount, tdsAmount } = computeContractTaxSummary(m);
-  // What counts toward the contract: a received-WITH-GST amount on a contract
-  // written without GST counts without its GST part (config/pricing.js).
+  const { baseAmount, gstEnabled, gstPercent, gstAmount, finalAmount, tdsAmount } = computeContractTaxSummary(m);
+  // What the amount received takes off the contract (config/pricing.js):
+  // received with GST on a contract without GST → without its GST part;
+  // received without GST (cash) on a contract with GST → plus the GST that's
+  // no longer charged on it (₹1,01,000 + GST, ₹6,000 cash → ₹95,000 + GST left).
   const received = computeReceivedSplit(m);
   const balance = Math.max(finalAmount - received.counted, 0);
   const fmt = (v) => formatCurrency(v, m.currency);
   const fmtWhole = (v) => formatCurrency(Math.round(Number(v) || 0), m.currency);
-  // The 50% / Full chips fill in the amount that has to be received — incl. the GST when it came with GST.
-  const grossUp = received.withGst && !gstEnabled ? 1 + received.gstPercent / 100 : 1;
-  const chipValue = (share) => String(Math.round(finalAmount * share * grossUp));
+  // The 50% / Full chips fill in the amount to enter for that share of the contract.
+  const chipValue = (share) => String(Math.round(receivedAmountFor(m, finalAmount * share)));
   const receivedPreset = received.entered === 0 ? "none" : chipValue(0.5) === String(Math.round(received.entered)) ? "half" : chipValue(1) === String(Math.round(received.entered)) ? "full" : null;
-  const toggleReceivedGst = (checked) => {
-    setField("receivedWithGst", !!checked);
-    // Start from the contract's own GST rate when it has one.
-    if (checked && gstEnabled && Number(m.gstPercent) > 0) setField("receivedGstPercent", String(m.gstPercent));
-  };
+  const toggleReceivedGst = (checked) => setField("receivedGst", checked ? "with" : "without");
+  // A contract amount before GST, for "₹95,000 + GST".
+  const beforeGst = (v) => Math.round((v / (1 + gstPercent / 100)) * 100) / 100;
+  // Older contracts can still carry a method that's no longer offered (e.g. "3 Parts").
+  const methods = !m.paymentMethod || PAYMENT_METHODS.includes(m.paymentMethod) ? PAYMENT_METHODS : [...PAYMENT_METHODS, m.paymentMethod];
 
   return (
     <SectionCard id={SECTION_IDS.value} Icon={IndianRupee} title="Value & payment" subtitle="What the client pays (GST is added on top) and what's been received" done={done}>
@@ -125,19 +126,19 @@ export default function ValueSection({ errors = {}, done }) {
           info={isEdit ? "Overrides the received total — individual payments stay in the Payments tab." : undefined}
           error={!isEdit ? errors.amountReceived?.[0] : null}
           labelRight={!isEdit && (
-            <span className="flex shrink-0 items-center gap-1" title="Received with GST — switch on when this amount already includes GST (e.g. paid against a GST bill)">
+            <span className="flex shrink-0 items-center gap-1" title="On: this amount includes GST (e.g. cheque / UPI against a GST bill). Off: received without GST (e.g. cash) — on a contract with GST it comes off the amount before GST.">
               <span className={cn("text-[11.5px]", received.withGst ? "font-medium text-primary" : "text-muted-foreground")}>GST</span>
               <Switch
                 id="cb-received-gst"
                 data-field="receivedWithGst"
                 aria-label="Amount received with GST"
-                checked={!!m.receivedWithGst}
+                checked={received.withGst}
                 onCheckedChange={toggleReceivedGst}
                 className="scale-90"
               />
             </span>
           )}
-          hint={(finalAmount > 0 || received.gstAmount > 0) && (
+          hint={(finalAmount > 0 || received.gstAmount > 0 || received.gstNotCharged > 0) && (
             <div className="space-y-1">
               {finalAmount > 0 && (
                 <QuickChips items={[
@@ -152,10 +153,15 @@ export default function ValueSection({ errors = {}, done }) {
                   {!gstEnabled && <> · <span className="font-medium text-foreground">{fmt(received.counted)}</span> counts toward the contract</>}
                 </p>
               )}
+              {!isEdit && received.gstNotCharged > 0 && (
+                <p data-field="receivedNoGst" className="leading-snug">
+                  Without GST · {fmt(received.gstNotCharged)} GST not charged on it · <span className="font-medium text-foreground">{fmt(received.counted)}</span> comes off
+                </p>
+              )}
             </div>
           )}
         >
-          {received.withGst ? (
+          {received.withGst && !gstEnabled ? (
             <div className="flex gap-1.5">
               <div className="min-w-0 flex-1">
                 <MoneyInput id="cb-received" field="amountReceived" value={m.amountReceived} onChange={(e) => setField("amountReceived", e.target.value)} />
@@ -182,17 +188,24 @@ export default function ValueSection({ errors = {}, done }) {
           </Field>
         )}
         <Field label="Payment Method" className={isEdit ? "xl:col-span-2" : undefined}>
-          <Select value={m.paymentMethod} onValueChange={(value) => setField("paymentMethod", value)}>
+          <Select
+            value={m.paymentMethod}
+            onValueChange={(value) => {
+              setField("paymentMethod", value);
+              // Back to "decided by the method": cash → without GST.
+              if (!isEdit) setField("receivedGst", null);
+            }}
+          >
             <SelectTrigger><SelectValue placeholder="Select method" /></SelectTrigger>
             <SelectContent>
-              {PAYMENT_METHODS.map((pm) => <SelectItem key={pm} value={pm}>{pm}</SelectItem>)}
+              {methods.map((pm) => <SelectItem key={pm} value={pm}>{pm}</SelectItem>)}
             </SelectContent>
           </Select>
         </Field>
         <Field label="Balance Due Date">
           <DateField value={m.dueDate} onChange={(value) => setField("dueDate", value)} placeholder="Due date" />
         </Field>
-        <Field label="Balance">
+        <Field label="Balance" hint={gstEnabled && gstPercent > 0 && balance > 0 ? <span data-field="balanceBeforeGst">{fmt(beforeGst(balance))} + GST</span> : undefined}>
           <div
             data-field="balance"
             className={cn(

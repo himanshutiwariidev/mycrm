@@ -46,8 +46,9 @@ export default function ContractSummary({ client, checklist = [], onJump, onGene
   const fmt = (v) => formatCurrency(v, currency);
   const isEdit = !!m.contractId;
   const { baseAmount, gstEnabled, gstPercent, gstAmount, finalAmount, tdsEnabled, tdsPercent, tdsAmount } = computeContractTaxSummary(m);
-  // Counted toward the contract (on a contract without GST, a received-with-GST amount counts without its GST).
-  const { counted: received, gstAmount: receivedGst } = computeReceivedSplit(m);
+  // What the amount received takes off the contract (config/pricing.js): without its GST on a
+  // contract without GST; plus the GST not charged on it when received without GST (cash).
+  const { entered: receivedEntered, counted: received, gstAmount: receivedGst, gstNotCharged } = computeReceivedSplit(m);
   const balance = Math.max(finalAmount - received, 0);
   const { discountTotal, gstTotal, grandTotal } = state.pricingSummary;
   const enabledCategories = state.selectedServices.filter((c) => c.enabled);
@@ -75,8 +76,18 @@ export default function ContractSummary({ client, checklist = [], onJump, onGene
         <div className="space-y-1.5">
           <Row label="Contract amount" value={fmt(baseAmount)} />
           {gstEnabled && <Row label={`GST (${gstPercent}%)`} value={`+${fmt(gstAmount)}`} />}
-          <Row label={receivedGst > 0 && !gstEnabled ? "Received (excl. GST)" : "Received"} value={fmt(received)} tone={received ? "text-emerald-600 dark:text-emerald-400" : undefined} />
+          {gstNotCharged > 0 ? (
+            <>
+              <Row label={isEdit ? "Received" : "Received (no GST)"} value={fmt(receivedEntered)} tone={receivedEntered ? "text-emerald-600 dark:text-emerald-400" : undefined} />
+              <Row label="GST not charged on it" value={fmt(gstNotCharged)} muted />
+            </>
+          ) : (
+            <Row label={receivedGst > 0 && !gstEnabled ? "Received (excl. GST)" : "Received"} value={fmt(received)} tone={received ? "text-emerald-600 dark:text-emerald-400" : undefined} />
+          )}
           <Row label="Balance" value={fmt(balance)} strong tone={balance ? "text-amber-600 dark:text-amber-400" : undefined} />
+          {gstEnabled && gstPercent > 0 && balance > 0 && gstNotCharged > 0 && (
+            <Row label="Balance before GST" value={`${fmt(Math.round((balance / (1 + gstPercent / 100)) * 100) / 100)} + GST`} muted />
+          )}
           {tdsEnabled && <Row label={`TDS (${tdsPercent}%) · records only`} value={fmt(tdsAmount)} muted />}
           {(period || m.timeline) && (
             <div className="mt-2 rounded-md bg-muted/60 px-2.5 py-1.5 text-xs text-muted-foreground">

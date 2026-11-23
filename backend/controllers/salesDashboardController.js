@@ -3,6 +3,7 @@ const Contract = require("../models/Contract");
 const Task = require("../models/Task");
 const { computeDeliverableStats } = require("../utils/deliverableStats");
 const { SERVICE_CATEGORY_LABELS } = require("../utils/pricingHelpers");
+const { collectedOf } = require("../utils/paymentTaxes");
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const RENEWAL_SOON_DAYS = 30;
@@ -80,8 +81,10 @@ exports.getSalesDashboard = async (req, res) => {
     // ── Balance Due ───────────────────────────────────────────────────────
     const balanceDue = liveContracts
       .map((c) => {
-        const received = (c.payments || []).reduce((sum, p) => sum + (p.amount || 0), 0);
-        const balance = Math.max(round2((c.projectAmount || 0) - received), 0);
+        // Balance off what each payment counts; received = money actually collected.
+        const counted = (c.payments || []).reduce((sum, p) => sum + (p.amount || 0), 0);
+        const received = (c.payments || []).reduce((sum, p) => sum + collectedOf(p), 0);
+        const balance = Math.max(round2((c.projectAmount || 0) - counted), 0);
         return { c, received, balance };
       })
       .filter(({ balance }) => balance > 0)
