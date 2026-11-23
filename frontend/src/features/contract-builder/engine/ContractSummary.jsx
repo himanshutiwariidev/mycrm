@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { useContractWizard } from "../context/useContractWizard";
 import { getCategoryMeta } from "../config/serviceCategories";
 import { getLeafConfig } from "../utils/configLookup";
-import { computeLeafFinalPrice, formatCurrency, computeContractTaxSummary } from "../config/pricing";
+import { computeLeafFinalPrice, formatCurrency, computeContractTaxSummary, computeReceivedSplit } from "../config/pricing";
 import { groupSharedSelections, getSharingLabel } from "../utils/contentSharing";
 import { packageTypeLabel } from "../config/packageTypes";
 import PackageStars from "@/components/PackageStars";
@@ -46,7 +46,8 @@ export default function ContractSummary({ client, checklist = [], onJump, onGene
   const fmt = (v) => formatCurrency(v, currency);
   const isEdit = !!m.contractId;
   const { baseAmount, gstEnabled, gstPercent, gstAmount, finalAmount, tdsEnabled, tdsPercent, tdsAmount } = computeContractTaxSummary(m);
-  const received = Number(m.amountReceived) || 0;
+  // Counted toward the contract (on a contract without GST, a received-with-GST amount counts without its GST).
+  const { counted: received, gstAmount: receivedGst } = computeReceivedSplit(m);
   const balance = Math.max(finalAmount - received, 0);
   const { discountTotal, gstTotal, grandTotal } = state.pricingSummary;
   const enabledCategories = state.selectedServices.filter((c) => c.enabled);
@@ -74,7 +75,7 @@ export default function ContractSummary({ client, checklist = [], onJump, onGene
         <div className="space-y-1.5">
           <Row label="Contract amount" value={fmt(baseAmount)} />
           {gstEnabled && <Row label={`GST (${gstPercent}%)`} value={`+${fmt(gstAmount)}`} />}
-          <Row label="Received" value={fmt(received)} tone={received ? "text-emerald-600 dark:text-emerald-400" : undefined} />
+          <Row label={receivedGst > 0 && !gstEnabled ? "Received (excl. GST)" : "Received"} value={fmt(received)} tone={received ? "text-emerald-600 dark:text-emerald-400" : undefined} />
           <Row label="Balance" value={fmt(balance)} strong tone={balance ? "text-amber-600 dark:text-amber-400" : undefined} />
           {tdsEnabled && <Row label={`TDS (${tdsPercent}%) · records only`} value={fmt(tdsAmount)} muted />}
           {(period || m.timeline) && (

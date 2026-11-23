@@ -329,6 +329,23 @@
   color: #b45309;
 }
 
+.summary-sub {
+  font-size: 11px;
+  color: #9ca3af;
+  max-width: 190px;
+}
+
+.tax-breakup-note {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: #b45309;
+}
+
+.pay-counted {
+  font-weight: 600;
+}
+
 .pay-sub {
   display: block;
   font-size: 11px;

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { fieldToZodSchema } from "./fieldDefinitions";
 import { COMMON_FIELDS } from "./commonFields";
 import { getCategoryMeta } from "./serviceCategories";
+import { computeContractTaxSummary, computeReceivedSplit } from "./pricing";
 
 export const step1Schema = z.object({
   clientId: z.string().min(1, "Client is required"),
@@ -18,9 +19,16 @@ export const step1Schema = z.object({
   gstPercent: z.coerce.number().min(0, "GST % cannot be negative").max(100, "GST % cannot exceed 100").optional(),
   tdsEnabled: z.boolean().optional(),
   tdsPercent: z.coerce.number().min(0, "TDS % cannot be negative").max(100, "TDS % cannot exceed 100").optional(),
+  receivedWithGst: z.boolean().optional(),
+  receivedGstPercent: z.coerce.number().min(0, "GST % cannot be negative").max(100, "GST % cannot exceed 100").optional(),
 }).refine(
-  (data) => (Number(data.amountReceived) || 0) <= data.contractAmount,
+  // What counts toward the contract (without the GST part on a contract
+  // written without GST) can't be more than the final amount (+₹1 rounding).
+  (data) => computeReceivedSplit(data).counted <= computeContractTaxSummary(data).finalAmount + 1,
   { message: "Amount received cannot exceed the contract amount", path: ["amountReceived"] }
+).refine(
+  (data) => !data.receivedWithGst || Number(data.receivedGstPercent) > 0,
+  { message: "Enter the GST % included in the amount received", path: ["amountReceived"] }
 ).refine(
   (data) => !data.gstEnabled || Number(data.gstPercent) > 0,
   { message: "Enter a GST percentage", path: ["gstPercent"] }

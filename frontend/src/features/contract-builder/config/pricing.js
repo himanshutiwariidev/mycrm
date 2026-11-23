@@ -84,6 +84,23 @@ export function computeContractTaxSummary(meta = {}) {
   return { baseAmount, gstEnabled, gstPercent, gstAmount, finalAmount, tdsEnabled, tdsPercent, tdsAmount };
 }
 
+/**
+ * The "Amount Received" entered while creating a contract, optionally marked
+ * as received WITH GST (the GST is inside the amount — e.g. a cheque against
+ * a GST invoice). Counted toward the contract: the whole amount when the
+ * contract's value includes GST, otherwise only the taxable part (the GST is
+ * recorded separately). Mirrors backend/utils/paymentTaxes.js.
+ */
+export function computeReceivedSplit(meta = {}) {
+  const entered = Number(meta.amountReceived) || 0;
+  const withGst = !meta.contractId && !!meta.receivedWithGst;
+  const gstPercent = withGst ? Number(meta.receivedGstPercent) || 0 : 0;
+  const gstAmount = gstPercent > 0 ? round2((entered * gstPercent) / (100 + gstPercent)) : 0;
+  const taxable = round2(entered - gstAmount);
+  const counted = meta.gstEnabled ? entered : taxable;
+  return { entered, withGst, gstPercent, gstAmount, taxable, counted };
+}
+
 const CURRENCY_SYMBOLS = { INR: "₹", USD: "$", EUR: "€" };
 
 export function formatCurrency(amount, currency = "INR") {

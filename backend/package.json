@@ -14,7 +14,8 @@
     "seed:demo": "node seedDemo.js",
     "migrate:clients": "node migrations/migrateClientsCollection.js",
     "migrate:task-progress": "node migrations/backfillTaskProgress.js",
-    "migrate:contract-numbers": "node migrations/shortenContractNumbers.js"
+    "migrate:contract-numbers": "node migrations/shortenContractNumbers.js",
+    "migrate:gst-payments": "node migrations/recountGstPayments.js"
   },
   "keywords": [],
   "author": "",

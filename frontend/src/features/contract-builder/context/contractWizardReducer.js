@@ -56,6 +56,9 @@ export function createInitialState({ clientId }) {
       currency: "INR",
       contractAmount: "",
       amountReceived: "",
+      // Was the amount received WITH GST (GST inside it)? See computeReceivedSplit in config/pricing.js.
+      receivedWithGst: false,
+      receivedGstPercent: "18",
       // Defaults to today, but must stay editable — a backdated contract's
       // initial "Amount Received" needs to be recorded against the date it
       // was actually received (e.g. January), not the date the contract was

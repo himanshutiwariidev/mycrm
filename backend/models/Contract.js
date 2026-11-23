@@ -191,16 +191,18 @@ const ContractSchema = new mongoose.Schema(
           default: "Other",
         },
         notes: { type: String, trim: true },
-        // Optional tax split, worked out on the server (clientController
-        // paymentTaxes). `amount` is always what counts against the due; the
-        // bank received amount − tdsAmount. The modes say how the entered
-        // amount related to each tax: "excluded" = the tax was added on top,
-        // "included" = it was already inside the amount. TDS is on the taxable
-        // value. (Older records have no mode — their GST was inside `amount`.)
+        // Optional tax split, worked out on the server (utils/paymentTaxes.js).
+        // `amount` is always what counts against the due; `bankAmount` is what
+        // actually reached the bank. The modes say how the entered amount
+        // related to each tax: "excluded" = added on top, "included" = already
+        // inside. TDS is on the taxable value and counts as received. GST only
+        // counts toward a contract whose own value includes GST (gstCounted).
         taxableAmount: { type: Number, min: 0 },
+        bankAmount: { type: Number, min: 0 },
         gstPercent: { type: Number, min: 0, max: 100 },
         gstAmount: { type: Number, min: 0 },
         gstMode: { type: String, enum: ["excluded", "included"] },
+        gstCounted: { type: Boolean },
         tdsPercent: { type: Number, min: 0, max: 100 },
         tdsAmount: { type: Number, min: 0 },
         tdsMode: { type: String, enum: ["excluded", "included"] },

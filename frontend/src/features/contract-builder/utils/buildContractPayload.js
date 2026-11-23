@@ -1,7 +1,7 @@
 import { generateProjectDescription } from "./generateProjectDescription";
 import { generateProjectScope } from "./generateProjectScope";
 import { flattenDeliverables } from "./flattenDeliverables";
-import { computeContractTaxSummary } from "../config/pricing";
+import { computeContractTaxSummary, computeReceivedSplit } from "../config/pricing";
 
 /**
  * Wizard state -> legacy-compatible backend payload. projectDescription /
@@ -21,6 +21,9 @@ export function buildContractPayload(state) {
 
   const { baseAmount, gstEnabled, gstPercent, gstAmount, finalAmount, tdsEnabled, tdsPercent, tdsAmount } =
     computeContractTaxSummary(state.meta);
+  // Received WITH GST → the server splits it (GST included) and, on a contract
+  // without GST, counts only the taxable part (backend/utils/paymentTaxes.js).
+  const received = computeReceivedSplit(state.meta);
 
   return {
     clientId: state.meta.clientId,
@@ -64,7 +67,15 @@ export function buildContractPayload(state) {
     // received (e.g. January), not the month the contract was entered into
     // the system — otherwise Payment Overview would misattribute it.
     ...(isNewContract && amountReceived > 0
-      ? { payments: [{ amount: amountReceived, method: state.meta.paymentMethod || "Other", paymentDate: state.meta.paymentDate || undefined, notes: "Recorded at contract creation" }] }
+      ? {
+          payments: [{
+            amount: amountReceived,
+            method: state.meta.paymentMethod || "Other",
+            paymentDate: state.meta.paymentDate || undefined,
+            notes: "Recorded at contract creation",
+            ...(received.gstPercent > 0 ? { gstEnabled: true, gstPercent: received.gstPercent, gstMode: "included" } : {}),
+          }],
+        }
       : {}),
     // Editing an existing contract's Amount Received is a direct, free-form
     // override of the stored total — deliberately NOT a new payment record,

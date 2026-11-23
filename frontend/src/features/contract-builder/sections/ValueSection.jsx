@@ -5,7 +5,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { cn } from "@/lib/utils";
 import DateField from "../engine/DateField";
 import { useContractWizard } from "../context/useContractWizard";
-import { formatCurrency, computeContractTaxSummary } from "../config/pricing";
+import { formatCurrency, computeContractTaxSummary, computeReceivedSplit } from "../config/pricing";
 import { Field, MoneyInput, QuickChips, SectionCard, SECTION_IDS } from "./ui";
 
 const PAYMENT_METHODS = ["NEFT", "RTGS", "Bank Draft", "UPI", "Cash", "Cheque", "Card Swap", "3 Parts", "P Account", "Other"];
@@ -70,12 +70,22 @@ export default function ValueSection({ errors = {}, done }) {
   const isEdit = !!m.contractId;
   const setField = (field, value) => dispatch({ type: ACTIONS.SET_META_FIELD, payload: { field, value } });
 
-  const amountReceived = Number(m.amountReceived) || 0;
-  const { baseAmount, gstAmount, finalAmount, tdsAmount } = computeContractTaxSummary(m);
-  const balance = Math.max(finalAmount - amountReceived, 0);
+  const { baseAmount, gstEnabled, gstAmount, finalAmount, tdsAmount } = computeContractTaxSummary(m);
+  // What counts toward the contract: a received-WITH-GST amount on a contract
+  // written without GST counts without its GST part (config/pricing.js).
+  const received = computeReceivedSplit(m);
+  const balance = Math.max(finalAmount - received.counted, 0);
   const fmt = (v) => formatCurrency(v, m.currency);
   const fmtWhole = (v) => formatCurrency(Math.round(Number(v) || 0), m.currency);
-  const receivedPreset = amountReceived === 0 ? "none" : Math.round(finalAmount / 2) === amountReceived ? "half" : Math.round(finalAmount) === amountReceived ? "full" : null;
+  // The 50% / Full chips fill in the amount that has to be received — incl. the GST when it came with GST.
+  const grossUp = received.withGst && !gstEnabled ? 1 + received.gstPercent / 100 : 1;
+  const chipValue = (share) => String(Math.round(finalAmount * share * grossUp));
+  const receivedPreset = received.entered === 0 ? "none" : chipValue(0.5) === String(Math.round(received.entered)) ? "half" : chipValue(1) === String(Math.round(received.entered)) ? "full" : null;
+  const toggleReceivedGst = (checked) => {
+    setField("receivedWithGst", !!checked);
+    // Start from the contract's own GST rate when it has one.
+    if (checked && gstEnabled && Number(m.gstPercent) > 0) setField("receivedGstPercent", String(m.gstPercent));
+  };
 
   return (
     <SectionCard id={SECTION_IDS.value} Icon={IndianRupee} title="Value & payment" subtitle="What the client pays (GST is added on top) and what's been received" done={done}>
@@ -110,18 +120,61 @@ export default function ValueSection({ errors = {}, done }) {
         </div>
 
         <Field
-          label="Amount Received" htmlFor="cb-received"
+          // Shorter while the GST switch shares the label line.
+          label={isEdit ? "Amount Received" : "Received"} htmlFor="cb-received"
           info={isEdit ? "Overrides the received total — individual payments stay in the Payments tab." : undefined}
           error={!isEdit ? errors.amountReceived?.[0] : null}
-          hint={finalAmount > 0 && (
-            <QuickChips items={[
-              { label: "None", active: receivedPreset === "none", onClick: () => setField("amountReceived", "") },
-              { label: "50%", active: receivedPreset === "half", onClick: () => setField("amountReceived", String(Math.round(finalAmount / 2))) },
-              { label: "Full", active: receivedPreset === "full", onClick: () => setField("amountReceived", String(Math.round(finalAmount))) },
-            ]} />
+          labelRight={!isEdit && (
+            <span className="flex shrink-0 items-center gap-1" title="Received with GST — switch on when this amount already includes GST (e.g. paid against a GST bill)">
+              <span className={cn("text-[11.5px]", received.withGst ? "font-medium text-primary" : "text-muted-foreground")}>GST</span>
+              <Switch
+                id="cb-received-gst"
+                data-field="receivedWithGst"
+                aria-label="Amount received with GST"
+                checked={!!m.receivedWithGst}
+                onCheckedChange={toggleReceivedGst}
+                className="scale-90"
+              />
+            </span>
+          )}
+          hint={(finalAmount > 0 || received.gstAmount > 0) && (
+            <div className="space-y-1">
+              {finalAmount > 0 && (
+                <QuickChips items={[
+                  { label: "None", active: receivedPreset === "none", onClick: () => setField("amountReceived", "") },
+                  { label: "50%", active: receivedPreset === "half", onClick: () => setField("amountReceived", chipValue(0.5)) },
+                  { label: "Full", active: receivedPreset === "full", onClick: () => setField("amountReceived", chipValue(1)) },
+                ]} />
+              )}
+              {received.gstAmount > 0 && (
+                <p data-field="receivedSplit" className="leading-snug">
+                  {fmt(received.taxable)} + {fmt(received.gstAmount)} GST
+                  {!gstEnabled && <> · <span className="font-medium text-foreground">{fmt(received.counted)}</span> counts toward the contract</>}
+                </p>
+              )}
+            </div>
           )}
         >
-          <MoneyInput id="cb-received" field="amountReceived" value={m.amountReceived} onChange={(e) => setField("amountReceived", e.target.value)} />
+          {received.withGst ? (
+            <div className="flex gap-1.5">
+              <div className="min-w-0 flex-1">
+                <MoneyInput id="cb-received" field="amountReceived" value={m.amountReceived} onChange={(e) => setField("amountReceived", e.target.value)} />
+              </div>
+              <div className="flex h-10 w-[76px] shrink-0 items-center gap-1 rounded-md border border-input bg-background px-2.5 shadow-xs focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30">
+                <input
+                  type="number" min="0" max="100" inputMode="decimal"
+                  data-field="receivedGstPercent"
+                  aria-label="GST % included in the amount received"
+                  value={m.receivedGstPercent}
+                  onChange={(e) => setField("receivedGstPercent", e.target.value)}
+                  className="w-full min-w-0 bg-transparent text-sm tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+                />
+                <span className="text-sm text-muted-foreground">%</span>
+              </div>
+            </div>
+          ) : (
+            <MoneyInput id="cb-received" field="amountReceived" value={m.amountReceived} onChange={(e) => setField("amountReceived", e.target.value)} />
+          )}
         </Field>
         {!isEdit && (
           <Field label="Received On">

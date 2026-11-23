@@ -31,11 +31,13 @@ const fmtINR = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { maximumFrac
 
 /**
  * Tax split of a payment from the entered amount — the same maths as the
- * server (clientController paymentTaxes):
+ * server (backend/utils/paymentTaxes.js):
  *   GST excluded → GST = amount × g% added on top; included → already inside
  *   TDS = taxable × t%; excluded → added on top; included → deducted
+ * Counted toward the contract: the GST part only when the contract's own
+ * value includes GST; TDS always counts as received.
  */
-function splitPayment(entered, gst, tds) {
+function splitPayment(entered, gst, tds, contractHasGst) {
   const a = Number(entered) || 0;
   const g = gst.on ? Number(gst.percent) || 0 : 0;
   const t = tds.on ? Number(tds.percent) || 0 : 0;
@@ -43,9 +45,14 @@ function splitPayment(entered, gst, tds) {
   const taxable = g > 0 && gst.mode === "included" ? round2(a - gstAmount) : a;
   const invoice = round2(taxable + gstAmount);
   const tdsAmount = t > 0 ? round2((taxable * t) / 100) : 0;
-  const counted = t > 0 && tds.mode === "excluded" ? round2(invoice + tdsAmount) : invoice;
-  return { entered: a, gstPercent: g, tdsPercent: t, taxable, gst: gstAmount, tds: tdsAmount, counted, bank: round2(counted - tdsAmount) };
+  const settled = t > 0 && tds.mode === "excluded" ? invoice + tdsAmount : invoice;
+  const bank = t > 0 && tds.mode === "included" ? invoice - tdsAmount : invoice;
+  const counted = round2(settled - (contractHasGst ? 0 : gstAmount));
+  return { entered: a, gstPercent: g, tdsPercent: t, taxable, gst: gstAmount, tds: tdsAmount, counted, bank: round2(bank) };
 }
+
+/** What reached the bank for a saved payment (older records didn't store it). */
+const bankOf = (p) => p.bankAmount ?? round2((p.amount || 0) - (p.tdsAmount || 0));
 
 const MODES = [
   { id: "excluded", label: "Excluded" },
@@ -173,14 +180,16 @@ const PaymentManager = ({ contract, onUpdated }) => {
   };
 
   const projectAmount = contract?.projectAmount || 0;
-  const receivedAmount = contract?.receivedAmount || 0;
+  const receivedAmount = round2(contract?.receivedAmount || 0);
   const dueAmount = contract?.dueAmount ?? projectAmount;
   const nextDue = realDate(contract?.nextDueDate);
   const isOverdue = Boolean(nextDue && dueAmount > 0 && nextDue < new Date());
+  const contractHasGst = !!contract?.gstEnabled;
   const split = splitPayment(
     form.amount,
     { on: form.gstEnabled, percent: form.gstPercent, mode: form.gstMode },
     { on: form.tdsEnabled, percent: form.tdsPercent, mode: form.tdsMode },
+    contractHasGst,
   );
   const hasAmount = split.entered > 0;
   // What's still due once this payment is added.
@@ -190,7 +199,11 @@ const PaymentManager = ({ contract, onUpdated }) => {
   const gstOn = form.gstEnabled && split.gstPercent > 0;
   const tdsOn = form.tdsEnabled && split.tdsPercent > 0;
   const setField = (name, value) => setForm((prev) => ({ ...prev, [name]: value }));
-  const paymentsWithTax = (contract?.payments || []).some((p) => p.gstAmount || p.tdsAmount);
+  const payments = contract?.payments || [];
+  const paymentsWithTax = payments.some((p) => p.gstAmount || p.tdsAmount);
+  const gstCollected = round2(payments.reduce((sum, p) => sum + (p.gstAmount || 0), 0));
+  const inBank = round2(payments.reduce((sum, p) => sum + bankOf(p), 0));
+  const overpaid = round2(-dueAmount);
 
   return (
     <div className="payment-manager">
@@ -201,11 +214,12 @@ const PaymentManager = ({ contract, onUpdated }) => {
         </div>
         <div className="summary-item">
           <span className="summary-label">Received Payment</span>
-          <span className="summary-value" style={{ color: "#22c55e" }}>₹{receivedAmount.toLocaleString("en-IN")}</span>
+          <span className="summary-value" style={{ color: "#22c55e" }}>{fmtINR(receivedAmount)}</span>
         </div>
         <div className="summary-item">
           <span className="summary-label">Due Payment</span>
-          <span className="summary-value" style={{ color: "#f59e0b" }}>₹{dueAmount.toLocaleString("en-IN")}</span>
+          <span className="summary-value" style={{ color: overpaid > 0 ? "#16a34a" : "#f59e0b" }}>{fmtINR(Math.max(0, dueAmount))}</span>
+          {overpaid > 0 && <span className="summary-sub">{fmtINR(overpaid)} received extra</span>}
         </div>
         <div className="summary-item">
           <span className="summary-label">Due Date</span>
@@ -223,6 +237,19 @@ const PaymentManager = ({ contract, onUpdated }) => {
           <div className="summary-item">
             <span className="summary-label">TDS ({contract.tdsPercent}%) — records only</span>
             <span className="summary-value">₹{Number(contract.tdsAmount || 0).toLocaleString("en-IN")}</span>
+          </div>
+        )}
+        {paymentsWithTax && (
+          <div className="summary-item" data-summary="bank">
+            <span className="summary-label">Received in bank</span>
+            <span className="summary-value">{fmtINR(inBank)}</span>
+          </div>
+        )}
+        {gstCollected > 0 && (
+          <div className="summary-item" data-summary="gst-collected">
+            <span className="summary-label">GST collected</span>
+            <span className="summary-value">{fmtINR(gstCollected)}</span>
+            {!contractHasGst && <span className="summary-sub">not counted — contract value is without GST</span>}
           </div>
         )}
         {isOverdue && <span className="overdue-badge">Payment Overdue</span>}
@@ -304,8 +331,11 @@ const PaymentManager = ({ contract, onUpdated }) => {
             {tdsOn && (
               <div><span>TDS {split.tdsPercent}% {form.tdsMode === "included" ? "(deducted)" : "(added)"}</span><b>{form.tdsMode === "included" ? "− " : "+ "}{fmtINR(split.tds)}</b></div>
             )}
-            {tdsOn && <div><span>Received in bank</span><b>{fmtINR(split.bank)}</b></div>}
-            <div className="tax-breakup-total"><span>Counted as received</span><b>{fmtINR(split.counted)}</b></div>
+            {(tdsOn || (gstOn && form.gstMode === "excluded")) && <div><span>Received in bank</span><b>{fmtINR(split.bank)}</b></div>}
+            <div className="tax-breakup-total"><span>Counted toward contract</span><b>{fmtINR(split.counted)}</b></div>
+            {gstOn && !contractHasGst && (
+              <p className="tax-breakup-note">This contract&apos;s value is without GST, so only the taxable value counts toward it — the {fmtINR(split.gst)} GST is recorded separately.</p>
+            )}
           </div>
         )}
         <div className="form-row">
@@ -349,7 +379,7 @@ const PaymentManager = ({ contract, onUpdated }) => {
           {loading ? "Saving..." : "Add Payment"}
         </button>
         <p className="form-hint">
-          Excluded adds the tax on top of the amount; Included means it&apos;s already inside the amount. TDS counts as received. Due payment = Total Payment − Received Payment.
+          Excluded adds the tax on top of the amount; Included means it&apos;s already inside the amount. TDS counts as received. GST counts toward the due only when the contract&apos;s value includes GST. Due payment = Total Payment − Received Payment.
         </p>
       </form>
 
@@ -363,9 +393,10 @@ const PaymentManager = ({ contract, onUpdated }) => {
             <thead>
               <tr>
                 <th>Date</th>
-                <th>Amount</th>
+                <th>{paymentsWithTax ? "Received" : "Amount"}</th>
                 {paymentsWithTax && <th>GST</th>}
                 {paymentsWithTax && <th>TDS</th>}
+                {paymentsWithTax && <th>Counted</th>}
                 <th>Method</th>
                 <th>Notes</th>
                 <th></th>
@@ -376,14 +407,16 @@ const PaymentManager = ({ contract, onUpdated }) => {
                 <tr key={payment._id}>
                   <td>{new Date(payment.paymentDate).toLocaleDateString("en-IN")}</td>
                   <td>
-                    {fmtINR(payment.amount)}
-                    {payment.tdsAmount > 0 && <span className="pay-sub">{fmtINR(payment.amount - payment.tdsAmount)} in bank</span>}
+                    {fmtINR(paymentsWithTax ? bankOf(payment) : payment.amount)}
                   </td>
                   {paymentsWithTax && (
                     <td>{payment.gstAmount > 0 ? <>{fmtINR(payment.gstAmount)}<span className="pay-sub">{payment.gstPercent}%{payment.gstMode ? ` · ${payment.gstMode === "included" ? "included" : "added"}` : ""}</span></> : "—"}</td>
                   )}
                   {paymentsWithTax && (
                     <td>{payment.tdsAmount > 0 ? <>{fmtINR(payment.tdsAmount)}<span className="pay-sub">{payment.tdsPercent}%{payment.tdsMode ? ` · ${payment.tdsMode === "included" ? "deducted" : "added"}` : ""}</span></> : "—"}</td>
+                  )}
+                  {paymentsWithTax && (
+                    <td className="pay-counted">{fmtINR(payment.amount)}</td>
                   )}
                   <td>{payment.method}</td>
                   <td>{payment.notes || "—"}</td>

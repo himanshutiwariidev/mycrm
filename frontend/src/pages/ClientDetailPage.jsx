@@ -822,10 +822,11 @@ export default function ClientDetailPage() {
                       <td>{fmtDate(p.paymentDate)}</td>
                       <td>{p._contractName}</td>
                       <td>
-                        {fmtINR(p.amount)}
+                        {/* What reached the bank; below it what counted toward the contract, and the tax split. */}
+                        {fmtINR(Math.round((p.bankAmount ?? (p.amount || 0) - (p.tdsAmount || 0)) * 100) / 100)}
                         {(p.gstAmount > 0 || p.tdsAmount > 0) && (
                           <span className="cdx-pay-tax">
-                            {[p.gstAmount > 0 && `GST ${fmtINR(p.gstAmount)}`, p.tdsAmount > 0 && `TDS ${fmtINR(p.tdsAmount)}`].filter(Boolean).join(" · ")}
+                            {[`${fmtINR(p.amount)} counted`, p.gstAmount > 0 && `GST ${fmtINR(p.gstAmount)}`, p.tdsAmount > 0 && `TDS ${fmtINR(p.tdsAmount)}`].filter(Boolean).join(" · ")}
                           </span>
                         )}
                       </td>
