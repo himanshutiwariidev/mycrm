@@ -17,6 +17,16 @@ const toLocalDateInput = (d) => {
 };
 
 const round2 = (n) => Math.round(n * 100) / 100;
+
+// Date inputs only accept sensible years — a half-typed year otherwise becomes "0001".
+const MIN_DATE = "2000-01-01";
+const MAX_DATE = "2100-12-31";
+/** The date as a Date, or null when it's missing or nonsense (e.g. year 1). */
+const realDate = (value) => {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) || d.getFullYear() < 2000 || d.getFullYear() > 2100 ? null : d;
+};
 const fmtINR = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
 /**
@@ -104,7 +114,12 @@ const PaymentManager = ({ contract, onUpdated }) => {
     paymentDate: toLocalDateInput(new Date()),
     method: "UPI",
     notes: "",
-    nextDueDate: contract?.nextDueDate ? contract.nextDueDate.slice(0, 10) : "",
+    // Prefill only an upcoming due date — a passed (or broken) one has to be re-picked.
+    nextDueDate: (() => {
+      const d = realDate(contract?.nextDueDate);
+      const key = d ? toLocalDateInput(d) : "";
+      return key && key >= toLocalDateInput(new Date()) ? key : "";
+    })(),
     // Start from the contract's own GST / TDS settings.
     // "excluded" = the tax is added on top of the amount; "included" = it's already inside.
     gstEnabled: !!contract?.gstEnabled,
@@ -129,7 +144,8 @@ const PaymentManager = ({ contract, onUpdated }) => {
     setError("");
     try {
       const payload = { ...form };
-      if (!payload.nextDueDate) delete payload.nextDueDate;
+      // A payment that settles the contract has no next due date (the server clears it too).
+      if (!payload.nextDueDate || settlesDue) delete payload.nextDueDate;
       if (!payload.gstEnabled) { delete payload.gstPercent; delete payload.gstMode; }
       if (!payload.tdsEnabled) { delete payload.tdsPercent; delete payload.tdsMode; }
       const response = await addPayment(contract._id, payload);
@@ -159,15 +175,18 @@ const PaymentManager = ({ contract, onUpdated }) => {
   const projectAmount = contract?.projectAmount || 0;
   const receivedAmount = contract?.receivedAmount || 0;
   const dueAmount = contract?.dueAmount ?? projectAmount;
-  const isOverdue = Boolean(
-    contract?.nextDueDate && dueAmount > 0 && new Date(contract.nextDueDate) < new Date()
-  );
+  const nextDue = realDate(contract?.nextDueDate);
+  const isOverdue = Boolean(nextDue && dueAmount > 0 && nextDue < new Date());
   const split = splitPayment(
     form.amount,
     { on: form.gstEnabled, percent: form.gstPercent, mode: form.gstMode },
     { on: form.tdsEnabled, percent: form.tdsPercent, mode: form.tdsMode },
   );
   const hasAmount = split.entered > 0;
+  // What's still due once this payment is added.
+  const dueBefore = Math.max(0, round2(dueAmount));
+  const dueAfter = round2(dueBefore - (hasAmount ? split.counted : 0));
+  const settlesDue = dueBefore <= 0 || (hasAmount && dueAfter <= 0);
   const gstOn = form.gstEnabled && split.gstPercent > 0;
   const tdsOn = form.tdsEnabled && split.tdsPercent > 0;
   const setField = (name, value) => setForm((prev) => ({ ...prev, [name]: value }));
@@ -190,8 +209,8 @@ const PaymentManager = ({ contract, onUpdated }) => {
         </div>
         <div className="summary-item">
           <span className="summary-label">Due Date</span>
-          <span className="summary-value">
-            {contract?.nextDueDate ? new Date(contract.nextDueDate).toLocaleDateString("en-IN") : "N/A"}
+          <span className="summary-value" style={dueBefore <= 0 ? { color: "#16a34a" } : undefined}>
+            {dueBefore <= 0 ? "No dues" : nextDue ? nextDue.toLocaleDateString("en-IN") : "N/A"}
           </span>
         </div>
         {contract?.gstEnabled && (
@@ -231,6 +250,8 @@ const PaymentManager = ({ contract, onUpdated }) => {
             <input
               type="date"
               name="paymentDate"
+              min={MIN_DATE}
+              max={MAX_DATE}
               value={form.paymentDate}
               onChange={handleChange}
             />
@@ -298,15 +319,31 @@ const PaymentManager = ({ contract, onUpdated }) => {
               onChange={handleChange}
             />
           </div>
-          <div className="form-field">
-            <label>Next Due Date (optional)</label>
-            <input
-              type="date"
-              name="nextDueDate"
-              value={form.nextDueDate}
-              onChange={handleChange}
-            />
-          </div>
+          {settlesDue ? (
+            <div className="form-field">
+              <label>Next Due Date</label>
+              <div className="due-cleared" data-due-cleared>
+                {dueBefore <= 0
+                  ? "No dues left on this contract — no next due date needed."
+                  : dueAfter < 0
+                    ? `This payment clears the due (${fmtINR(-dueAfter)} more than what was due) — no next due date needed.`
+                    : "This payment clears the due — no next due date needed."}
+              </div>
+            </div>
+          ) : (
+            <div className="form-field">
+              <label>Next Due Date (optional)</label>
+              <input
+                type="date"
+                name="nextDueDate"
+                min={form.paymentDate || MIN_DATE}
+                max={MAX_DATE}
+                value={form.nextDueDate}
+                onChange={handleChange}
+              />
+              {hasAmount && <span className="due-left" data-due-left>{fmtINR(dueAfter)} will still be due</span>}
+            </div>
+          )}
         </div>
         <button type="submit" disabled={loading}>
           {loading ? "Saving..." : "Add Payment"}

@@ -362,7 +362,14 @@ export default function ClientDetailPage() {
   // TDS is admin record-keeping only — it never rolls into projectAmount/dueAmount above.
   const totalTds = contracts.reduce((sum, p) => sum + (p.tdsEnabled ? (p.tdsAmount || 0) : 0), 0);
   const now = new Date();
-  const overdueCount = contracts.filter((p) => p.nextDueDate && p.dueAmount > 0 && new Date(p.nextDueDate) < now).length;
+  // The next due date only counts when there's still something due and it's a
+  // real date (a half-typed date input could once save year "0001").
+  const dueDateOf = (c) => {
+    if (!c.nextDueDate || !(c.dueAmount > 0)) return null;
+    const d = new Date(c.nextDueDate);
+    return Number.isNaN(d.getTime()) || d.getFullYear() < 2000 ? null : d;
+  };
+  const overdueCount = contracts.filter((p) => { const d = dueDateOf(p); return d && d < now; }).length;
   const effectivePaymentContractId = paymentContractId || latestContract?._id || null;
 
   const customFields = Object.entries(client).filter(
@@ -561,7 +568,8 @@ export default function ClientDetailPage() {
                   <tbody>
                     {contracts.map((contract) => {
                       const piUrl = contract.piAttachment?.filename ? `${piBaseUrl}/uploads/${contract.piAttachment.filename}` : null;
-                      const overdue = contract.nextDueDate && contract.dueAmount > 0 && new Date(contract.nextDueDate) < now;
+                      const dueDate = dueDateOf(contract);
+                      const overdue = dueDate && dueDate < now;
                       return (
                         <tr key={contract._id}>
                           <td className="cdx-muted">{contract.contractNumber}</td>
@@ -574,8 +582,8 @@ export default function ClientDetailPage() {
                           <td className="cdx-nowrap">{fmtINR(contract.receivedAmount || 0)}</td>
                           <td className="cdx-nowrap cdx-strong">{fmtINR(contract.dueAmount ?? contract.projectAmount)}</td>
                           <td className="cdx-nowrap">
-                            {contract.nextDueDate
-                              ? <span style={overdue ? { color: "#dc2626", fontWeight: 600 } : undefined}>{fmtDate(contract.nextDueDate)}</span>
+                            {dueDate
+                              ? <span style={overdue ? { color: "#dc2626", fontWeight: 600 } : undefined}>{fmtDate(dueDate)}</span>
                               : <span className="cd-pi-none">—</span>}
                           </td>
                           <td>

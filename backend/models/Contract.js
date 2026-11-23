@@ -251,6 +251,9 @@ ContractSchema.pre("save", function () {
     0
   );
   this.dueAmount = (this.projectAmount || 0) - this.receivedAmount;
+  // Nothing left to collect → no next due date (otherwise a fully paid
+  // contract could still show up as "Payment Overdue").
+  if (this.dueAmount <= 0 && this.nextDueDate) this.nextDueDate = undefined;
 });
 
 // Dashboard analytics filter/group by these fields (status breakdowns, renewal

@@ -1378,6 +1378,10 @@ exports.addPayment = async (req, res) => {
     }
     const taxes = paymentTaxes(entered, req.body);
     if (taxes.error) return res.status(400).json({ message: taxes.error });
+    // A half-typed date input can send e.g. "0001-01-01" — only accept real dates.
+    const sensibleDate = (v) => { const d = new Date(v); return !Number.isNaN(d.getTime()) && d.getFullYear() >= 2000 && d.getFullYear() <= 2100; };
+    if (nextDueDate && !sensibleDate(nextDueDate)) return res.status(400).json({ message: "Enter a valid next due date" });
+    if (paymentDate && !sensibleDate(paymentDate)) return res.status(400).json({ message: "Enter a valid payment date" });
     const { amount } = taxes; // what counts against the due, after adding any excluded tax
 
     const contract = await Contract.findById(req.params.id);
@@ -1389,7 +1393,7 @@ exports.addPayment = async (req, res) => {
     if (nextDueDate) {
       contract.nextDueDate = nextDueDate;
     }
-    await contract.save();
+    await contract.save(); // clears nextDueDate when this payment settles the due (Contract pre-save)
 
     const { gstAmount, gstPercent, gstMode, tdsAmount, tdsPercent, tdsMode } = taxes.fields;
     const taxNote = [
