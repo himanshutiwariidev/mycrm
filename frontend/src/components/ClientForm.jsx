@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
-  UserRound, Building2, MapPin, NotebookPen, ChevronDown, FileSignature, Save, Loader2,
+  UserRound, Building2, MapPin, NotebookPen, ChevronDown, FileSignature, Save, Loader2, Plus, Check, X,
 } from "lucide-react";
-import { createClient, updateClient, getUsersByRole } from "../services/clientApi";
-import { CLIENT_CATEGORIES } from "../config/clientCategories";
+import { createClient, updateClient, getUsersByRole, getAllClients } from "../services/clientApi";
+import { useClientCategories } from "../config/clientCategories";
 import "./ClientForm.css";
 import "./ClientFormSections.css";
 
@@ -72,6 +72,79 @@ function Section({ id, Icon, title, summary, open, onToggle, optional = true, ch
   );
 }
 
+/**
+ * Category dropdown with a "+" to add a new one: type the name, Add, and it's
+ * saved, listed and selected. (No fixed list — categories live on the server.)
+ */
+function CategoryField({ value, onChange }) {
+  const { categories, addCategory } = useClientCategories();
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const add = async () => {
+    if (!name.trim()) { setError("Enter the category name"); return; }
+    setSaving(true);
+    setError("");
+    try {
+      const data = await addCategory(name.trim());
+      onChange(data.category.value);
+      toast.success(data.existed ? `"${data.category.name}" already exists — selected it` : data.message);
+      setAdding(false);
+      setName("");
+    } catch (err) {
+      setError(err.response?.data?.message || "Couldn't add the category");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const cancel = () => { setAdding(false); setName(""); setError(""); };
+
+  return (
+    <div className="cf-field">
+      <label>Category</label>
+      {adding ? (
+        <div className="cf-cat-row">
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter adds the category instead of submitting the client form.
+              if (e.key === "Enter") { e.preventDefault(); add(); }
+              if (e.key === "Escape") { e.preventDefault(); cancel(); }
+            }}
+            placeholder="New category, e.g. Textiles"
+            maxLength={60}
+            autoFocus
+            data-category-name
+          />
+          <button type="button" className="cf-cat-btn cf-cat-add" onClick={add} disabled={saving} data-category-save>
+            <Check size={15} /> {saving ? "Adding…" : "Add"}
+          </button>
+          <button type="button" className="cf-cat-btn" onClick={cancel} aria-label="Cancel" title="Cancel">
+            <X size={15} />
+          </button>
+        </div>
+      ) : (
+        <div className="cf-cat-row">
+          <select name="businessCategory" value={value} onChange={(e) => onChange(e.target.value)} data-category-select>
+            <option value="">{categories.length ? "Select category" : "No categories yet — add one with +"}</option>
+            {categories.map((c) => <option key={c.value} value={c.value}>{c.name}</option>)}
+            {/* A value saved before it was in the list still shows as selected. */}
+            {value && !categories.some((c) => c.value === value) && <option value={value}>{value}</option>}
+          </select>
+          <button type="button" className="cf-cat-btn cf-cat-plus" onClick={() => setAdding(true)} title="Add a category" aria-label="Add a category" data-category-plus>
+            <Plus size={16} />
+          </button>
+        </div>
+      )}
+      {error && <small className="cf-cat-error">{error}</small>}
+    </div>
+  );
+}
+
 const Field = ({ label, required, hint, full, children }) => (
   <div className={`cf-field${full ? " full" : ""}`}>
     <label>{label}{required && <em> *</em>}</label>
@@ -97,6 +170,7 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     tanNo: "",
     salesPerson: "",
     leadSource: "",
+    referredBy: "",
     clientType: "",
     businessCategory: "",
     projectType: "service",
@@ -140,6 +214,7 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
       setFormData({
         ...client,
         businessCategory: client.businessCategory || "",
+        referredBy: client.referredBy || "",
         salesPerson: client.salesPerson?._id || client.salesPerson || client.salesPersonName || "",
       });
       // Editing: open every section that already has something in it.
@@ -167,7 +242,12 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     getUsersByRole("sales")
       .then((res) => {
         if (!isMounted) return;
-        const users = res.data || [];
+        // A super admin can also handle a client personally — offer them as
+        // the sales person too. Such clients are hidden from the sales manager.
+        const team = res.data || [];
+        const users = userRole === "admin" && userId && !team.some((u) => u._id === userId)
+          ? [{ _id: userId, name: `${userName || "Me"} (me — super admin)` }, ...team]
+          : team;
         setSalesUsers(users);
         // Editing a client whose sales person is a typed name (not one of
         // these users) — switch straight to the "Other" text input instead
@@ -192,6 +272,25 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
   }, []);
 
   const setValue = (name, value) => setFormData((prev) => ({ ...prev, [name]: value }));
+
+  // Lead source "Client Reference": who referred them — suggest existing client names.
+  const isReferral = formData.leadSource === "client reference";
+  const [clientNames, setClientNames] = useState(null);
+  useEffect(() => {
+    if (!isReferral || clientNames) return undefined;
+    let alive = true;
+    getAllClients()
+      .then((res) => {
+        if (!alive) return;
+        const names = (res.data?.clients || [])
+          .filter((c) => c._id !== client?._id)
+          .map((c) => (c.companyName ? `${c.clientName} (${c.companyName})` : c.clientName))
+          .filter(Boolean);
+        setClientNames([...new Set(names)].sort((a, b) => a.localeCompare(b)));
+      })
+      .catch(() => alive && setClientNames([]));
+    return () => { alive = false; };
+  }, [isReferral, clientNames, client?._id]);
   const handleChange = (e) => setValue(e.target.name, e.target.value);
 
   const toggleSection = (id) =>
@@ -203,6 +302,11 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
 
   const handleSubmit = async (e, intent = "save") => {
     e?.preventDefault();
+    if (formData.leadSource === "client reference" && !formData.referredBy?.trim()) {
+      setOpenSections((prev) => new Set(prev).add("business"));
+      setError("Enter the name of the client who referred them.");
+      return;
+    }
     if (!formData.clientName?.trim() || !formData.phone?.trim()) {
       setError("Client name and phone number are required.");
       return;
@@ -215,6 +319,10 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
     // string isn't a valid enum value, so omit them entirely when left blank.
     const payload = { ...formData };
     if (!payload.leadSource) delete payload.leadSource;
+    if (payload.leadSource !== "client reference") {
+      if (isEdit && client?.referredBy) payload.referredBy = null;
+      else delete payload.referredBy;
+    } else payload.referredBy = payload.referredBy.trim();
     if (!payload.clientType) delete payload.clientType;
     // Category is optional too: omit when blank — or, when editing a client
     // that had one, send null so clearing it actually clears it.
@@ -263,7 +371,7 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
   const join = (...parts) => parts.filter(Boolean).join(" · ");
   const businessSummary = join(
     labelOf(CLIENT_TYPES, formData.clientType),
-    labelOf(LEAD_SOURCES, formData.leadSource),
+    isReferral && formData.referredBy ? `Ref: ${formData.referredBy}` : labelOf(LEAD_SOURCES, formData.leadSource),
     formData.activeStatus === "inactive" && "Dead",
     formData.gstNo && `GST ${formData.gstNo}`,
     formData.tanNo && `TAN ${formData.tanNo}`
@@ -308,12 +416,7 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
                 allowClear={false}
               />
             </Field>
-            <Field label="Category">
-              <select name="businessCategory" value={formData.businessCategory} onChange={handleChange}>
-                <option value="">Select category</option>
-                {CLIENT_CATEGORIES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-            </Field>
+            <CategoryField value={formData.businessCategory} onChange={(v) => setValue("businessCategory", v)} />
             <Field label="Sales Person" required>
               {isSalesUser ? (
                 <input type="text" value={userName || "You"} disabled readOnly />
@@ -370,6 +473,23 @@ const ClientForm = ({ client, onSuccess, onCancel }) => {
               {LEAD_SOURCES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </Field>
+          {isReferral && (
+            <Field label="Referred by (client name)" required hint="Type or pick the existing client who referred them.">
+              <input
+                type="text"
+                name="referredBy"
+                value={formData.referredBy}
+                onChange={handleChange}
+                list="cf-referrer-names"
+                placeholder="e.g. Ravi Sharma"
+                maxLength={200}
+                autoFocus={!isEdit}
+              />
+              <datalist id="cf-referrer-names">
+                {(clientNames || []).map((n) => <option key={n} value={n} />)}
+              </datalist>
+            </Field>
+          )}
           <Field label="Client Status" hint='Mark past clients as "Dead" when adding historical records.'>
             <select name="activeStatus" value={formData.activeStatus} onChange={handleChange}>
               <option value="active">Active</option>

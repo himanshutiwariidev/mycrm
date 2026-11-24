@@ -1,5 +1,8 @@
 import React, { useState } from "react";
-import { Phone, MapPin, Video, User, Headset, Repeat, ExternalLink } from "lucide-react";
+import { Phone, MapPin, Video, User, Headset, Repeat, ExternalLink, Navigation, UserPlus } from "lucide-react";
+import { PhotoStrip, PhotoLightbox } from "../sections/VisitPhotos";
+import { mapUrl } from "../../services/clientVisitApi";
+import { fmtDuration, visitMinutes, hasFix } from "../sections/visitFormat";
 import { MEETING_MODES, MEETING_STATUS, MEETING_OUTCOMES } from "../../config/telecalling";
 import { Badge, DateBlock, fmtWhen } from "./teleUi";
 
@@ -19,6 +22,27 @@ function LocationLink({ meeting }) {
     return <a href={href} target="_blank" rel="noopener noreferrer"><Video size={13} /> Join link <ExternalLink size={11} /></a>;
   }
   return <span><MapPin size={13} /> {meeting.location}</span>;
+}
+
+/** The location check-in made for the meeting, with its photos — proof it happened. */
+function VisitProof({ visit, title }) {
+  const [viewer, setViewer] = useState(null);
+  const [now] = useState(() => Date.now());
+  const open = visit.status === "in-progress";
+  const time = (d) => new Date(d).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
+  return (
+    <div className="tc-meeting-note" data-visit-proof style={{ background: open ? "#eff6ff" : "#f8fafc", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <Navigation size={14} color={open ? "#2563eb" : "#16a34a"} />
+      <span>
+        <strong style={{ color: "#0f172a" }}>{open ? "Visit in progress" : "Visited"}</strong>
+        {" "}· {time(visit.checkIn?.at)}{visit.checkOut?.at ? `–${time(visit.checkOut.at)}` : ""} ({fmtDuration(visitMinutes(visit, now))})
+        {hasFix(visit.checkIn) && <> · <a href={mapUrl(visit.checkIn.lat, visit.checkIn.lng)} target="_blank" rel="noopener noreferrer">location <ExternalLink size={11} /></a></>}
+        {visit.outcome ? ` · ${visit.outcome}` : ""}
+      </span>
+      <span style={{ marginLeft: "auto" }}><PhotoStrip visit={visit} onOpen={(i) => setViewer(i)} size={30} /></span>
+      {viewer !== null && <PhotoLightbox visit={visit} startIndex={viewer} title={title} onClose={() => setViewer(null)} />}
+    </div>
+  );
 }
 
 /**
@@ -56,12 +80,18 @@ export default function MeetingCard({ meeting, show = { salesPerson: true, booke
           {mode && <span><mode.Icon size={13} /> {mode.label}</span>}
           <LocationLink meeting={meeting} />
           {show.salesPerson && meeting.salesPerson && <span><User size={13} /> {meeting.salesPerson.name}</span>}
-          {show.bookedBy && meeting.createdBy && <span><Headset size={13} /> Booked by {meeting.createdBy.name}</span>}
+          {show.salesPerson && !meeting.salesPerson && (
+            <span style={{ color: "#b45309", fontWeight: 600 }} data-unassigned><User size={13} /> Waiting for the sales manager to assign</span>
+          )}
+          {show.bookedBy && meeting.createdBy && (meeting.source === "sales"
+            ? <span data-self-added><UserPlus size={13} /> Added by {meeting.createdBy.name} (on the spot)</span>
+            : <span><Headset size={13} /> Booked by {meeting.createdBy.name}</span>)}
           {meeting.rescheduleCount > 0 && meeting.status === "scheduled" && <span><Repeat size={13} /> New time confirmed</span>}
         </div>
 
         {meeting.description && <div className="tc-meeting-note"><strong style={{ color: "#0f172a" }}>Agenda:</strong> {meeting.description}</div>}
         {meeting.outcomeNotes && <div className="tc-meeting-note" style={{ background: "#f0fdf4" }}><strong style={{ color: "#0f172a" }}>Result:</strong> {meeting.outcomeNotes}</div>}
+        {meeting.visit && <VisitProof visit={meeting.visit} title={meeting.company || meeting.contactName} />}
         {actions && <div className="tc-meeting-actions">{actions}</div>}
       </div>
     </article>

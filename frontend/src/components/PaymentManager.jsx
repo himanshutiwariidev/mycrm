@@ -1,7 +1,8 @@
-import React, { useState } from "react";
-import { Trash2 } from "lucide-react";
-import { addPayment, deletePayment } from "../services/clientApi";
+import React, { useEffect, useRef, useState } from "react";
+import { Trash2, Mail, Ban, Undo2, MoreHorizontal } from "lucide-react";
+import { addPayment, deletePayment, writeOffBadDebt, undoBadDebt } from "../services/clientApi";
 import "./PaymentManager.css";
+import PaymentReminderDialog from "./PaymentReminderDialog";
 
 const PAYMENT_METHODS = ["NEFT", "RTGS", "Bank Draft", "UPI", "Cash", "Cheque", "Card Swap", "P Account", "Other"];
 
@@ -121,6 +122,38 @@ function TaxToggle({ id, label, on, onToggle, percent, onPercent, mode, onMode, 
   );
 }
 
+/** "⋯" menu on the Due box — for rarely used actions (bad debt). */
+function DueMenu({ onBadDebt }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
+    const onKey = (e) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+  return (
+    <div className="pay-menu" ref={ref}>
+      <button type="button" className="pay-menu-btn" aria-label="More actions" aria-haspopup="menu" aria-expanded={open} title="More actions" onClick={() => setOpen((o) => !o)} data-due-menu>
+        <MoreHorizontal size={16} />
+      </button>
+      {open && (
+        <div className="pay-menu-list" role="menu">
+          <button type="button" role="menuitem" onClick={() => { setOpen(false); onBadDebt(); }} data-baddebt-open>
+            <Ban size={14} />
+            <span>
+              Mark as bad debt
+              <small>Client won&apos;t pay — write off what&apos;s due</small>
+            </span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const PaymentManager = ({ contract, onUpdated }) => {
   const [form, setForm] = useState({
     amount: "",
@@ -145,6 +178,12 @@ const PaymentManager = ({ contract, onUpdated }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [deletingId, setDeletingId] = useState(null);
+  const [reminding, setReminding] = useState(false);
+  // Bad debt: null = closed, otherwise the reason being typed.
+  const [badDebtReason, setBadDebtReason] = useState(null);
+  const [badDebtSaving, setBadDebtSaving] = useState(false);
+  const canWriteOff = ["admin", "salesmanager"].includes(localStorage.getItem("role"));
+  const contractClientId = contract?.clientId?._id || contract?.clientId;
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -177,6 +216,35 @@ const PaymentManager = ({ contract, onUpdated }) => {
       setError(err.response?.data?.message || "Failed to add payment");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleWriteOff = async () => {
+    setBadDebtSaving(true);
+    setError("");
+    try {
+      const { data } = await writeOffBadDebt(contract._id, { reason: badDebtReason.trim() });
+      setBadDebtReason(null);
+      onUpdated(data.contract);
+    } catch (err) {
+      setError(err.response?.data?.message || "Couldn't write off the bad debt");
+      setBadDebtReason(null);
+    } finally {
+      setBadDebtSaving(false);
+    }
+  };
+
+  const handleUndoBadDebt = async () => {
+    if (!window.confirm(`Undo the bad debt? ${fmtINR(contract.badDebt.amount)} will be due again.`)) return;
+    setBadDebtSaving(true);
+    setError("");
+    try {
+      const { data } = await undoBadDebt(contract._id);
+      onUpdated(data.contract);
+    } catch (err) {
+      setError(err.response?.data?.message || "Couldn't undo the bad debt");
+    } finally {
+      setBadDebtSaving(false);
     }
   };
 
@@ -232,6 +300,9 @@ const PaymentManager = ({ contract, onUpdated }) => {
   const pctOf = (v) => (projectAmount > 0 ? Math.min(100, Math.max(0, (v / projectAmount) * 100)) : 0);
   const receivedPct = pctOf(receivedAmount);
   const waivedPct = Math.min(pctOf(gstNotCharged), 100 - receivedPct);
+  // Written off as bad debt: off the due, but never received.
+  const badDebt = contract?.badDebt?.amount > 0 ? contract.badDebt : null;
+  const badDebtPct = badDebt ? Math.max(0, 100 - receivedPct - waivedPct) : 0;
   const settledPct = dueBefore <= 0 ? 100 : Math.min(99, Math.floor(receivedPct + waivedPct));
   // Smaller tax figures under the main three — only the ones that apply.
   const details = [
@@ -241,6 +312,7 @@ const PaymentManager = ({ contract, onUpdated }) => {
       note: contractHasGst ? "inside the payments" : "not counted — contract is without GST",
     },
     gstNotCharged > 0 && { key: "gst-not-charged", label: "GST not charged", value: fmtINR(gstNotCharged), note: "on cash / without-GST payments" },
+    badDebt && { key: "bad-debt", label: "Bad debt", value: fmtINR(badDebt.amount), note: "written off — not received, not an expense" },
     contract?.tdsEnabled && { key: "tds", label: `TDS ${contract.tdsPercent}%`, value: fmtINR(contract.tdsAmount), note: "records only" },
     // Only when it differs from "Received" (TDS deducted, or GST on a contract without GST).
     paymentsWithTax && Math.abs(inBank - receivedAmount) >= 0.01 && {
@@ -270,20 +342,34 @@ const PaymentManager = ({ contract, onUpdated }) => {
               {payments.length ? `${payments.length} payment${payments.length === 1 ? "" : "s"}` : "No payments yet"}
             </span>
           </div>
-          <div className={`pay-stat pay-stat--due ${dueBefore <= 0 ? "is-clear" : isOverdue ? "is-overdue" : ""}`}>
-            <span className="pay-stat-label">Due payment</span>
+          <div className={`pay-stat pay-stat--due ${badDebt ? "is-baddebt" : dueBefore <= 0 ? "is-clear" : isOverdue ? "is-overdue" : ""}`}>
+            <div className="pay-stat-head">
+              <span className="pay-stat-label">Due payment</span>
+              {/* Rare actions live in a small "⋯" menu, not as a button on every contract. */}
+              {canWriteOff && dueBefore > 0 && !badDebt && badDebtReason === null && (
+                <DueMenu onBadDebt={() => setBadDebtReason("")} />
+              )}
+            </div>
             {/* On a contract with GST: the due before GST, with the GST-inclusive figure below. */}
             <span className="pay-stat-value" data-summary="due">
               {fmtINR(dueBefore <= 0 ? 0 : dueWithGst ? beforeGst(dueAmount) : dueAmount)}
             </span>
             {dueWithGst && <span className="pay-stat-sub" data-summary="due-with-gst">{fmtINR(dueAmount)} with GST</span>}
             {overpaid > 0 && <span className="pay-stat-sub">{fmtINR(overpaid)} received extra</span>}
-            {dueBefore <= 0 && overpaid <= 0 && <span className="pay-stat-sub">Fully paid</span>}
+            {badDebt && <span className="pay-stat-sub" data-summary="bad-debt-sub">{fmtINR(badDebt.amount)} written off as bad debt</span>}
+            {!badDebt && dueBefore <= 0 && overpaid <= 0 && <span className="pay-stat-sub">Fully paid</span>}
             {dueBefore > 0 && (
               <span className="pay-due-date" data-summary="due-date">
                 {nextDue ? `Due on ${nextDue.toLocaleDateString("en-IN")}` : "No due date set"}
                 {isOverdue && <span className="pay-overdue-chip">Overdue</span>}
               </span>
+            )}
+            {dueBefore > 0 && contractClientId && (
+              <div className="pay-due-actions">
+                <button type="button" className="pay-remind-btn" onClick={() => setReminding(true)} data-pay-remind>
+                  <Mail size={13} /> Email payment reminder
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -293,8 +379,9 @@ const PaymentManager = ({ contract, onUpdated }) => {
             <div className="pay-progress-track">
               <span className="pay-progress-fill" style={{ width: `${receivedPct}%` }} />
               {waivedPct > 0 && <span className="pay-progress-fill is-waived" style={{ width: `${waivedPct}%` }} />}
+              {badDebtPct > 0 && <span className="pay-progress-fill is-baddebt" style={{ width: `${badDebtPct}%` }} />}
             </div>
-            <span className="pay-progress-text">{settledPct}% settled</span>
+            <span className="pay-progress-text">{badDebt ? `${Math.floor(receivedPct + waivedPct)}% received · rest bad debt` : `${settledPct}% settled`}</span>
           </div>
         )}
 
@@ -311,6 +398,56 @@ const PaymentManager = ({ contract, onUpdated }) => {
         )}
       </div>
 
+      {badDebtReason !== null && !badDebt && (
+        <div className="baddebt-panel" data-baddebt-panel>
+          <div className="baddebt-panel-head">
+            <Ban size={16} />
+            <div>
+              <strong>Write off {fmtINR(dueAmount)} as bad debt?</strong>
+              <p>Use this when the client won&apos;t pay. The amount stops showing as due, upcoming or overdue. It isn&apos;t counted as received or as an expense, and you can undo it later.</p>
+            </div>
+          </div>
+          <textarea
+            rows={2}
+            maxLength={1000}
+            value={badDebtReason}
+            onChange={(e) => setBadDebtReason(e.target.value)}
+            placeholder="Reason — e.g. Client closed the business, not reachable since March"
+            data-baddebt-reason
+            autoFocus
+          />
+          <div className="baddebt-panel-actions">
+            <button type="button" className="pay-remind-btn" onClick={() => setBadDebtReason(null)} disabled={badDebtSaving}>Cancel</button>
+            <button type="button" className="baddebt-confirm" onClick={handleWriteOff} disabled={badDebtSaving || !badDebtReason.trim()} data-baddebt-confirm>
+              {badDebtSaving ? "Writing off…" : `Write off ${fmtINR(dueAmount)}`}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {badDebt && (
+        <div className="baddebt-banner" data-baddebt-banner>
+          <Ban size={16} />
+          <div>
+            <strong>{fmtINR(badDebt.amount)} written off as bad debt</strong>
+            <p>
+              {badDebt.writtenOffAt ? new Date(badDebt.writtenOffAt).toLocaleDateString("en-IN") : ""}
+              {badDebt.byName ? ` · by ${badDebt.byName}` : ""}
+              {badDebt.reason ? ` — ${badDebt.reason}` : ""}
+            </p>
+            <p>To record a payment on this contract, undo the bad debt first.</p>
+          </div>
+          {canWriteOff && (
+            <button type="button" className="pay-remind-btn" onClick={handleUndoBadDebt} disabled={badDebtSaving} data-baddebt-undo>
+              <Undo2 size={13} /> {badDebtSaving ? "Undoing…" : "Undo bad debt"}
+            </button>
+          )}
+        </div>
+      )}
+
+      {badDebt && error && <div className="error-message">{error}</div>}
+
+      {!badDebt && (
       <form className="add-payment-form" onSubmit={handleSubmit}>
         <h4>Update Received Payment</h4>
         {error && <div className="error-message">{error}</div>}
@@ -449,6 +586,7 @@ const PaymentManager = ({ contract, onUpdated }) => {
           Excluded adds the tax on top of the amount; Included means it&apos;s already inside the amount. TDS counts as received. GST counts toward the due only when the contract&apos;s value includes GST. On a contract with GST, keep GST off for a payment received without GST (cash) — it comes off the amount before GST. Due payment = Total Payment − Received Payment − GST not charged.
         </p>
       </form>
+      )}
 
       <div className="payment-history">
         <h4>Payment History</h4>
@@ -520,6 +658,9 @@ const PaymentManager = ({ contract, onUpdated }) => {
           </div>
         )}
       </div>
+      {reminding && (
+        <PaymentReminderDialog clientId={contractClientId} contract={contract} onClose={() => setReminding(false)} />
+      )}
     </div>
   );
 };

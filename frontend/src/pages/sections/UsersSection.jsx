@@ -10,6 +10,7 @@ const ROLE_ACCENT = {
   manager: { color: "#7c3aed", bg: "#ede9fe", border: "#ddd6fe" },
   hr: { color: "#0d9488", bg: "#ccfbf1", border: "#99f6e4" },
   sales: { color: "#16a34a", bg: "#dcfce7", border: "#bbf7d0" },
+  salesmanager: { color: "#15803d", bg: "#d1fae5", border: "#86efac" },
   telecaller: { color: "#0891b2", bg: "#cffafe", border: "#a5f3fc" },
   user: { color: "#d97706", bg: "#fffbeb", border: "#fde68a" },
   client: { color: "#db2777", bg: "#fce7f3", border: "#fbcfe8" },
@@ -21,10 +22,13 @@ const ROLE_OPTIONS = [
   { value: "manager", label: "Manager" },
   { value: "hr", label: "HR" },
   { value: "sales", label: "Sales" },
+  { value: "salesmanager", label: "Sales Manager" },
   { value: "telecaller", label: "Telecaller" },
   { value: "user", label: "User" },
   { value: "client", label: "Client" },
 ];
+
+const roleLabel = (role) => ROLE_OPTIONS.find((o) => o.value === role)?.label || role || "";
 
 const PAGE_SIZE = 6;
 
@@ -160,7 +164,7 @@ export default function UsersSection({ users, tasks, setTab, openEditUser, setDe
                   </div>
                 </div>
                 <span style={{ fontSize: 10, fontWeight: 700, padding: "4px 10px", borderRadius: 6, letterSpacing: ".07em", textTransform: "uppercase", color: accent.color, background: accent.bg, border: `1px solid ${accent.border}`, display: "inline-block", marginBottom: 16 }}>
-                  {user.role?.toUpperCase()}
+                  {roleLabel(user.role).toUpperCase()}
                 </span>
 
                 {showTaskProgress && (
@@ -232,7 +236,7 @@ export default function UsersSection({ users, tasks, setTab, openEditUser, setDe
                   <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 2 }}>{user.email}</div>
                 </div>
                 <span style={{ fontSize: 10, fontWeight: 700, padding: "4px 10px", borderRadius: 6, letterSpacing: ".06em", textTransform: "uppercase", color: accent.color, background: accent.bg, border: `1px solid ${accent.border}`, flexShrink: 0 }}>
-                  {user.role?.toUpperCase()}
+                  {roleLabel(user.role).toUpperCase()}
                 </span>
                 <span style={{ fontSize: 12, color: T.textMuted, flexShrink: 0, minWidth: 100, textAlign: "right" }}>{fmtJoined(user.createdAt)}</span>
                 <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>

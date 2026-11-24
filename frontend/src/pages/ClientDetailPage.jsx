@@ -1,20 +1,22 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
-  ArrowLeft, Pencil, Trash2, Download, FileText, Wallet, Package,
-  CreditCard, History, Plus, X, User, CheckCircle2, ChevronDown, ChevronRight,
-  Activity, Inbox, IndianRupee, Eye,
-  UserPlus, Send, RefreshCw, Edit3, ShieldCheck, FilePlus,
+  ArrowLeft, Pencil, Trash2, Download, FileText, Package,
+  CreditCard, Plus, X, User, CheckCircle2, ChevronDown, ChevronRight,
+  Activity, Inbox, Eye, RefreshCw,
   MessageSquare, TrendingUp, Phone, Mail, FileBarChart2,
 } from "lucide-react";
 import {
-  getClientById, updateClient, deleteClient, getClientActivity,
+  getClientById, updateClient, deleteClient,
   deleteContract,
   getClientRemarks, addClientRemark,
   updateDeliverable,
 } from "../services/clientApi";
 import ClientForm from "../components/ClientForm";
 import ContractDetail from "./ContractDetail";
+import PaymentReminderDialog from "../components/PaymentReminderDialog";
+import EmailClientPanel from "../components/EmailClientPanel";
+import { uploadsUrl } from "../utils/uploads";
 import DeliverableDetailPanel from "../components/DeliverableDetailPanel";
 import { getLeafConfig } from "../features/contract-builder/utils/configLookup";
 import { findMatchingSelection } from "../features/contract-builder/utils/deliverableTracking";
@@ -22,7 +24,7 @@ import { getCategoryMeta } from "../features/contract-builder/config/serviceCate
 import { resolveDeliverableVisual, resolveCategoryVisual } from "../config/serviceVisuals";
 import { unitNoun, formatDeliverableAmount } from "../config/deliverableUnits";
 import { ProofButton, ProofDialog, proofsForContractDeliverable, useDeliverableProofs } from "../components/DeliverableProofs";
-import { clientCategoryLabel } from "../config/clientCategories";
+import { clientCategoryLabel, useClientCategories } from "../config/clientCategories";
 import PackageStars from "../components/PackageStars";
 import ClientMonthlyReports from "../components/ClientMonthlyReports";
 import "./ClientDetailPage.css";
@@ -57,7 +59,7 @@ const STATUS_OPTIONS = [
 // "Custom Information" below — so newly added onboarding fields show up with no code changes.
 const KNOWN_CLIENT_FIELDS = new Set([
   "_id", "__v", "clientName", "email", "phone", "companyName", "gstNo", "tanNo",
-  "salesPerson", "leadSource", "clientType", "businessCategory", "projectType", "projectName",
+  "salesPerson", "leadSource", "referredBy", "clientType", "businessCategory", "projectType", "projectName",
   "address", "city", "state", "country", "zipCode", "contactPerson", "designation",
   "status", "activeStatus", "totalProjects", "totalAmount", "notes", "onboardedAt",
   "createdAt", "updatedAt", "hasLoginAccess",
@@ -71,24 +73,9 @@ const TABS = [
   { id: "deliverables", label: "Deliverables", Icon: Package },
   { id: "payments", label: "Payments", Icon: CreditCard },
   { id: "reports", label: "Monthly Reports", Icon: FileBarChart2 },
-  { id: "activity", label: "Activity Timeline", Icon: History },
+  { id: "email", label: "Email Client", Icon: Mail },
 ];
 
-const ACTIVITY_META = {
-  client_created: { Icon: UserPlus, color: "#16a34a" },
-  client_updated: { Icon: Edit3, color: "#2563eb" },
-  status_changed: { Icon: RefreshCw, color: "#f7931e" },
-  contract_created: { Icon: FileText, color: "#2563eb" },
-  contract_updated: { Icon: Edit3, color: "#2563eb" },
-  contract_sent: { Icon: Send, color: "#16a34a" },
-  deliverable_added: { Icon: Package, color: "#f7931e" },
-  deliverable_updated: { Icon: Package, color: "#2563eb" },
-  payment_added: { Icon: IndianRupee, color: "#16a34a" },
-  reminder_created: { Icon: Wallet, color: "#f7931e" },
-  reminder_sent: { Icon: Send, color: "#16a34a" },
-  portal_enabled: { Icon: ShieldCheck, color: "#7c3aed" },
-  invoice_generated: { Icon: FilePlus, color: "#2563eb" },
-};
 
 function Skeleton({ height = 16, width = "100%", radius = 8, style = {} }) {
   return (
@@ -172,21 +159,27 @@ export default function ClientDetailPage() {
   // Proof of work (screenshots / live links) the team attached to this client's deliverables.
   const { proofs, remove: removeProof } = useDeliverableProofs({ clientIds: clientId ? [clientId] : [] });
   const [proofItem, setProofItem] = useState(null); // contract deliverable whose proof is open
-  const [activity, setActivity] = useState([]);
   const [remarks, setRemarks] = useState([]);
   const [loading, setLoading] = useState(true);
   // Everything is on one page now; ?tab=deliverables (etc., e.g. from the
   // Sales Dashboard) scrolls to that section once the data has loaded.
   const requestedSection = searchParams.get("tab");
-  const [showAllActivity, setShowAllActivity] = useState(false);
   const [statusSaving, setStatusSaving] = useState(false);
 
   const [showForm, setShowForm] = useState(false);
   const [showRenewPicker, setShowRenewPicker] = useState(false);
   const [formType, setFormType] = useState(null);
   const [manageContractId, setManageContractId] = useState(null);
+  // Closing the contract popup (× or outside click) refreshes the page —
+  // payments / bad debt changed inside it show up straight away.
+  const closeContractModal = () => {
+    setManageContractId(null);
+    setManageContractTab(null);
+    loadAll({ quiet: true });
+  };
+  // Contract whose payment reminder email is being written.
+  const [reminderFor, setReminderFor] = useState(null);
   const [manageContractTab, setManageContractTab] = useState(null);
-  const [manageContractDefaultTab, setManageContractDefaultTab] = useState(null);
   const [paymentContractId, setPaymentContractId] = useState(null);
   const [expandedDeliverableKey, setExpandedDeliverableKey] = useState(null);
   const [deliverableStatusSaving, setDeliverableStatusSaving] = useState(null);
@@ -195,23 +188,24 @@ export default function ClientDetailPage() {
   const [remarkSaving, setRemarkSaving] = useState(false);
 
   const userRole = localStorage.getItem("role");
+  const { categories } = useClientCategories();
   // "Back to Clients" returns to the Clients section inside each role's own
   // dashboard (with its sidebar/tabs) — never the bare /clients page.
-  const backPath = { admin: "/admin?tab=clients", sales: "/sales?view=clients", user: "/dashboard?tab=clients" }[userRole] || "/clients";
+  const backPath = { admin: "/admin?tab=clients", salesmanager: "/sales-manager?view=clients", sales: "/sales?view=clients", user: "/dashboard?tab=clients" }[userRole] || "/clients";
   const userId = localStorage.getItem("userId");
   const isAdmin = userRole === "admin";
 
-  const loadAll = async () => {
-    setLoading(true);
+  // `quiet`: refresh the data without the loading skeleton (keeps open panels as they are).
+  const loadAll = async ({ quiet = false } = {}) => {
+    if (!quiet) setLoading(true);
     try {
-      const [clientRes, activityRes, remarksRes] = await Promise.all([
+      // (The activity timeline is shown only on the super admin dashboard.)
+      const [clientRes, remarksRes] = await Promise.all([
         getClientById(clientId),
-        getClientActivity(clientId).catch(() => ({ data: { activity: [] } })),
         getClientRemarks(clientId).catch(() => ({ data: { remarks: [] } })),
       ]);
       setClient(clientRes.data.client);
       setContracts(clientRes.data.contracts || []);
-      setActivity(activityRes.data.activity || []);
       setRemarks(remarksRes.data.remarks || []);
     } catch (error) {
       console.error("Error loading client:", error);
@@ -231,7 +225,7 @@ export default function ClientDetailPage() {
     return undefined;
   }, [loading, requestedSection]);
 
-  const canManageRemarks = isAdmin
+  const canManageRemarks = isAdmin || userRole === "salesmanager"
     || (client?.salesPerson?._id && String(client.salesPerson._id) === userId)
     || (client?.assignedUser?._id && String(client.assignedUser._id) === userId);
 
@@ -384,18 +378,16 @@ export default function ClientDetailPage() {
     client.email, client.contactPerson, client.designation, client.clientType, client.gstNo, client.tanNo,
     client.leadSource, salesName, addressLine,
   ].filter((v) => !v).length;
-  const visibleActivity = showAllActivity ? activity : activity.slice(0, 8);
+  // Emailing the client (payment / renewal reminders, monthly reports): the sales side.
+  const canEmailClient = ["admin", "salesmanager", "sales"].includes(userRole);
   const sectionNav = [
     { id: "contracts", label: "Contracts", count: contracts.length },
     { id: "deliverables", label: "Deliverables", count: groupedDeliverables.length },
     { id: "reports", label: "Monthly Reports" },
     { id: "payments", label: "Payments", count: allPayments.length },
     { id: "remarks", label: "Remarks", count: remarks.length },
-    { id: "activity", label: "Activity", count: activity.length },
+    ...(canEmailClient ? [{ id: "email", label: "Email Client" }] : []),
   ];
-  const piBaseUrl = import.meta.env.VITE_API_BASE_URL
-    ? import.meta.env.VITE_API_BASE_URL.replace("/api", "")
-    : "http://localhost:4050";
 
   return (
     <div className="client-detail-page cdx-page">
@@ -460,11 +452,12 @@ export default function ClientDetailPage() {
           <div className="cdx-group">
             <div className="cdx-group-title">Business &amp; Lead</div>
             <KV label="Client Type" value={client.clientType} cap />
-            <KV label="Category" value={clientCategoryLabel(client.businessCategory)} />
+            <KV label="Category" value={clientCategoryLabel(client.businessCategory, categories)} />
             <KV label="Deals In" value={client.projectType} cap />
             <KV label="GST No." value={client.gstNo} />
             <KV label="TAN No." value={client.tanNo} />
             <KV label="Lead Source" value={client.leadSource} cap />
+            {client.referredBy && <KV label="Referred By" value={client.referredBy} />}
             <KV label="Sales Person" value={salesName || "Unassigned"} />
             <KV label="Lead Status" value={statusLabel} />
           </div>
@@ -567,7 +560,7 @@ export default function ClientDetailPage() {
                   </thead>
                   <tbody>
                     {contracts.map((contract) => {
-                      const piUrl = contract.piAttachment?.filename ? `${piBaseUrl}/uploads/${contract.piAttachment.filename}` : null;
+                      const piUrl = contract.piAttachment?.filename ? uploadsUrl(contract.piAttachment.filename) : null;
                       const dueDate = dueDateOf(contract);
                       const overdue = dueDate && dueDate < now;
                       return (
@@ -597,9 +590,14 @@ export default function ClientDetailPage() {
                           </td>
                           <td>
                             <div className="action-buttons">
-                              <button className="btn-small" title="View Full Details" onClick={() => { setManageContractId(contract._id); setManageContractTab(null); setManageContractDefaultTab("details"); }}>
+                              <button className="btn-small" title="View Full Details" onClick={() => { setManageContractId(contract._id); setManageContractTab(null); }}>
                                 <Eye size={14} strokeWidth={2.1} />
                               </button>
+                              {(contract.dueAmount ?? 0) > 0 && (
+                                <button className="btn-small" title="Email a payment reminder" data-remind={contract._id} onClick={() => setReminderFor(contract)}>
+                                  <Mail size={14} strokeWidth={2.1} />
+                                </button>
+                              )}
                               <button className="btn-small" title="Edit" onClick={() => navigate(`/clients/${clientId}/contracts/${contract._id}/edit`)}>
                                 <Pencil size={14} strokeWidth={2.1} />
                               </button>
@@ -875,36 +873,12 @@ export default function ClientDetailPage() {
             </Block>
           </div>
 
-          {/* ── Activity ── */}
-          <Block id="activity" Icon={History} title="Activity Timeline" count={activity.length}>
-            {activity.length === 0 ? (
-              <EmptyState message="No activity recorded yet" />
-            ) : (
-              <>
-                <div className="cd-timeline cdx-timeline">
-                  {visibleActivity.map((entry) => {
-                    const meta = ACTIVITY_META[entry.type] || { Icon: Activity, color: "#94a3b8" };
-                    return (
-                      <div key={entry._id} className="cd-timeline-row">
-                        <div className="cd-timeline-icon" style={{ background: `${meta.color}1a`, color: meta.color }}>
-                          <meta.Icon size={14} strokeWidth={2.2} />
-                        </div>
-                        <div>
-                          <div className="cd-timeline-message">{entry.message}</div>
-                          <div className="cd-timeline-time">{fmtDateTime(entry.createdAt)}</div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                {activity.length > 8 && (
-                  <button type="button" className="cdx-more" onClick={() => setShowAllActivity((v) => !v)}>
-                    {showAllActivity ? "Show less" : `Show all ${activity.length}`}
-                  </button>
-                )}
-              </>
-            )}
-          </Block>
+          {/* ── Email the client ── */}
+          {canEmailClient && (
+            <Block id="email" Icon={Mail} title="Email Client" subtitle="Payment reminders, renewal reminders and monthly reports — sent to the client's email">
+              <EmailClientPanel client={client} contracts={contracts} onSent={() => loadAll({ quiet: true })} />
+            </Block>
+          )}
         </main>
       </div>
 
@@ -975,19 +949,25 @@ export default function ClientDetailPage() {
       )}
 
       {manageContractId && (
-        <div className="modal-overlay" onClick={() => { setManageContractId(null); setManageContractTab(null); setManageContractDefaultTab(null); }}>
+        <div className="modal-overlay" onClick={closeContractModal}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <button className="close-btn" onClick={() => { setManageContractId(null); setManageContractTab(null); setManageContractDefaultTab(null); }}>
+            <button className="close-btn" onClick={closeContractModal} aria-label="Close">
               <X size={18} strokeWidth={2} />
             </button>
             <ContractDetail
               contractId={manageContractId}
               onlyTab={manageContractTab}
-              defaultTab={manageContractDefaultTab}
-              onClose={() => { setManageContractId(null); setManageContractTab(null); setManageContractDefaultTab(null); loadAll(); }}
             />
           </div>
         </div>
+      )}
+      {reminderFor && (
+        <PaymentReminderDialog
+          clientId={clientId}
+          contract={reminderFor}
+          onClose={() => setReminderFor(null)}
+          onSent={() => loadAll()}
+        />
       )}
     </div>
   );

@@ -56,7 +56,7 @@ function me() {
 
 // The super admin only views reports; the assigned user, sales person and
 // manager add them. A manager can remove any; others only what they added.
-const VIEW_ONLY_ROLES = ["admin"];
+const VIEW_ONLY_ROLES = ["admin", "salesmanager"];
 
 function canDelete(report) {
   const { role, userId } = me();

@@ -10,6 +10,7 @@ import HrDashboard from "./pages/HrDashboard";
 import ManagerDashboard from "./pages/ManagerDashboard";
 import SalesDashboard from "./pages/SalesDashboard";
 import TelecallerDashboard from "./pages/TelecallerDashboard";
+import SalesManagerDashboard from "./pages/SalesManagerDashboard";
 import ClientDashboard from "./pages/ClientDashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ContractBuilderPage from "./features/contract-builder/pages/ContractBuilderPage";
@@ -18,7 +19,7 @@ import ContractBuilderPage from "./features/contract-builder/pages/ContractBuild
 // The client list lives inside each role's dashboard (admin sidebar, sales and
 // user tabs). The bare /clients URL just forwards there, so it never shows up
 // without its navigation.
-const CLIENTS_HOME = { admin: "/admin?tab=clients", sales: "/sales?view=clients", user: "/dashboard?tab=clients" };
+const CLIENTS_HOME = { admin: "/admin?tab=clients", salesmanager: "/sales-manager?view=clients", sales: "/sales?view=clients", user: "/dashboard?tab=clients" };
 function ClientsHome() {
   return <Navigate to={CLIENTS_HOME[localStorage.getItem("role")] || "/"} replace />;
 }
@@ -39,7 +40,7 @@ function App() {
         <Route
           path="/clients/:clientId/contracts/new"
           element={
-            <ProtectedRoute roles={["admin", "sales", "user"]}>
+            <ProtectedRoute roles={["admin", "salesmanager", "sales", "user"]}>
               <ContractBuilderPage />
             </ProtectedRoute>
           }
@@ -48,7 +49,7 @@ function App() {
         <Route
           path="/clients/:clientId/contracts/:contractId/edit"
           element={
-            <ProtectedRoute roles={["admin", "sales", "user"]}>
+            <ProtectedRoute roles={["admin", "salesmanager", "sales", "user"]}>
               <ContractBuilderPage />
             </ProtectedRoute>
           }
@@ -75,7 +76,7 @@ function App() {
         <Route
           path="/clients"
           element={
-            <ProtectedRoute roles={["admin", "sales", "user"]}>
+            <ProtectedRoute roles={["admin", "salesmanager", "sales", "user"]}>
               <ClientsHome />
             </ProtectedRoute>
           }
@@ -84,7 +85,7 @@ function App() {
         <Route
           path="/clients/:clientId"
           element={
-            <ProtectedRoute roles={["admin", "sales", "user"]}>
+            <ProtectedRoute roles={["admin", "salesmanager", "sales", "user"]}>
               <ClientDetailPage />
             </ProtectedRoute>
           }
@@ -122,6 +123,15 @@ function App() {
           element={
             <ProtectedRoute role="sales">
               <SalesDashboard />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/sales-manager"
+          element={
+            <ProtectedRoute role="salesmanager">
+              <SalesManagerDashboard />
             </ProtectedRoute>
           }
         />

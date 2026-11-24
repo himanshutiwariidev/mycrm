@@ -110,4 +110,7 @@ function describePayment(p) {
  */
 const collectedOf = (p) => round2((p?.amount || 0) - (p?.gstNotCharged || 0));
 
-module.exports = { buildPayment, describePayment, collectedOf, sensibleDate, round2, inr };
+/** What a contract wrote off as bad debt (comes off the due, never collected). */
+const writtenOffOf = (contract) => contract?.badDebt?.amount || 0;
+
+module.exports = { buildPayment, describePayment, collectedOf, writtenOffOf, sensibleDate, round2, inr };

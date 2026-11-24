@@ -1,11 +1,16 @@
 // Shared by every photo / screenshot upload in the app (client-meeting
 // photos, deliverable work proof).
 
-// Uploaded files are served by the API server itself, next to /api.
-const FILES_BASE = (import.meta.env.VITE_API_BASE_URL || "https://crm.cybertricksmedia.in/api").replace(/\/api\/?$/, "");
+// Uploaded files are served by the API server under /api/uploads. (Not
+// /uploads: the live server only forwards /api to the backend — anything else
+// returns the frontend page, which is why images showed as broken.)
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "https://crm.cybertricksmedia.in/api").replace(/\/+$/, "");
+
+/** Public URL of a file the server stored under uploads/ (path like "visit-photos/abc.jpg"). */
+export const uploadsUrl = (filePath) => `${API_BASE}/uploads/${String(filePath).split("/").map(encodeURIComponent).join("/")}`;
 
 /** Public URL of a file the server stored under uploads/<folder>/. */
-export const uploadedFileUrl = (folder, filename) => `${FILES_BASE}/uploads/${folder}/${encodeURIComponent(filename)}`;
+export const uploadedFileUrl = (folder, filename) => uploadsUrl(`${folder}/${filename}`);
 
 const MAX_EDGE = 1600;
 const MAX_ORIGINAL_MB = 25; // same cap as the server

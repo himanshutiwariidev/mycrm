@@ -165,6 +165,105 @@ function ServiceWiseCases({ stats }) {
   );
 }
 
+// Same blues as the dashboard's "Total Revenue by Cases" donut.
+const CASE_TYPE_META = {
+  renewal: { label: "Renewal", color: "#2563eb", bg: "#dbeafe", bar: "#2563eb" },
+  new: { label: "New client", color: "#4f7fd9", bg: "#e8efff", bar: "#9dbcf6" },
+};
+
+/**
+ * Money collected in the period, split by renewal contracts vs new ones —
+ * one row per contract that received payments (same numbers as the
+ * dashboard's revenue split: renewal + new = total collected).
+ */
+function RevenueByCaseType({ stats }) {
+  const [filter, setFilter] = useState("all");
+  const split = stats.revenueByCaseType || {};
+  const all = split.rows || [];
+  const rows = filter === "all" ? all : all.filter((r) => r.type === filter);
+  const total = (split.renewal || 0) + (split.new || 0);
+  const pct = (v) => (total ? Math.round((v / total) * 100) : 0);
+  const shown = rows.reduce((sum, r) => sum + r.collected, 0);
+
+  const tiles = [
+    { id: "all", label: "Total collected", value: total, sub: `${all.length} contract${all.length === 1 ? "" : "s"}`, color: T.textPrimary },
+    { id: "renewal", label: "Renewals", value: split.renewal || 0, sub: `${split.renewalContracts || 0} contracts · ${pct(split.renewal || 0)}%`, color: CASE_TYPE_META.renewal.color },
+    { id: "new", label: "New clients", value: split.new || 0, sub: `${split.newContracts || 0} contracts · ${pct(split.new || 0)}%`, color: CASE_TYPE_META.new.color },
+  ];
+
+  return (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10, marginBottom: 12 }} data-case-tiles>
+        {tiles.map((t) => {
+          const active = filter === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setFilter(t.id)}
+              aria-pressed={active}
+              style={{
+                textAlign: "left", cursor: "pointer", fontFamily: "inherit", padding: "12px 14px", borderRadius: 12,
+                border: `1px solid ${active ? t.color : T.border}`, background: active ? `${t.color}0d` : T.card,
+                boxShadow: active ? `0 0 0 3px ${t.color}1a` : "none",
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.4 }}>{t.label}</div>
+              <div style={{ fontSize: 19, fontWeight: 700, color: t.color, marginTop: 4 }}>{fmtINR(t.value)}</div>
+              <div style={{ fontSize: 12, color: T.textSecondary, marginTop: 2 }}>{t.sub}</div>
+            </button>
+          );
+        })}
+      </div>
+      {total > 0 && (
+        <div style={{ display: "flex", height: 8, borderRadius: 99, overflow: "hidden", background: T.borderLight, marginBottom: 16 }} title={`Renewals ${pct(split.renewal || 0)}% · New ${pct(split.new || 0)}%`}>
+          <span style={{ width: `${pct(split.renewal || 0)}%`, background: CASE_TYPE_META.renewal.bar }} />
+          <span style={{ width: `${pct(split.new || 0)}%`, background: CASE_TYPE_META.new.bar }} />
+        </div>
+      )}
+      {!rows.length ? (
+        <Empty>No {filter === "renewal" ? "renewal " : filter === "new" ? "new-client " : ""}revenue collected in this period</Empty>
+      ) : (
+        <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: 440 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 820 }} data-case-table>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${T.border}` }}>
+                {["Client", "Contract", "Type", "Salesperson", "Contract Amount", "Payments", "Collected", "Last Payment"].map((h) => (
+                  <th key={h} style={thStyle(["Contract Amount", "Payments", "Collected"].includes(h) ? "right" : "left")}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.contractId} style={{ borderBottom: `1px solid ${T.borderLight}` }}>
+                  <td style={{ padding: 10, color: T.textPrimary, fontWeight: 600 }}>{r.companyName || r.clientName}</td>
+                  <td style={{ padding: 10, color: T.textSecondary }}>
+                    {r.projectName}
+                    {r.contractNumber && <div style={{ fontSize: 11.5, color: T.textMuted }}>{r.contractNumber}</div>}
+                  </td>
+                  <td style={{ padding: 10 }}><StatusPill meta={CASE_TYPE_META[r.type]} label={CASE_TYPE_META[r.type].label} /></td>
+                  <td style={{ padding: 10, color: T.textSecondary }}>{r.salesPerson}</td>
+                  <td style={{ padding: 10, color: T.textSecondary, textAlign: "right", whiteSpace: "nowrap" }}>{fmtINR(r.contractAmount)}</td>
+                  <td style={{ padding: 10, color: T.textSecondary, textAlign: "right" }}>{r.payments}</td>
+                  <td style={{ padding: 10, color: T.textPrimary, fontWeight: 700, textAlign: "right", whiteSpace: "nowrap" }}>{fmtINR(r.collected)}</td>
+                  <td style={{ padding: 10, color: T.textSecondary, whiteSpace: "nowrap" }}>{fmtShortDate(r.lastPaidOn)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={6} style={{ padding: 10, fontWeight: 700, color: T.textPrimary }}>Total{filter !== "all" ? ` · ${filter === "renewal" ? "renewals" : "new clients"}` : ""}</td>
+                <td style={{ padding: 10, fontWeight: 700, color: T.textPrimary, textAlign: "right", whiteSpace: "nowrap" }} data-case-total>{fmtINR(shown)}</td>
+                <td />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
 function AllActivity({ activity }) {
   if (!activity.length) return <Empty>No activity recorded yet</Empty>;
   return (
@@ -193,6 +292,7 @@ const DETAIL_TABS = [
   { id: "renewals", label: "Renewal Cases" },
   { id: "balance", label: "Balance Due" },
   { id: "services", label: "Service Wise Cases" },
+  { id: "caseRevenue", label: "Revenue: Renewal / New" },
   { id: "activity", label: "All Activity" },
 ];
 
@@ -223,6 +323,7 @@ export default function DashboardDetails({ stats, activity, tab, onTabChange }) 
       {tab === "renewals" && <RenewalCasesTable stats={stats} />}
       {tab === "balance" && <BalanceDueTable stats={stats} />}
       {tab === "services" && <ServiceWiseCases stats={stats} />}
+      {tab === "caseRevenue" && <RevenueByCaseType stats={stats} />}
       {tab === "activity" && <AllActivity activity={activity} />}
     </div>
   );

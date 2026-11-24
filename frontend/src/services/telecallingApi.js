@@ -13,6 +13,11 @@ export const getSalesPeople = () => API.get("/telecalling/sales-people");
 // Sales
 export const getAssignedMeetings = (scope) => API.get("/telecalling/meetings/assigned", { params: { scope } });
 export const updateMeetingStatus = (id, payload) => API.put(`/telecalling/meetings/${id}/status`, payload);
+// Sales person / sales manager: add a meeting yourself (e.g. found on the spot).
+export const createOwnMeeting = (payload) => API.post("/telecalling/meetings", payload);
+
+// Sales manager (and super admin): give a booked meeting to a sales person.
+export const assignMeeting = (id, payload) => API.put(`/telecalling/meetings/${id}/assign`, payload);
 
 // Super admin
 export const getTelecallingOverview = (params) => API.get("/telecalling/admin/overview", { params });

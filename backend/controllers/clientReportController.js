@@ -11,6 +11,44 @@ const ClientReport = require("../models/ClientReport");
 const { logActivity } = require("../utils/activityLogger");
 const { PERIOD_RE, latestAllowedMonth } = require("../utils/taskPeriods");
 const { SERVICE_CATEGORY_LABELS } = require("../utils/pricingHelpers");
+const { clientFilterFor } = require("../middleware/clientOwnership");
+const clientService = require("../services/clientService");
+
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const periodLabelOf = (period) => { const [y, m] = String(period).split("-").map(Number); return `${MONTHS[m - 1]} ${y}`; };
+
+/**
+ * POST /api/client-reports/:id/share { message? } — email a monthly report to
+ * the client: the file as an attachment, or the link (e.g. a Google Sheet).
+ */
+exports.shareReport = async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ message: "Report not found" });
+    const report = await ClientReport.findById(req.params.id).lean();
+    if (!report) return res.status(404).json({ message: "Report not found" });
+    if (!(await canAccessClient(req.user, report.clientId))) return res.status(403).json({ message: "You don't have access to this client's reports" });
+    const client = await Client.findById(report.clientId).lean();
+    if (!client?.email) return res.status(400).json({ message: "This client has no email address — add it with Edit client first" });
+    let filePath;
+    if (report.kind === "file") {
+      filePath = path.join(REPORT_DIR, path.basename(report.filename));
+      if (!fs.existsSync(filePath)) return res.status(404).json({ message: "The report file is missing on the server" });
+    }
+    const contract = await Contract.findById(report.contractId).select("projectName contractNumber").lean();
+    const serviceLabel = SERVICE_CATEGORY_LABELS[report.categoryId] || report.categoryId;
+    const periodLabel = periodLabelOf(report.period);
+    const message = typeof req.body.message === "string" ? req.body.message.trim().slice(0, 2000) : "";
+
+    await clientService.sendMonthlyReportEmail({ client, contract, serviceLabel, periodLabel, report, filePath, message });
+
+    const actor = (await User.findById(req.user.id).select("name").lean())?.name || "Someone";
+    await logActivity(client._id, "report_shared", `${serviceLabel} report for ${periodLabel} emailed to ${client.email} by ${actor}`, { reportId: report._id, contractId: report.contractId });
+    return res.json({ message: `${serviceLabel} report for ${periodLabel} emailed to ${client.email}` });
+  } catch (error) {
+    console.error("Error sharing report:", error);
+    return res.status(error.statusCode || 500).json({ message: error.message || "Failed to email the report" });
+  }
+};
 
 // Client reports are business documents, so they live OUTSIDE the public
 // /uploads folder and are only ever served through the authenticated
@@ -61,9 +99,14 @@ exports.receiveReportFile = (req, res, next) => {
  * client), the client's sales person, and a user assigned to the client or to
  * one of its tasks.
  */
+// Can open every client's reports, but not add or remove them.
+const VIEW_ONLY_ROLES = { admin: "Super admin", salesmanager: "Sales manager" };
+
 async function canAccessClient(user, clientId) {
   if (!mongoose.isValidObjectId(clientId)) return false;
-  if (user.role === "admin" || user.role === "manager") return Client.exists({ _id: clientId }).then(Boolean);
+  if (["admin", "manager"].includes(user.role)) return Client.exists({ _id: clientId }).then(Boolean);
+  // Sales manager: any client except the ones a super admin handles personally.
+  if (user.role === "salesmanager") return Client.exists({ _id: clientId, ...(await clientFilterFor(user)) }).then(Boolean);
   const client = await Client.findById(clientId).select("salesPerson assignedUser").lean();
   if (!client) return false;
   if (user.role === "sales") return String(client.salesPerson || "") === String(user.id);
@@ -127,7 +170,7 @@ exports.addReport = async (req, res) => {
   try {
     const { clientId, contractId, categoryId } = req.body;
     const period = String(req.body.period || "");
-    if (req.user.role === "admin") return reject(403, "Super admin can view reports but not add them");
+    if (VIEW_ONLY_ROLES[req.user.role]) return reject(403, `${VIEW_ONLY_ROLES[req.user.role]} can view reports but not add them`);
     if (!(await canAccessClient(req.user, clientId))) return reject(403, "You don't have access to this client's reports");
     if (!PERIOD_RE.test(period)) return reject(400, "Choose the report month");
     if (period > latestAllowedMonth()) return reject(400, "Reports can't be added for a future month");
@@ -197,7 +240,7 @@ exports.deleteReport = async (req, res) => {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ message: "Report not found" });
     const report = await ClientReport.findById(req.params.id);
     if (!report) return res.status(404).json({ message: "Report not found" });
-    if (req.user.role === "admin") return res.status(403).json({ message: "Super admin can view reports but not remove them" });
+    if (VIEW_ONLY_ROLES[req.user.role]) return res.status(403).json({ message: `${VIEW_ONLY_ROLES[req.user.role]} can view reports but not remove them` });
     if (req.user.role !== "manager" && String(report.uploadedBy) !== String(req.user.id)) {
       return res.status(403).json({ message: "You can only remove reports you added" });
     }

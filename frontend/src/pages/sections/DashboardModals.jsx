@@ -93,6 +93,7 @@ export default function DashboardModals({
                     <option value="manager">Manager</option>
                     <option value="hr">HR</option>
                     <option value="sales">Sales</option>
+                    <option value="salesmanager">Sales Manager</option>
                     <option value="telecaller">Telecaller</option>
                     {editUser.role === "client" && <option value="client">Client</option>}
                   </select>

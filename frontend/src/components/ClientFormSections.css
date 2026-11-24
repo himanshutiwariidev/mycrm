@@ -328,3 +328,68 @@
     transform: rotate(360deg);
   }
 }
+
+/* Category: dropdown + "+" to add a new one */
+.cf-cat-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.cf-cat-row select,
+.cf-cat-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.cf-cat-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 42px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1.5px solid #e2e6ef;
+  background: #fff;
+  color: #475569;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cf-cat-btn:hover:not(:disabled) {
+  border-color: #f7931e;
+  color: #c2410c;
+}
+
+.cf-cat-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.cf-cat-plus {
+  padding: 0;
+  width: 42px;
+  color: #c2410c;
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.cf-cat-add {
+  border-color: #f7931e;
+  background: #f7931e;
+  color: #fff;
+}
+
+.cf-cat-add:hover:not(:disabled) {
+  color: #fff;
+  background: #ea7a0c;
+}
+
+.cf-cat-error {
+  color: #dc2626;
+  font-size: 12px;
+}

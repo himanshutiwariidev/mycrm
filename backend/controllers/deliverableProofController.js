@@ -170,6 +170,9 @@ exports.listProofs = async (req, res) => {
         Task.distinct("_id", { assignedTo: req.user.id }),
       ]);
       filter.$and.push({ $or: [{ clientId: { $in: ownClients } }, { taskId: { $in: ownTasks } }] });
+    } else if (req.user.role === "salesmanager") {
+      // The sales team's clients — not the ones a super admin handles personally.
+      filter.$and.push({ clientId: { $in: await getOwnedClientIds(req.user) } });
     } else if (!isManager(req.user)) {
       return res.status(403).json({ message: "Not allowed" });
     }

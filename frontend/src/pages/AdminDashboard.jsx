@@ -29,6 +29,7 @@ const ROLE_LABELS = {
   manager: "Manager",
   hr: "HR",
   sales: "Sales",
+  salesmanager: "Sales Manager",
   telecaller: "Telecaller",
 };
 

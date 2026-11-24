@@ -19,10 +19,10 @@ const handleValidationErrors = (req, res, next) => {
 // ── Allowed role values ─────────────────────────────────────────────────────
 // "admin" is intentionally excluded — only the hardcoded admin account or an
 // existing admin can hold that role; regular user creation is limited to these.
-// "manager" is creatable here too, but only by an admin caller (enforced in
+// "manager" and "salesmanager" are creatable here too, but only by an admin caller (enforced in
 // userController.createUser, since this validator has no access to who's
 // calling — it only checks that the value is a structurally valid role).
-const VALID_USER_ROLES = ["user", "hr", "sales", "client", "manager", "telecaller"];
+const VALID_USER_ROLES = ["user", "hr", "sales", "client", "manager", "telecaller", "salesmanager"];
 
 // Names: letters in any language (e.g. Hindi), spaces and ' . , - ( ).
 // Parentheses allow labels like "Priya Nair (Demo)"; still no digits, <, > etc.

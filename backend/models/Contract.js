@@ -211,6 +211,27 @@ const ContractSchema = new mongoose.Schema(
         gstNotCharged: { type: Number, min: 0 },
       },
     ],
+    // Renewal reminder emails sent to the client (client page → Email client).
+    renewalReminders: [
+      {
+        _id: false,
+        sentAt: { type: Date, default: Date.now },
+        sentTo: { type: String, trim: true },
+        renewalDate: { type: Date },
+        amount: { type: Number, min: 0 },
+        byName: { type: String, trim: true },
+      },
+    ],
+    // What's still due, written off when the client won't pay (a bad debt).
+    // It comes off the due (never upcoming/overdue again) but is NOT a
+    // payment and NOT an expense. Cleared again by undoing the write-off.
+    badDebt: {
+      amount: { type: Number, min: 0 },
+      writtenOffAt: { type: Date },
+      reason: { type: String, trim: true, maxlength: 1000 },
+      by: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      byName: { type: String, trim: true },
+    },
     receivedAmount: {
       type: Number,
       default: 0,
@@ -259,7 +280,8 @@ ContractSchema.pre("save", function () {
   const counted = this.payments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
   const notCharged = this.payments.reduce((sum, payment) => sum + (payment.gstNotCharged || 0), 0);
   this.receivedAmount = Math.round((counted - notCharged) * 100) / 100;
-  this.dueAmount = Math.round(((this.projectAmount || 0) - counted) * 100) / 100;
+  const writtenOff = this.badDebt?.amount || 0;
+  this.dueAmount = Math.round(((this.projectAmount || 0) - counted - writtenOff) * 100) / 100;
   // Nothing left to collect → no next due date (otherwise a fully paid
   // contract could still show up as "Payment Overdue").
   if (this.dueAmount <= 0 && this.nextDueDate) this.nextDueDate = undefined;

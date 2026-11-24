@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { toast } from "sonner";
 import { PhoneCall, Phone, CalendarPlus, CalendarClock, Clock } from "lucide-react";
-import { logCall, getSalesPeople } from "../../services/telecallingApi";
+import { logCall } from "../../services/telecallingApi";
 import {
   CALL_OUTCOMES, CONNECTED_OUTCOMES, NOT_CONNECTED_OUTCOMES, FOLLOW_UP_OUTCOMES, MEETING_MODES, LEAD_STATUS,
 } from "../../config/telecalling";
@@ -25,8 +25,8 @@ function OutcomeTile({ k, selected, onSelect }) {
 
 /**
  * Log a call on a lead: pick the outcome, note what the client said, plan
- * the follow-up — and when they agree to meet, book the meeting for a sales
- * person right here (it then shows up in the sales person's and admin's panels).
+ * the follow-up — and when they agree to meet, book the meeting right here.
+ * The sales manager then assigns it to a sales person.
  */
 export default function LogCallModal({ lead, onClose, onLogged }) {
   const [outcome, setOutcome] = useState("");
@@ -34,8 +34,7 @@ export default function LogCallModal({ lead, onClose, onLogged }) {
   const [seconds, setSeconds] = useState("");
   const [notes, setNotes] = useState("");
   const [followUpAt, setFollowUpAt] = useState("");
-  const [meeting, setMeeting] = useState({ date: "", mode: "in-person", location: "", salesPersonId: "", agenda: lead.requirement || "", projectType: "service" });
-  const [salesPeople, setSalesPeople] = useState([]);
+  const [meeting, setMeeting] = useState({ date: "", mode: "in-person", location: "", agenda: lead.requirement || "", projectType: "service" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -43,17 +42,12 @@ export default function LogCallModal({ lead, onClose, onLogged }) {
   const isMeeting = outcome === "meeting-scheduled";
   const wantsFollowUp = FOLLOW_UP_OUTCOMES.includes(outcome);
 
-  useEffect(() => {
-    getSalesPeople().then(({ data }) => setSalesPeople(data.salesPeople || [])).catch(() => setSalesPeople([]));
-  }, []);
-
   const setM = (key) => (e) => setMeeting((m) => ({ ...m, [key]: e.target?.value ?? e }));
 
   const submit = async () => {
     if (!outcome) { setError("Choose how the call went"); return; }
     if (isMeeting) {
       if (!meeting.date) { setError("Pick the meeting date and time"); return; }
-      if (!meeting.salesPersonId) { setError("Assign a sales person for the meeting"); return; }
       if (meeting.mode === "in-person" && !meeting.location.trim()) { setError("Add the meeting address"); return; }
     }
     setSaving(true);
@@ -68,9 +62,6 @@ export default function LogCallModal({ lead, onClose, onLogged }) {
         meeting: isMeeting ? { ...meeting, date: new Date(meeting.date).toISOString() } : undefined,
       });
       toast.success(data.message);
-      if (data.reassignedTo) {
-        toast.info(`Assigned to ${data.reassignedTo} — this number is already their client`, { duration: 6000 });
-      }
       onLogged?.(data);
     } catch (err) {
       setError(err.response?.data?.message || "Couldn't save the call");
@@ -164,14 +155,7 @@ export default function LogCallModal({ lead, onClose, onLogged }) {
               <input className="tc-input" type="datetime-local" value={meeting.date} onChange={setM("date")} min={toLocalInput(new Date())} />
               <QuickTimes onPick={(d) => setMeeting((m) => ({ ...m, date: toLocalInput(d) }))} options={["tomorrow", "tomorrow4", "3d", "week"]} />
             </Field>
-            <Field label="Assign to sales person" required>
-              <select className="tc-input" value={meeting.salesPersonId} onChange={setM("salesPersonId")}>
-                <option value="">Select…</option>
-                {salesPeople.map((s) => <option key={s._id} value={s._id}>{s.name}</option>)}
-              </select>
-              {!salesPeople.length && <span className="tc-field-hint">No active sales people found — ask the admin to add one.</span>}
-            </Field>
-            <Field label="Meeting type" span2>
+            <Field label="Meeting type">
               <div className="tc-segmented" role="radiogroup">
                 {Object.entries(MEETING_MODES).map(([k, m]) => (
                   <button key={k} type="button" className={meeting.mode === k ? "active" : ""} onClick={() => setMeeting((s) => ({ ...s, mode: k }))} aria-pressed={meeting.mode === k}>
@@ -194,7 +178,7 @@ export default function LogCallModal({ lead, onClose, onLogged }) {
             </Field>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#64748b", marginTop: 12 }}>
-            <Clock size={13} /> The lead becomes a client of the chosen sales person and appears in their Meetings tab.
+            <Clock size={13} /> The sales manager assigns a sales person — the meeting then appears in that person&apos;s Meetings tab.
           </div>
         </div>
       )}

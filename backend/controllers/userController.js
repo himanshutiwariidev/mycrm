@@ -20,6 +20,9 @@ const COOKIE_OPTIONS = {
 // passwords verified at 10 rounds continue to work without migration.
 const BCRYPT_ROUNDS = 12;
 
+// Roles only an admin may hand out.
+const ADMIN_GRANTED_ROLES = ["manager", "salesmanager"];
+
 // ── CREATE USER (admin / HR / manager) ──────────────────────────────────────
 exports.createUser = asyncHandler(async (req, res) => {
   const { name, email, password, role } = req.body;
@@ -31,9 +34,9 @@ exports.createUser = asyncHandler(async (req, res) => {
   let resolvedRole = role;
   if (req.user.role === "manager") {
     resolvedRole = "user";
-  } else if (role === "manager" && req.user.role !== "admin") {
-    // Only an admin can grant the manager role itself (e.g. HR cannot).
-    return res.status(403).json({ message: "Only an admin can create a manager account" });
+  } else if (ADMIN_GRANTED_ROLES.includes(role) && req.user.role !== "admin") {
+    // Only an admin can grant the manager / sales manager roles (e.g. HR cannot).
+    return res.status(403).json({ message: "Only an admin can create a manager or sales manager account" });
   }
 
   const existingUser = await User.findOne({ email: normalizedEmail });
@@ -97,6 +100,9 @@ exports.updateUser = asyncHandler(async (req, res) => {
     if (updatePayload.role && updatePayload.role !== "user") {
       return res.status(403).json({ message: "Managers cannot change a user's role" });
     }
+  }
+  if (ADMIN_GRANTED_ROLES.includes(updatePayload.role) && req.user.role !== "admin") {
+    return res.status(403).json({ message: "Only an admin can make someone a manager or sales manager" });
   }
 
   if (updatePayload.email) {

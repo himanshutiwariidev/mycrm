@@ -52,7 +52,7 @@ export default function MeetingUpdateModal({ meeting, onClose, onUpdated }) {
       width={600}
       footer={
         <>
-          <Btn variant="secondary" onClick={onClose}>Close</Btn>
+          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
           <Btn onClick={submit} disabled={saving}>{saving ? "Saving…" : "Save update"}</Btn>
         </>
       }

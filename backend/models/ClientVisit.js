@@ -42,6 +42,9 @@ const ClientVisitSchema = new mongoose.Schema(
   {
     salesPerson: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     clientId: { type: mongoose.Schema.Types.ObjectId, ref: "Client", required: true },
+    // The client meeting this visit was made for (so its location and photos
+    // show on the meeting), when it was started from one.
+    meeting: { type: mongoose.Schema.Types.ObjectId, ref: "Meeting" },
     purpose: { type: String, trim: true, maxlength: 500 },
     status: { type: String, enum: ["in-progress", "completed"], default: "in-progress" },
     checkIn: { type: LocationFixSchema, required: true },
@@ -55,6 +58,7 @@ const ClientVisitSchema = new mongoose.Schema(
 ClientVisitSchema.index({ salesPerson: 1, createdAt: -1 });
 ClientVisitSchema.index({ createdAt: -1 });
 ClientVisitSchema.index({ clientId: 1, createdAt: -1 });
+ClientVisitSchema.index({ meeting: 1 }, { sparse: true });
 // At most one open meeting per sales person — enforced by the database so
 // two quick taps (or two tabs) can't both check in.
 ClientVisitSchema.index(

@@ -27,6 +27,12 @@ const ClientSchema = new mongoose.Schema(
       enum: ["cold call", "visit", "self", "telecaller", "client reference", "company reference", "other"],
       requiredd: true
     },
+    // Lead source "client reference": the existing client who referred them.
+    referredBy: {
+      type: String,
+      trim: true,
+      maxlength: 200,
+    },
     clientName: {
       type: String,
       required: [true, "Client name is required"],
@@ -44,9 +50,10 @@ const ClientSchema = new mongoose.Schema(
       trim: true,
       match: [/^\S+@\S+\.\S+$/, "Invalid email format"],
     },
+    // Required by the Add Client form (clientController.createClient); a client
+    // added with a meeting found on the spot can be saved without one.
     phone: {
       type: String,
-      required: [true, "Phone number is required"],
       trim: true,
     },
     companyName: {
@@ -65,10 +72,11 @@ const ClientSchema = new mongoose.Schema(
       type: String,
       enum: ["pvt ltd", "ltd", "llp", "huf", "proprietor", "other"],
     },
-    // The client's industry ("Category" in the client form). Optional.
+    // The client's industry ("Category" in the client form). Optional. One of
+    // the ClientCategory values (added from the form's "+"), checked in clientController.
     businessCategory: {
       type: String,
-      enum: ["manufacturing", "fmcg", "furniture", "cosmetics", "health", "electronics", "real-estate", "automobile", "jewellery", "perfume"],
+      trim: true,
     },
     projectType: {
       type: String,

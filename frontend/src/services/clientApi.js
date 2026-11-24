@@ -131,6 +131,12 @@ export const addPayment = (contractId, paymentData) =>
 export const deletePayment = (contractId, paymentId) =>
   API.delete(`/clients/contracts/${contractId}/payments/${paymentId}`);
 
+// Bad debt: write off what's still due ({ reason }), or undo it (super admin / sales manager).
+export const writeOffBadDebt = (contractId, payload) =>
+  API.post(`/clients/contracts/${contractId}/bad-debt`, payload);
+export const undoBadDebt = (contractId) =>
+  API.delete(`/clients/contracts/${contractId}/bad-debt`);
+
 // ============= CONTRACT PI (PROFORMA INVOICE) =============
 
 export const uploadContractPi = (contractId, file) => {
@@ -150,8 +156,13 @@ export const getDashboardStats = () =>
   API.get("/clients/dashboard-stats");
 
 // Sales person's own book only: renewals, balance due, deliverables (role: sales).
-export const getSalesDashboard = () =>
-  API.get("/clients/sales-dashboard");
+// A sales manager passes { salesPerson } for one person, nothing for the whole team.
+export const getSalesDashboard = (params) =>
+  API.get("/clients/sales-dashboard", { params });
+
+// Sales manager: one row per sales person for a period ({ from, to }).
+export const getSalesTeam = (params) =>
+  API.get("/clients/sales-team", { params });
 
 // ============= PAYMENT REMINDER OPERATIONS =============
 

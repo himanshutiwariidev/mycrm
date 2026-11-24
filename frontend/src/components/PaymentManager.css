@@ -493,3 +493,230 @@
     text-align: left;
   }
 }
+
+.add-payment-form .pay-remind-btn,
+.pay-remind-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 6px 11px;
+  border: 1px solid #fdba74;
+  border-radius: 8px;
+  background: #fff;
+  color: #c2410c;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pay-remind-btn:hover {
+  background: #fff7ed;
+}
+
+/* ── Bad debt ─────────────────────────────────────────────── */
+.pay-due-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pay-due-actions .pay-remind-btn {
+  margin-top: 8px;
+}
+
+.pay-baddebt-btn {
+  border-color: #e2e8f0;
+  color: #64748b;
+}
+
+.pay-baddebt-btn:hover {
+  border-color: #fca5a5;
+  color: #b91c1c;
+  background: #fef2f2;
+}
+
+.pay-stat--due.is-baddebt {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.pay-stat--due.is-baddebt .pay-stat-value {
+  color: #64748b;
+}
+
+.pay-stat--due.is-baddebt .pay-stat-sub {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.pay-progress-fill.is-baddebt {
+  background: repeating-linear-gradient(45deg, #fca5a5 0 4px, #fee2e2 4px 8px);
+}
+
+.baddebt-panel,
+.baddebt-banner {
+  border-radius: 12px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  padding: 14px 16px;
+  color: #7f1d1d;
+}
+
+.baddebt-panel-head,
+.baddebt-banner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.baddebt-panel-head svg,
+.baddebt-banner > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #dc2626;
+}
+
+.baddebt-panel p,
+.baddebt-banner p {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: #991b1b;
+}
+
+.baddebt-banner > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.baddebt-banner .pay-remind-btn {
+  margin-top: 0;
+  flex-shrink: 0;
+}
+
+.baddebt-panel textarea {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 10px;
+  padding: 9px 11px;
+  border: 1px solid #fecaca;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 13.5px;
+  resize: vertical;
+  background: #fff;
+}
+
+.baddebt-panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.baddebt-panel-actions .pay-remind-btn {
+  margin-top: 0;
+}
+
+.baddebt-confirm {
+  padding: 7px 13px;
+  border: 1px solid #b91c1c;
+  border-radius: 8px;
+  background: #dc2626;
+  color: #fff;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.baddebt-confirm:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .baddebt-banner {
+    flex-wrap: wrap;
+  }
+}
+
+/* Due box "⋯" menu (rare actions such as bad debt) */
+.pay-stat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pay-menu {
+  position: relative;
+  margin: -4px -6px -4px 0;
+}
+
+.pay-menu-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.pay-menu-btn:hover,
+.pay-menu-btn[aria-expanded="true"] {
+  background: rgba(15, 23, 42, 0.06);
+  color: #475569;
+}
+
+.pay-menu-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 240px;
+  padding: 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+}
+
+.pay-menu-list button {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #b91c1c;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pay-menu-list button:hover {
+  background: #fef2f2;
+}
+
+.pay-menu-list button svg {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.pay-menu-list small {
+  display: block;
+  margin-top: 1px;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: #94a3b8;
+}

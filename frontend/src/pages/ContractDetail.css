@@ -36,25 +36,368 @@
   color: #1f2937;
 }
 
-.contract-detail-tabs {
+
+/* ── Contract overview: invoice-style statement ─────────────────────────── */
+.civ {
+  --civ-ink: #111111;
+  --civ-sub: #333333;
+  --civ-muted: #6b7280;
+  --civ-line: #d9d9d9;
+  --civ-soft: #f2f2f2;
+  color: var(--civ-ink);
+  font-size: 14px;
   display: flex;
-  gap: 6px;
-  border-bottom: 1px solid #e5e7eb;
-  margin-bottom: -8px;
+  flex-direction: column;
+  gap: 0;
 }
 
-.contract-detail-tab {
-  padding: 10px 18px;
-  border: none;
-  background: transparent;
-  font-size: 13.5px;
+.civ-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Header: wordmark | details */
+.civ-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 32px;
+  padding: 4px 44px 22px 0; /* right: room for the popup's × */
+  border-bottom: 2px solid var(--civ-ink);
+}
+
+.civ-brand-name {
+  font-size: 38px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.civ-brand-tag {
+  margin-top: 8px;
+  font-size: 13px;
   font-weight: 600;
-  color: #6b7280;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
 }
 
-.contract-detail-tab.active {
-  color: #f7931e;
-  border-bottom-color: #f7931e;
+.civ-meta {
+  margin: 0;
+  padding-left: 28px;
+  border-left: 2px solid var(--civ-ink);
+  display: grid;
+  grid-template-columns: auto auto;
+  column-gap: 40px;
+  row-gap: 6px;
+}
+
+.civ-meta div {
+  display: contents;
+}
+
+.civ-meta dt {
+  font-size: 14px;
+  color: var(--civ-sub);
+}
+
+.civ-meta dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.civ-label,
+.civ-doc-label {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--civ-ink);
+}
+
+/* Billed to / payment */
+.civ-parties {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  padding: 22px 0;
+  border-bottom: 1.5px solid var(--civ-ink);
+}
+
+.civ-parties-right {
+  min-width: 220px;
+}
+
+.civ-party-name {
+  margin-top: 8px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.civ-party-line {
+  margin-top: 4px;
+  font-size: 14px;
+  color: var(--civ-sub);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.civ-parties-right .civ-label {
+  margin-bottom: 8px;
+}
+
+/* Description */
+.civ-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.civ > .civ-table {
+  border-bottom: 1.5px solid var(--civ-ink);
+}
+
+.civ > .civ-table th {
+  padding: 20px 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--civ-ink);
+  text-align: left;
+}
+
+.civ > .civ-table td {
+  padding: 4px 0 18px;
+  vertical-align: top;
+}
+
+.civ-r {
+  text-align: right !important;
+  white-space: nowrap;
+}
+
+.civ-nowrap {
+  white-space: nowrap;
+}
+
+.civ-item-title {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.civ-item-tag {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--civ-muted);
+}
+
+.civ-item-sub {
+  margin-top: 4px;
+  font-size: 14px;
+  color: var(--civ-sub);
+}
+
+.civ-pre {
+  white-space: pre-line;
+}
+
+.civ-muted {
+  color: var(--civ-muted);
+}
+
+/* Calculation */
+.civ-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
+  gap: 48px;
+  align-items: start;
+  padding: 18px 0 8px;
+}
+
+.civ-summary-note p {
+  margin: 0 0 14px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--civ-sub);
+}
+
+.civ-summary-note .civ-muted {
+  color: var(--civ-sub);
+}
+
+.civ-calc {
+  margin: 0;
+}
+
+.civ-calc div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 5px 0;
+  font-size: 14px;
+}
+
+.civ-calc dt {
+  color: var(--civ-sub);
+}
+
+.civ-calc dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.civ-calc-total {
+  margin: 6px 0;
+  padding: 10px 0 !important;
+  border-top: 1.5px solid var(--civ-ink);
+  border-bottom: 1px solid var(--civ-ink);
+}
+
+.civ-calc-total dt,
+.civ-calc-total dd {
+  color: var(--civ-ink) !important;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.civ-calc-balance {
+  margin-top: 12px;
+  padding: 12px 0 4px !important;
+  border-top: 2px solid var(--civ-ink);
+}
+
+.civ-calc-balance dt,
+.civ-calc-balance dd {
+  color: var(--civ-ink) !important;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.civ-calc-foot dt,
+.civ-calc-foot dd {
+  font-size: 12px;
+  color: var(--civ-muted) !important;
+}
+
+/* Payments received — boxed table */
+.civ-section-label {
+  margin: 22px 0 10px;
+  font-size: 15px;
+}
+
+.civ-table--boxed {
+  border: 1px solid #c9c9c9;
+  border-radius: 6px;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+}
+
+.civ-table--boxed th,
+.civ-table--boxed td {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--civ-line);
+  border-right: 1px solid var(--civ-line);
+  font-size: 14px;
+  text-align: left;
+}
+
+.civ-table--boxed th:last-child,
+.civ-table--boxed td:last-child {
+  border-right: none;
+}
+
+.civ-table--boxed thead th {
+  background: #e8e8e8;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--civ-ink);
+}
+
+.civ-table--boxed tbody td.civ-muted {
+  font-size: 13px;
+  color: var(--civ-sub);
+}
+
+.civ-table--boxed tfoot td {
+  background: #e8e8e8;
+  border-bottom: none;
+  border-right: none;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.civ-text {
+  margin: 0;
+  line-height: 1.6;
+  color: var(--civ-sub);
+  white-space: pre-line;
+}
+
+.civ-collapse {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 18px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--civ-sub);
+  cursor: pointer;
+}
+
+.civ-import {
+  margin: 8px 0 0;
+}
+
+.civ-import div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--civ-line);
+  font-size: 12.5px;
+}
+
+.civ-import dt {
+  color: var(--civ-sub);
+}
+
+.civ-import dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .civ-head,
+  .civ-parties,
+  .civ-summary {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .civ-meta {
+    padding-left: 0;
+    border-left: none;
+    padding-top: 14px;
+    border-top: 1px solid var(--civ-line);
+  }
+
+  .civ-brand-name {
+    font-size: 30px;
+  }
+
+  .civ-table--boxed {
+    display: block;
+    overflow-x: auto;
+  }
 }

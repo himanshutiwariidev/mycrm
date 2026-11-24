@@ -173,7 +173,7 @@ function centreFont(text, donutSize) {
   return Math.round(Math.max(10, Math.min(18, donutSize * 0.12, byWidth)));
 }
 
-function RevenueByCases({ stats, copy }) {
+function RevenueByCases({ stats, copy, onOpen }) {
   // The donut is drawn at an exact pixel size measured from the card, so the
   // ring and the centred total are always concentric, and the total's font
   // shrinks to fit inside the hole however long the amount gets.
@@ -193,7 +193,10 @@ function RevenueByCases({ stats, copy }) {
     <div className="sad-card sad-chart-card">
       <div className="sad-card-head">
         <CardTitle Icon={ChartColumnBig} color="#2563eb" bg="#e8efff">Total Revenue by Cases</CardTitle>
-        <span className="sad-pill">{copy.short}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span className="sad-pill">{copy.short}</span>
+          {onOpen && <button type="button" className="sad-link" onClick={() => onOpen("caseRevenue")} data-case-details>Details <ArrowRight size={13} /></button>}
+        </span>
       </div>
       <div className="sad-chart-body sad-donut-body" ref={bodyRef}>
         <div className="sad-donut" style={{ width: donutSize, height: donutSize }}>
@@ -442,7 +445,7 @@ export default function DashboardSection({ dashboardStats, activityLog, fetchDas
         </div>
 
         <div className="sad-row sad-row-charts">
-          <RevenueByCases stats={stats} copy={copy} />
+          <RevenueByCases stats={stats} copy={copy} onOpen={openDetails} />
           <RevenueBySource stats={stats} copy={copy} />
         </div>
 

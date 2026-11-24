@@ -169,7 +169,7 @@ export default function TelecallerOverview({ userName, onLogCall, onAddLead, onO
                       <span className="tc-card-icon" style={{ background: "#f3e8ff", color: "#7c3aed" }}>{mode ? <mode.Icon size={15} /> : <CalendarClock size={15} />}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div className="tc-cell-main" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.company || m.contactName}</div>
-                        <div className="tc-cell-sub">{fmtWhen(m.meetingDate)} · with {m.salesPerson?.name || "sales"}</div>
+                        <div className="tc-cell-sub">{fmtWhen(m.meetingDate)} · {m.salesPerson ? `with ${m.salesPerson.name}` : "not assigned yet"}</div>
                       </div>
                       <Badge meta={LEAD_STATUS["meeting-scheduled"]} size="sm">{mode?.label || "Meeting"}</Badge>
                     </div>

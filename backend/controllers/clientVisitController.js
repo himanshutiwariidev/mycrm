@@ -1,6 +1,8 @@
 const mongoose = require("mongoose");
 const ClientVisit = require("../models/ClientVisit");
 const User = require("../models/User");
+const Meeting = require("../models/Meeting");
+const { hiddenClientIds } = require("../middleware/clientOwnership");
 const { logActivity } = require("../utils/activityLogger");
 const {
   MAX_PHOTOS_PER_VISIT, PHOTO_CATEGORIES, PHOTO_EDIT_WINDOW_HOURS,
@@ -47,7 +49,7 @@ async function actorName(userId) {
 /** POST /api/client-visits/check-in (sales) — start a client meeting with live location. */
 exports.checkIn = async (req, res) => {
   try {
-    const { clientId } = req.body;
+    const { clientId, meetingId } = req.body;
     const purpose = typeof req.body.purpose === "string" ? req.body.purpose.trim().slice(0, 500) : undefined;
     if (!clientId || !mongoose.isValidObjectId(clientId)) {
       return res.status(400).json({ message: "Choose the client you're meeting" });
@@ -56,6 +58,16 @@ exports.checkIn = async (req, res) => {
     const { fix, error } = parseFix(req.body);
     if (error) return res.status(400).json({ message: error });
     if (!fix) return res.status(400).json({ message: "Location is required to start a client meeting" });
+
+    // Started from one of your own client meetings → link it (its proof shows on the meeting).
+    let meeting = null;
+    if (meetingId) {
+      if (!mongoose.isValidObjectId(meetingId)) return res.status(400).json({ message: "Meeting not found" });
+      meeting = await Meeting.findOne({ _id: meetingId, kind: "client", salesPerson: req.user.id }).select("clientId status").lean();
+      if (!meeting) return res.status(404).json({ message: "That meeting isn't assigned to you" });
+      if (String(meeting.clientId) !== String(clientId)) return res.status(400).json({ message: "That meeting is with a different client" });
+      if (meeting.status !== "scheduled") return res.status(400).json({ message: "That meeting is already closed" });
+    }
 
     const open = await ClientVisit.findOne({ salesPerson: req.user.id, status: "in-progress" }).populate(POPULATE_CLIENT);
     if (open) {
@@ -67,7 +79,7 @@ exports.checkIn = async (req, res) => {
 
     let visit;
     try {
-      visit = await ClientVisit.create({ salesPerson: req.user.id, clientId, purpose, checkIn: fix });
+      visit = await ClientVisit.create({ salesPerson: req.user.id, clientId, purpose, checkIn: fix, ...(meeting ? { meeting: meeting._id } : {}) });
     } catch (createError) {
       // Lost a race with another check-in (double tap / second tab).
       if (createError?.code === 11000) {
@@ -263,6 +275,8 @@ exports.getAllVisits = async (req, res) => {
     const { salesPerson, clientId, status, from, to } = req.query;
     if (salesPerson && mongoose.isValidObjectId(salesPerson)) filter.salesPerson = salesPerson;
     if (clientId && mongoose.isValidObjectId(clientId)) filter.clientId = clientId;
+    // Sales manager: not the visits on a super admin's own clients.
+    const hidden = await hiddenClientIds(req.user);
     if (status === "in-progress" || status === "completed") filter.status = status;
 
     const range = {};
@@ -272,6 +286,7 @@ exports.getAllVisits = async (req, res) => {
     if (toDate && !Number.isNaN(toDate.getTime())) range.$lte = toDate;
     if (Object.keys(range).length) filter["checkIn.at"] = range;
 
+    if (hidden.length) filter.$and = [{ clientId: { $nin: hidden } }];
     const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), MAX_PAGE_SIZE);
     const page = Math.max(Number(req.query.page) || 1, 1);
 
@@ -283,7 +298,7 @@ exports.getAllVisits = async (req, res) => {
         .populate([POPULATE_CLIENT, POPULATE_SALES]),
       ClientVisit.countDocuments(filter),
       ClientVisit.aggregate([
-        { $match: { ...filter, ...(filter.salesPerson ? { salesPerson: new mongoose.Types.ObjectId(filter.salesPerson) } : {}), ...(filter.clientId ? { clientId: new mongoose.Types.ObjectId(filter.clientId) } : {}) } },
+        { $match: { ...filter, ...(filter.salesPerson ? { salesPerson: new mongoose.Types.ObjectId(filter.salesPerson) } : {}), ...(filter.clientId ? { clientId: new mongoose.Types.ObjectId(filter.clientId) } : {}), ...(hidden.length ? { $and: [{ clientId: { $nin: hidden } }] } : {}) } },
         {
           $group: {
             _id: null,

@@ -20,6 +20,9 @@ const MeetingSchema = new mongoose.Schema(
     clientId: { type: mongoose.Schema.Types.ObjectId, ref: "Client" },
     lead: { type: mongoose.Schema.Types.ObjectId, ref: "TeleLead" },
     salesPerson: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    // Who set it up: "telecaller" (booked on a call) or "sales" — added by a
+    // sales person / sales manager themselves, e.g. a meeting found on the spot.
+    source: { type: String, enum: ["telecaller", "sales"], default: "telecaller" },
     mode: { type: String, enum: MEETING_MODES },
     status: { type: String, enum: MEETING_STATUSES, default: "scheduled" },
     outcome: { type: String, enum: Object.keys(MEETING_OUTCOMES) },

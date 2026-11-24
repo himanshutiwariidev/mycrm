@@ -626,19 +626,34 @@ const buildContractEmailHtml = ({ client }) =>
   `<p>Dear ${client.clientName},</p><p>Please find attached your project contract in PDF format.</p>`;
 
 
-const buildPaymentReminderEmailHtml = ({ client, reminder }) => {
+// Text typed in the CRM goes into the email as text, never as HTML. Request
+// bodies already pass through xss-clean (Server.js), which turns "<" into
+// "&lt;" — undo that first so it isn't escaped twice.
+const escapeHtml = (value) => String(value ?? "")
+  .replace(/&lt;/g, "<")
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+const REMINDER_INTRO = {
+  "first-reminder": "This is a friendly reminder that a payment is due on your account.",
+  "second-reminder": "This is a second reminder — we haven't yet received the payment below.",
+  "final-reminder": "This is a final reminder — the payment below is now overdue. Please clear it at the earliest.",
+  custom: "This is a reminder about a payment due on your account.",
+};
+
+const buildPaymentReminderEmailHtml = ({ client, reminder, contract }) => {
+  const project = contract ? `${escapeHtml(contract.projectName)}${contract.contractNumber ? ` (${escapeHtml(contract.contractNumber)})` : ""}` : "";
   return `
     <div style="font-family: Arial, sans-serif; background: #f8fafc; padding: 24px; color: #0f172a;">
       <div style="max-width: 760px; margin: 0 auto; background: #ffffff; border-radius: 18px; overflow: hidden; border: 1px solid #e2e8f0;">
         <div style="background: linear-gradient(135deg, #dc2626, #ea580c); color: white; padding: 28px 32px;">
           <h1 style="margin: 0; font-size: 24px;">Payment Reminder</h1>
-          <p style="margin: 10px 0 0; font-size: 14px; opacity: 0.9;">Payment Due Reminder - Invoice ${reminder.invoiceNumber || "N/A"}</p>
+          <p style="margin: 10px 0 0; font-size: 14px; opacity: 0.9;">${project ? `For ${project}` : `Payment Due Reminder - Invoice ${escapeHtml(reminder.invoiceNumber || "N/A")}`}</p>
         </div>
         <div style="padding: 28px 32px;">
           <div style="background: #fef2f2; border-left: 4px solid #dc2626; padding: 16px; border-radius: 6px; margin-bottom: 24px;">
             <p style="margin: 0; font-size: 14px; color: #991b1b;">
-              <strong>Hello ${client.clientName},</strong><br/><br/>
-              This is a friendly reminder that payment is due on your account.
+              <strong>Hello ${escapeHtml(client.clientName)},</strong><br/><br/>
+              ${REMINDER_INTRO[reminder.reminderType] || REMINDER_INTRO.custom}
             </p>
           </div>
 
@@ -656,18 +671,20 @@ const buildPaymentReminderEmailHtml = ({ client, reminder }) => {
           </div>
 
           ${reminder.customMessage ? `<div style="background: #f9fafb; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
-            <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #475569;">
-              ${reminder.customMessage}
-            </p>
+            <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #475569; white-space: pre-line;">${escapeHtml(reminder.customMessage)}</p>
           </div>` : ""}
 
           <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+            ${project ? `<tr>
+              <td style="padding: 12px; border-bottom: 1px solid #e2e8f0;"><strong>Project:</strong></td>
+              <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; text-align: right;">${project}</td>
+            </tr>` : ""}
             <tr>
               <td style="padding: 12px; border-bottom: 1px solid #e2e8f0;">
                 <strong>Invoice Number:</strong>
               </td>
               <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; text-align: right;">
-                ${reminder.invoiceNumber || "N/A"}
+                ${escapeHtml(reminder.invoiceNumber || "N/A")}
               </td>
             </tr>
             <tr>
@@ -746,7 +763,7 @@ const sendContractEmail = async ({ client, contract }) => {
   }
 };
 
-const sendPaymentReminderEmail = async ({ client, reminder }) => {
+const sendPaymentReminderEmail = async ({ client, reminder, contract }) => {
   try {
     const transporter = createTransporter();
     const fromName = process.env.SMTP_FROM_NAME || "Bharat Bizmart CRM";
@@ -755,8 +772,8 @@ const sendPaymentReminderEmail = async ({ client, reminder }) => {
     const result = await transporter.sendMail({
       from: `"${fromName}" <${fromEmail}>`,
       to: client.email,
-      subject: `Payment Reminder: ${formatCurrency(reminder.amountDue, reminder.currency)} Due - Invoice ${reminder.invoiceNumber || "N/A"}`,
-      html: buildPaymentReminderEmailHtml({ client, reminder }),
+      subject: `${reminder.reminderType === "final-reminder" ? "Final Payment Reminder" : "Payment Reminder"}: ${formatCurrency(reminder.amountDue, reminder.currency)} due${contract?.projectName ? ` — ${contract.projectName}` : ` - Invoice ${reminder.invoiceNumber || "N/A"}`}`,
+      html: buildPaymentReminderEmailHtml({ client, reminder, contract }),
     });
 
     return {
@@ -771,8 +788,112 @@ const sendPaymentReminderEmail = async ({ client, reminder }) => {
   }
 };
 
+// ── Renewal reminder & monthly report emails (client page "Email client") ──
+
+/** Shared shell for the client emails below. `rows` = [[label, valueHtml]]. */
+const clientEmailHtml = ({ heading, subheading, greeting, intro, rows = [], message, footer, button }) => `
+    <div style="font-family: Arial, sans-serif; background: #f8fafc; padding: 24px; color: #0f172a;">
+      <div style="max-width: 680px; margin: 0 auto; background: #ffffff; border-radius: 18px; overflow: hidden; border: 1px solid #e2e8f0;">
+        <div style="background: linear-gradient(135deg, #f7931e, #ea580c); color: white; padding: 26px 30px;">
+          <h1 style="margin: 0; font-size: 22px;">${heading}</h1>
+          ${subheading ? `<p style="margin: 8px 0 0; font-size: 14px; opacity: 0.92;">${subheading}</p>` : ""}
+        </div>
+        <div style="padding: 26px 30px;">
+          <p style="margin: 0 0 14px; font-size: 14px;"><strong>Hello ${escapeHtml(greeting)},</strong></p>
+          <p style="margin: 0 0 20px; font-size: 14px; line-height: 1.6; color: #334155;">${intro}</p>
+          ${rows.length ? `<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">${rows.map(([k, v]) => `
+            <tr>
+              <td style="padding: 11px 12px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-size: 13px;">${k}</td>
+              <td style="padding: 11px 12px; border-bottom: 1px solid #e2e8f0; text-align: right; font-size: 14px; font-weight: 600;">${v}</td>
+            </tr>`).join("")}</table>` : ""}
+          ${button ? `<p style="margin: 0 0 20px; text-align: center;"><a href="${escapeHtml(button.href)}" style="display: inline-block; padding: 11px 22px; border-radius: 10px; background: #ea580c; color: #fff; text-decoration: none; font-weight: 700; font-size: 14px;">${escapeHtml(button.label)}</a></p>` : ""}
+          ${message ? `<div style="background: #f9fafb; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 16px; margin-bottom: 20px;">
+            <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #475569; white-space: pre-line;">${escapeHtml(message)}</p>
+          </div>` : ""}
+          ${footer ? `<p style="margin: 0; font-size: 13px; color: #64748b; line-height: 1.6;">${footer}</p>` : ""}
+          <p style="margin: 22px 0 0; padding-top: 14px; border-top: 1px solid #e2e8f0; font-size: 12px; color: #94a3b8; text-align: center;">
+            Sent on ${new Date().toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" })}
+          </p>
+        </div>
+      </div>
+    </div>`;
+
+const sendClientMail = async ({ client, subject, html, attachments }) => {
+  try {
+    const transporter = createTransporter();
+    const fromName = process.env.SMTP_FROM_NAME || "Bharat Bizmart CRM";
+    const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+    const result = await transporter.sendMail({ from: `"${fromName}" <${fromEmail}>`, to: client.email, subject, html, attachments });
+    return { success: true, messageId: result.messageId, sentAt: new Date() };
+  } catch (error) {
+    const err = new Error(`Failed to send the email: ${error.message}`);
+    err.statusCode = error.statusCode || 500;
+    throw err;
+  }
+};
+
+const fmtLongDate = (d) => new Date(d).toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" });
+
+/** The contract is up for renewal on `renewalDate` — email the client. */
+const sendRenewalReminderEmail = ({ client, contract, renewalDate, amount, services, message }) => {
+  const project = `${escapeHtml(contract.projectName)}${contract.contractNumber ? ` (${escapeHtml(contract.contractNumber)})` : ""}`;
+  const due = renewalDate ? new Date(renewalDate) : null;
+  const passed = due && due < new Date(new Date().toDateString());
+  return sendClientMail({
+    client,
+    subject: `Renewal Reminder: ${contract.projectName}${due ? ` — ${passed ? "expired" : "renews"} on ${fmtLongDate(due)}` : ""}`,
+    html: clientEmailHtml({
+      heading: "Renewal Reminder",
+      subheading: `For ${project}`,
+      greeting: client.clientName,
+      intro: due
+        ? (passed
+          ? `Your services under <strong>${project}</strong> were due for renewal on <strong>${fmtLongDate(due)}</strong>. Renew now to continue without a break.`
+          : `Your services under <strong>${project}</strong> are due for renewal on <strong>${fmtLongDate(due)}</strong>. Renew in time to keep everything running without a break.`)
+        : `This is a reminder that your services under <strong>${project}</strong> are coming up for renewal.`,
+      rows: [
+        ["Project", project],
+        ...(services ? [["Services", escapeHtml(services)]] : []),
+        ...(due ? [["Renewal date", fmtLongDate(due)]] : []),
+        ...(amount > 0 ? [["Renewal amount", formatCurrency(amount, contract.currency)]] : []),
+      ],
+      message,
+      footer: "Reply to this email or call us to confirm the renewal — we'll take care of the rest.",
+    }),
+  });
+};
+
+/** Share one monthly report: the file as an attachment, or the link. */
+const sendMonthlyReportEmail = ({ client, contract, serviceLabel, periodLabel, report, filePath, message }) => {
+  const isLink = report.kind === "link";
+  return sendClientMail({
+    client,
+    subject: `${serviceLabel} Report — ${periodLabel}${contract?.projectName ? ` · ${contract.projectName}` : ""}`,
+    html: clientEmailHtml({
+      heading: `${escapeHtml(serviceLabel)} Report`,
+      subheading: escapeHtml(periodLabel),
+      greeting: client.clientName,
+      intro: isLink
+        ? `Your <strong>${escapeHtml(serviceLabel)}</strong> report for <strong>${escapeHtml(periodLabel)}</strong> is ready. Open it with the button below.`
+        : `Please find attached your <strong>${escapeHtml(serviceLabel)}</strong> report for <strong>${escapeHtml(periodLabel)}</strong>.`,
+      rows: [
+        ...(contract ? [["Project", escapeHtml(contract.projectName)]] : []),
+        ["Service", escapeHtml(serviceLabel)],
+        ["Period", escapeHtml(periodLabel)],
+        ...(report.note ? [["Note", escapeHtml(report.note)]] : []),
+      ],
+      button: isLink ? { href: report.url, label: "Open the report" } : null,
+      message,
+      footer: "Have questions about the numbers? Just reply to this email.",
+    }),
+    attachments: isLink ? undefined : [{ filename: report.originalname || `report.${report.format}`, path: filePath }],
+  });
+};
+
 module.exports = {
   buildReminderNumber,
+  sendRenewalReminderEmail,
+  sendMonthlyReportEmail,
   generateContractPdf,
   generateInvoicePdf,
   sendContractEmail,

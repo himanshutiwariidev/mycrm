@@ -13,7 +13,7 @@ import { getAllClients, importClients, bulkDeleteClients } from "../services/cli
 import ClientForm from "../components/ClientForm";
 import ContractClientPicker from "../components/ContractClientPicker";
 import DateRangePicker, { computeRangeForPreset } from "../components/DateRangePicker";
-import { CLIENT_CATEGORIES, clientCategoryLabel } from "../config/clientCategories";
+import { useClientCategories, clientCategoryLabel } from "../config/clientCategories";
 // ClientsPage.css also styles shared classes other pages use (.btn-primary,
 // .data-table, .modal-overlay, .status …) — keep importing it.
 import "./ClientsPage.css";
@@ -70,10 +70,10 @@ function lastMonths(now, count = MONTHS_SHOWN) {
 }
 
 const exportClientsToCsv = (rows) => {
-  const headers = ["Client Name", "Company", "Email", "Phone", "Status", "Client Type", "Category", "Lead Source", "Sales Person", "City", "Onboarded"];
+  const headers = ["Client Name", "Company", "Email", "Phone", "Status", "Client Type", "Category", "Lead Source", "Referred By", "Sales Person", "City", "Onboarded"];
   const data = rows.map((c) => [
     c.clientName, c.companyName || "", c.email || "", c.phone || "", STATUS_META[c.status]?.label || c.status || "",
-    TYPE_LABELS[c.clientType] || c.clientType || "", clientCategoryLabel(c.businessCategory), c.leadSource || "", salesName(c), c.city || "",
+    TYPE_LABELS[c.clientType] || c.clientType || "", clientCategoryLabel(c.businessCategory), c.leadSource || "", c.referredBy || "", salesName(c), c.city || "",
     c.onboardedAt || c.createdAt ? clientDate(c).toISOString().slice(0, 10) : "",
   ]);
   const csv = [headers, ...data]
@@ -202,6 +202,7 @@ const ClientsPage = ({ embedded = false } = {}) => {
   const directoryRef = useRef(null);
   const [now] = useState(() => new Date());
   const [isSalesView] = useState(() => localStorage.getItem("role") === "sales");
+  const { categories } = useClientCategories();
 
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -641,7 +642,7 @@ const ClientsPage = ({ embedded = false } = {}) => {
           </select>
           <select className={`cl-select${categoryFilter !== "all" ? " is-set" : ""}`} value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} aria-label="Category">
             <option value="all">All categories</option>
-            {CLIENT_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+            {categories.map((c) => <option key={c.value} value={c.value}>{c.name}</option>)}
           </select>
           {salesPersonOptions.length > 1 && (
             <select className={`cl-select${salesPersonFilter !== "all" ? " is-set" : ""}`} value={salesPersonFilter} onChange={(e) => setSalesPersonFilter(e.target.value)} aria-label="Sales person">
@@ -765,7 +766,7 @@ const ClientsPage = ({ embedded = false } = {}) => {
                   <div className="cl-cc-tags">
                     <StatusChip status={client.status} />
                     {client.clientType && <span className="cl-tag">{TYPE_LABELS[client.clientType] || titleCase(client.clientType)}</span>}
-                    {client.businessCategory && <span className="cl-tag">{clientCategoryLabel(client.businessCategory)}</span>}
+                    {client.businessCategory && <span className="cl-tag">{clientCategoryLabel(client.businessCategory, categories)}</span>}
                     {client.hasLoginAccess && <span className="cl-tag cl-tag-green"><CheckCircle2 size={11} /> Portal</span>}
                   </div>
                   <div className="cl-cc-lines">

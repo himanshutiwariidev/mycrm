@@ -1,0 +1,61 @@
+.ecp {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ecp-kinds {
+  margin-top: 2px;
+}
+
+.ecp-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 720px;
+}
+
+.ecp-form select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 11px;
+  border: 1px solid #e2e6ef;
+  border-radius: 9px;
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.ecp-form select:focus {
+  outline: none;
+  border-color: #f7931e;
+  box-shadow: 0 0 0 3px rgba(247, 147, 30, 0.15);
+}
+
+.ecp-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.ecp-empty {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px dashed #e2e8f0;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.ecp-kinds button,
+.ecp-to-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ecp-kinds svg,
+.ecp-to-line svg {
+  flex-shrink: 0;
+}

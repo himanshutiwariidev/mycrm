@@ -58,6 +58,11 @@ export const ACTIVITY_META = {
   meeting_completed: { Icon: CalendarCheck, color: "#16a34a" },
   meeting_no_show: { Icon: CalendarX, color: "#d97706" },
   meeting_cancelled: { Icon: CalendarX, color: "#64748b" },
+  meeting_assigned: { Icon: UserCheck, color: "#7c3aed" },
+  renewal_reminder_sent: { Icon: Send, color: "#2563eb" },
+  report_shared: { Icon: Send, color: "#0891b2" },
+  bad_debt: { Icon: IndianRupee, color: "#dc2626" },
+  bad_debt_undone: { Icon: IndianRupee, color: "#16a34a" },
   meeting_check_out: { Icon: MapPin, color: "#16a34a" },
   visit_photos_added: { Icon: Images, color: "#0891b2" },
 };

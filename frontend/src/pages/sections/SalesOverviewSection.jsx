@@ -64,7 +64,7 @@ function RenewalsCard({ renewals, soonDays, openClient, renew }) {
               {rows.map((r) => (
                 <tr key={r.contractId}>
                   <td style={td()}>
-                    <div style={{ fontWeight: 600, color: T.textPrimary }}>{r.companyName || r.clientName}</div>
+                    <div style={{ fontWeight: 600, color: T.textPrimary }}>{r.companyName || r.clientName}<OwnerTag name={r.salesPersonName} /></div>
                     <div style={{ fontSize: 11.5, color: T.textMuted }}>{r.projectName}</div>
                   </td>
                   <td style={td({ color: T.textSecondary })}>{r.serviceName}</td>
@@ -134,7 +134,7 @@ function BalanceDueCard({ balanceDue, total, overdueCount, openClient }) {
               {balanceDue.map((b) => (
                 <tr key={b.contractId}>
                   <td style={td()}>
-                    <div style={{ fontWeight: 600, color: T.textPrimary }}>{b.companyName || b.clientName}</div>
+                    <div style={{ fontWeight: 600, color: T.textPrimary }}>{b.companyName || b.clientName}<OwnerTag name={b.salesPersonName} /></div>
                     <div style={{ fontSize: 11.5, color: T.textMuted }}>{b.projectName}</div>
                   </td>
                   <td style={td({ textAlign: "right", color: T.textSecondary, whiteSpace: "nowrap" })}>{fmtINR(b.contractAmount)}</td>
@@ -174,7 +174,7 @@ function ContractDeliverables({ contract, items, expanded, onToggle, openClient,
         <Chevron size={16} color={T.textMuted} style={{ flexShrink: 0 }} />
         <div style={{ flex: "1 1 200px", minWidth: 0 }}>
           <div style={{ fontWeight: 600, fontSize: 13.5, color: T.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {contract.companyName || contract.clientName}
+            {contract.companyName || contract.clientName}<OwnerTag name={contract.salesPersonName} />
           </div>
           <div style={{ fontSize: 11.5, color: T.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{contract.projectName}</div>
         </div>
@@ -302,8 +302,19 @@ function DeliverablesCard({ contracts, openClient }) {
   );
 }
 
+// Whose case it is — only on a sales manager's whole-team view.
+function OwnerTag({ name }) {
+  if (!name) return null;
+  return <span style={{ marginLeft: 6, fontSize: 11.5, fontWeight: 500, color: T.textMuted }}>· {name}</span>;
+}
+
 // ─── Section ──────────────────────────────────────────────────────────────
-export default function SalesOverviewSection() {
+/**
+ * A sales person's own book. A sales manager passes `salesPersonId` (one
+ * person, or "" for the whole team) plus a heading.
+ */
+export default function SalesOverviewSection({ salesPersonId, title, subtitle } = {}) {
+  const managerView = salesPersonId !== undefined;
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -313,14 +324,14 @@ export default function SalesOverviewSection() {
     setLoading(true);
     setError("");
     try {
-      const response = await getSalesDashboard();
+      const response = await getSalesDashboard(salesPersonId ? { salesPerson: salesPersonId } : undefined);
       setData(response.data);
     } catch (err) {
-      setError(err.response?.data?.message || "Couldn't load your dashboard");
+      setError(err.response?.data?.message || "Couldn't load the dashboard");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [salesPersonId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -337,8 +348,8 @@ export default function SalesOverviewSection() {
     <div>
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
         <div>
-          <h1 style={{ fontFamily: "'Syne', sans-serif", fontSize: 22, fontWeight: 700, color: T.textPrimary, margin: 0 }}>My Dashboard</h1>
-          <p style={{ fontSize: 13, color: T.textSecondary, margin: "4px 0 0" }}>Renewals, payments and delivery status for your clients only.</p>
+          <h1 style={{ fontFamily: "'Syne', sans-serif", fontSize: 22, fontWeight: 700, color: T.textPrimary, margin: 0 }}>{title || "My Dashboard"}</h1>
+          <p style={{ fontSize: 13, color: T.textSecondary, margin: "4px 0 0" }}>{subtitle || "Renewals, payments and delivery status for your clients only."}</p>
         </div>
         <button type="button" style={linkBtn} onClick={load} disabled={loading}>
           <RefreshCw size={13} style={loading ? { animation: "spin 1s linear infinite" } : undefined} /> Refresh
@@ -351,12 +362,12 @@ export default function SalesOverviewSection() {
         </div>
       )}
 
-      {!data && loading && <Empty Icon={RefreshCw}>Loading your dashboard…</Empty>}
+      {!data && loading && <Empty Icon={RefreshCw}>Loading the dashboard…</Empty>}
 
       {data && (
         <>
           <div style={kpiGridStyle}>
-            <KpiCard Icon={Users} label="My Clients" value={s.totalClients} color={T.brand} bgColor={T.brandLight} sub={`${s.convertedClients} converted`} />
+            <KpiCard Icon={Users} label={managerView ? "Clients" : "My Clients"} value={s.totalClients} color={T.brand} bgColor={T.brandLight} sub={`${s.convertedClients} converted`} />
             <KpiCard Icon={FileText} label="Active Contracts" value={s.activeContracts} color="#2563eb" bgColor="#eff6ff" />
             <KpiCard
               Icon={Wallet} label="Balance Due" value={fmtINR(s.totalBalanceDue)} color={T.red} bgColor={T.redBg}

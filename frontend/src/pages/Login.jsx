@@ -29,6 +29,7 @@ export default function Login() {
       else if (role === "manager") navigate("/manager");
       else if (role === "hr") navigate("/hr");
       else if (role === "sales") navigate("/sales");
+      else if (role === "salesmanager") navigate("/sales-manager");
       else if (role === "telecaller") navigate("/telecaller");
       else if (role === "client") navigate("/client/dashboard");
       else navigate("/dashboard");

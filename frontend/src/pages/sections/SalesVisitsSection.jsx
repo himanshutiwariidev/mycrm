@@ -121,7 +121,7 @@ function OpenMeetingCard({ visit, onEnded, onUpdated }) {
 }
 
 // ─── Start meeting ────────────────────────────────────────────────────────
-function StartMeetingCard({ clients, onStarted, initialClientId = "", initialPurpose = "" }) {
+function StartMeetingCard({ clients, onStarted, initialClientId = "", initialPurpose = "", meetingId = "" }) {
   const [clientId, setClientId] = useState(initialClientId);
   const [purpose, setPurpose] = useState(initialPurpose);
   const [busy, setBusy] = useState(false);
@@ -138,7 +138,8 @@ function StartMeetingCard({ clients, onStarted, initialClientId = "", initialPur
     setError("");
     try {
       const fix = await getCurrentLocation();
-      const { data } = await checkInClientVisit({ clientId, purpose, ...fix });
+      // Started from a meeting (same client) → the visit is recorded against it.
+      const { data } = await checkInClientVisit({ clientId, purpose, ...fix, ...(meetingId && clientId === initialClientId ? { meetingId } : {}) });
       setPurpose("");
       onStarted(data.visit);
     } catch (err) {
@@ -211,6 +212,7 @@ export default function SalesVisitsSection() {
   const [searchParams] = useSearchParams();
   const presetClient = searchParams.get("client") || "";
   const presetPurpose = searchParams.get("purpose") || "";
+  const presetMeeting = searchParams.get("meeting") || "";
   const [clients, setClients] = useState([]);
   const [open, setOpen] = useState(null);
   const [visits, setVisits] = useState([]);
@@ -273,6 +275,7 @@ export default function SalesVisitsSection() {
             key={presetClient}
             initialClientId={clients.some((c) => c._id === presetClient) ? presetClient : ""}
             initialPurpose={presetPurpose}
+            meetingId={presetMeeting}
             clients={clients}
             onStarted={(visit) => { setOpen(visit); upsertVisit(visit); }}
           />

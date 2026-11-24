@@ -1,6 +1,6 @@
 const bcrypt = require("bcryptjs");
 const { createWithContractNumber } = require("../utils/contractNumber");
-const { buildPayment, describePayment, collectedOf, sensibleDate } = require("../utils/paymentTaxes");
+const { buildPayment, describePayment, collectedOf, writtenOffOf, sensibleDate, inr } = require("../utils/paymentTaxes");
 const mongoose = require("mongoose");
 const multer = require("multer");
 const path = require("path");
@@ -15,7 +15,14 @@ const Expense = require("../models/Expense");
 const clientService = require("../services/clientService");
 const { computeDeliverableStats, decorateContract } = require("../utils/deliverableStats");
 const { logActivity } = require("../utils/activityLogger");
-const { getOwnedClientIds } = require("../middleware/clientOwnership");
+const { getOwnedClientIds, clientFilterFor, privateOwnerIds } = require("../middleware/clientOwnership");
+const { isKnownCategory } = require("./clientCategoryController");
+
+// A sales manager can't hand a client to a super admin (those clients are hidden from them).
+async function salesPersonOffLimits(user, salesPersonId) {
+  if (user.role !== "salesmanager" || !salesPersonId) return false;
+  return (await privateOwnerIds()).some((id) => String(id) === String(salesPersonId));
+}
 const ActivityLog = require("../models/ActivityLog");
 const { computeLeafFinalPrice, SERVICE_CATEGORY_LABELS } = require("../utils/pricingHelpers");
 
@@ -39,7 +46,7 @@ const resolveSalesPersonFields = async (value) => {
 
 exports.createClient = async (req, res) => {
   try {
-    const { clientName, email, phone, companyName, gstNo,tanNo,salesPerson,leadSource,clientType,businessCategory,projectType, projectName, address, city, state, country, zipCode, contactPerson, designation, status, activeStatus, notes, password } = req.body;
+    const { referredBy, clientName, email, phone, companyName, gstNo,tanNo,salesPerson,leadSource,clientType,businessCategory,projectType, projectName, address, city, state, country, zipCode, contactPerson, designation, status, activeStatus, notes, password } = req.body;
 
     if (!clientName || !phone) {
       return res.status(400).json({ message: "Client name and phone are required" });
@@ -77,8 +84,15 @@ exports.createClient = async (req, res) => {
     //    anything) was submitted. A salesperson can only ever onboard clients
     //    under their own name, so this also closes off the client showing up
     //    with no owner — or the wrong owner — on their own Sales Dashboard.
+    if (!(await isKnownCategory(businessCategory))) {
+      return res.status(400).json({ message: "Choose a category from the list, or add it with +" });
+    }
+
     const assignedSalesPerson = req.user.role === "sales" ? req.user.id : salesPerson;
     const resolvedSalesPerson = await resolveSalesPersonFields(assignedSalesPerson);
+    if (await salesPersonOffLimits(req.user, resolvedSalesPerson.salesPerson)) {
+      return res.status(403).json({ message: "Choose a sales person from the sales team" });
+    }
 
     const client = await Client.create({
       clientName,
@@ -90,6 +104,7 @@ exports.createClient = async (req, res) => {
       salesPerson: resolvedSalesPerson.salesPerson,
       salesPersonName: resolvedSalesPerson.salesPersonName,
       leadSource,
+      referredBy: leadSource === "client reference" && referredBy ? String(referredBy).trim() : undefined,
       clientType,
       businessCategory: businessCategory || undefined,
       projectType,
@@ -140,12 +155,8 @@ exports.createClient = async (req, res) => {
 
 exports.getAllClients = async (req, res) => {
   try {
-    const filter = {};
-    if (req.user.role === "sales") {
-      filter.salesPerson = req.user.id;
-    } else if (req.user.role === "user") {
-      filter.assignedUser = req.user.id;
-    }
+    // Sales: own clients; user: assigned ones; sales manager: all but the super admin's own.
+    const filter = (await clientFilterFor(req.user)) || {};
 
     const clients = await Client.find(filter)
       .populate("salesPerson", "name email")
@@ -233,7 +244,7 @@ exports.assignUserToClient = async (req, res) => {
 };
 
 const canAccessClientRemarksOrProgress = (client, user) => {
-  if (user.role === "admin") return true;
+  if (user.role === "admin" || user.role === "salesmanager") return true;
   if (client.salesPerson && String(client.salesPerson._id || client.salesPerson) === user.id) return true;
   if (client.assignedUser && String(client.assignedUser._id || client.assignedUser) === user.id) return true;
   return false;
@@ -392,6 +403,11 @@ exports.updateWorkProgress = async (req, res) => {
 exports.updateClient = async (req, res) => {
   try {
     const updatePayload = { ...req.body };
+    if (updatePayload.businessCategory && !(await isKnownCategory(updatePayload.businessCategory))) {
+      return res.status(400).json({ message: "Choose a category from the list, or add it with +" });
+    }
+    // "Referred by" only goes with the "client reference" lead source.
+    if (updatePayload.leadSource !== undefined && updatePayload.leadSource !== "client reference") updatePayload.referredBy = null;
 
     const password = updatePayload.password;
     delete updatePayload.password;
@@ -414,6 +430,9 @@ exports.updateClient = async (req, res) => {
 
     if (updatePayload.salesPerson !== undefined) {
       const resolved = await resolveSalesPersonFields(updatePayload.salesPerson);
+      if (await salesPersonOffLimits(req.user, resolved.salesPerson)) {
+        return res.status(403).json({ message: "Choose a sales person from the sales team" });
+      }
       updatePayload.salesPerson = resolved.salesPerson;
       updatePayload.salesPersonName = resolved.salesPersonName;
     }
@@ -1203,6 +1222,13 @@ exports.updateContract = async (req, res) => {
     // only this deliberate, final save should log an entry.
     const shouldLogEdit = Boolean(updatePayload.logEdit);
     delete updatePayload.logEdit;
+    // Bad debt is only changed through its own endpoints; an edit's manual
+    // due (see buildContractPayload) still leaves the written-off part out.
+    delete updatePayload.badDebt;
+    if (updatePayload.dueAmount !== undefined) {
+      const existing = await Contract.findById(req.params.id).select("badDebt").lean();
+      if (writtenOffOf(existing)) updatePayload.dueAmount = Math.max(Number(updatePayload.dueAmount) - writtenOffOf(existing), 0);
+    }
 
     const contract = await Contract.findByIdAndUpdate(req.params.id, updatePayload, {
       new: true,
@@ -1347,6 +1373,10 @@ exports.addPayment = async (req, res) => {
       return res.status(404).json({ message: "Contract not found" });
     }
 
+    if (writtenOffOf(contract)) {
+      return res.status(400).json({ message: "This contract's due was written off as bad debt — undo the bad debt first to record a payment" });
+    }
+
     // GST / TDS split; on a contract without GST only the taxable value counts (utils/paymentTaxes.js).
     const built = buildPayment(req.body, { contractHasGst: !!contract.gstEnabled, contractGstPercent: contract.gstPercent });
     if (built.error) return res.status(400).json({ message: built.error });
@@ -1390,6 +1420,95 @@ exports.deletePayment = async (req, res) => {
   } catch (error) {
     console.error("Error deleting payment:", error);
     return res.status(500).json({ message: error.message || "Failed to delete payment" });
+  }
+};
+
+// ============= RENEWAL REMINDER =============
+
+/**
+ * POST /contracts/:id/renewal-reminder { renewalDate?, amount?, message? } —
+ * email the client that the contract is up for renewal. Defaults: the
+ * contract's end date and amount.
+ */
+exports.sendRenewalReminder = async (req, res) => {
+  try {
+    const contract = await Contract.findById(req.params.id);
+    if (!contract) return res.status(404).json({ message: "Contract not found" });
+    const client = await Client.findById(contract.clientId);
+    if (!client) return res.status(404).json({ message: "Client not found" });
+    if (!client.email) return res.status(400).json({ message: "This client has no email address — add it with Edit client first" });
+
+    const renewalDate = req.body.renewalDate ? new Date(req.body.renewalDate) : contract.validUntil;
+    if (req.body.renewalDate && (Number.isNaN(renewalDate.getTime()) || !sensibleDate(renewalDate))) {
+      return res.status(400).json({ message: "Enter a valid renewal date" });
+    }
+    const amount = req.body.amount !== undefined && req.body.amount !== "" ? Number(req.body.amount) : contract.projectAmount;
+    if (!Number.isFinite(amount) || amount < 0) return res.status(400).json({ message: "Enter a valid renewal amount" });
+    const message = typeof req.body.message === "string" ? req.body.message.trim().slice(0, 2000) : "";
+    const services = (contract.selectedServices || [])
+      .filter((cat) => cat?.enabled && (cat.selections || []).length)
+      .map((cat) => SERVICE_CATEGORY_LABELS[cat.categoryId] || cat.categoryId)
+      .join(", ");
+
+    await clientService.sendRenewalReminderEmail({ client, contract, renewalDate, amount, services, message });
+
+    const actor = await User.findById(req.user.id).select("name").lean();
+    contract.renewalReminders.push({ sentTo: client.email, renewalDate, amount, byName: actor?.name });
+    await contract.save();
+    await logActivity(client._id, "renewal_reminder_sent", `Renewal reminder for "${contract.projectName}" emailed to ${client.email} by ${actor?.name || "admin"}`, { contractId: contract._id });
+
+    return res.json({ message: `Renewal reminder emailed to ${client.email}`, contract: decorateContract(contract) });
+  } catch (error) {
+    console.error("Error sending renewal reminder:", error);
+    return res.status(error.statusCode || 500).json({ message: error.message || "Failed to send the renewal reminder" });
+  }
+};
+
+// ============= BAD DEBT =============
+
+/**
+ * POST /contracts/:id/bad-debt { reason } — write off everything still due
+ * when the client won't pay. The amount leaves the due (so the contract is no
+ * longer upcoming/overdue) without being a payment or an expense.
+ */
+exports.writeOffBadDebt = async (req, res) => {
+  try {
+    const contract = await Contract.findById(req.params.id);
+    if (!contract) return res.status(404).json({ message: "Contract not found" });
+    if (writtenOffOf(contract)) return res.status(400).json({ message: "This contract is already written off as bad debt" });
+    const counted = contract.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+    const remaining = Math.round(((contract.projectAmount || 0) - counted) * 100) / 100;
+    if (remaining <= 0) return res.status(400).json({ message: "Nothing is due on this contract" });
+    const reason = String(req.body.reason || "").trim().slice(0, 1000);
+    if (!reason) return res.status(400).json({ message: "Add a reason for the bad debt" });
+
+    const actor = await User.findById(req.user.id).select("name").lean();
+    contract.badDebt = { amount: remaining, writtenOffAt: new Date(), reason, by: req.user.id, byName: actor?.name };
+    await contract.save(); // due → 0 and the next due date is cleared (Contract pre-save)
+
+    await logActivity(contract.clientId, "bad_debt", `${inr(remaining)} written off as bad debt on "${contract.projectName}" by ${actor?.name || "admin"} — ${reason}`, { contractId: contract._id, amount: remaining });
+    return res.json({ message: `${inr(remaining)} written off as bad debt`, contract: decorateContract(contract) });
+  } catch (error) {
+    console.error("Error writing off bad debt:", error);
+    return res.status(500).json({ message: error.message || "Failed to write off the bad debt" });
+  }
+};
+
+/** DELETE /contracts/:id/bad-debt — undo a write-off (e.g. the client paid after all). */
+exports.undoBadDebt = async (req, res) => {
+  try {
+    const contract = await Contract.findById(req.params.id);
+    if (!contract) return res.status(404).json({ message: "Contract not found" });
+    const amount = writtenOffOf(contract);
+    if (!amount) return res.status(400).json({ message: "This contract has no bad debt" });
+    contract.badDebt = undefined;
+    await contract.save();
+    const actor = await User.findById(req.user.id).select("name").lean();
+    await logActivity(contract.clientId, "bad_debt_undone", `Bad debt of ${inr(amount)} on "${contract.projectName}" undone by ${actor?.name || "admin"} — it's due again`, { contractId: contract._id, amount });
+    return res.json({ message: `Bad debt undone — ${inr(amount)} is due again`, contract: decorateContract(contract) });
+  } catch (error) {
+    console.error("Error undoing bad debt:", error);
+    return res.status(500).json({ message: error.message || "Failed to undo the bad debt" });
   }
 };
 
@@ -1512,6 +1631,8 @@ exports.getDashboardStats = async (req, res) => {
     let newCaseRevenue = 0;
     const renewalCaseContractIds = new Set();
     const newCaseContractIds = new Set();
+    // Per-contract rows behind that split, for the "Revenue: Renewal / New" report.
+    const caseRevenueRows = new Map();
 
     // ── Service Wise Active Cases ────────────────────────────────────────────
     // "Active" = contractStatus is sent or accepted (a live, non-terminal-
@@ -1639,6 +1760,27 @@ exports.getDashboardStats = async (req, res) => {
             newCaseRevenue += collectedOf(payment);
             newCaseContractIds.add(String(contract._id));
           }
+          const key = String(contract._id);
+          if (!caseRevenueRows.has(key)) {
+            caseRevenueRows.set(key, {
+              contractId: contract._id,
+              clientId: contract.clientId?._id || contract.clientId,
+              clientName: contract.clientId?.clientName || "—",
+              companyName: contract.clientId?.companyName || "",
+              projectName: contract.projectName,
+              contractNumber: contract.contractNumber,
+              type: contract.renewedFromContractId ? "renewal" : "new",
+              salesPerson: contract.clientId?.salesPerson?.name || contract.clientId?.salesPersonName || "—",
+              contractAmount: contract.projectAmount || 0,
+              collected: 0,
+              payments: 0,
+              lastPaidOn: null,
+            });
+          }
+          const caseRow = caseRevenueRows.get(key);
+          caseRow.collected += collectedOf(payment);
+          caseRow.payments += 1;
+          if (!caseRow.lastPaidOn || paidOn > caseRow.lastPaidOn) caseRow.lastPaidOn = paidOn;
 
           // Revenue Summary: Cash is the "Cash" method exactly; every other
           // recorded method (NEFT, RTGS, Bank Draft, UPI, Cheque, Card Swap,
@@ -1820,7 +1962,7 @@ exports.getDashboardStats = async (req, res) => {
       .map((contract) => {
         const counted = contract.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
         const totalPaid = contract.payments.reduce((sum, p) => sum + collectedOf(p), 0);
-        const balance = Math.max(Math.round(((contract.projectAmount || 0) - counted) * 100) / 100, 0);
+        const balance = Math.max(Math.round(((contract.projectAmount || 0) - counted - writtenOffOf(contract)) * 100) / 100, 0);
         const dueDay = new Date(contract.nextDueDate.getFullYear(), contract.nextDueDate.getMonth(), contract.nextDueDate.getDate());
         return { contract, totalPaid, balance, dueDay };
       })
@@ -2093,6 +2235,10 @@ exports.getDashboardStats = async (req, res) => {
         new: Math.round(newCaseRevenue * 100) / 100,
         renewalContracts: renewalCaseContractIds.size,
         newContracts: newCaseContractIds.size,
+        // One row per contract that collected money in the period, biggest first.
+        rows: [...caseRevenueRows.values()]
+          .map((r) => ({ ...r, collected: Math.round(r.collected * 100) / 100 }))
+          .sort((a, b) => b.collected - a.collected),
       },
       // Quick Stats: all-time client count (totalClients above is only the
       // clients created in the selected period, i.e. "New Clients"), and how
@@ -2139,13 +2285,21 @@ exports.createPaymentReminder = async (req, res) => {
   try {
     const { clientId, contractId, invoiceNumber, amountDue, currency, dueDate, reminderType, customMessage, notes } = req.body;
 
-    if (!clientId || !amountDue) {
-      return res.status(400).json({ message: "Client ID and amount due are required" });
+    if (!clientId || !(Number(amountDue) > 0)) {
+      return res.status(400).json({ message: "Enter the amount due" });
     }
 
     const client = await Client.findById(clientId);
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
+    }
+    // The reminder only goes out by email — don't save one that can't be sent.
+    if (!client.email) {
+      return res.status(400).json({ message: "This client has no email address — add it with Edit client first" });
+    }
+    const contract = contractId ? await Contract.findOne({ _id: contractId, clientId }) : null;
+    if (contractId && !contract) {
+      return res.status(400).json({ message: "That contract doesn't belong to this client" });
     }
 
     const reminderId = clientService.buildReminderNumber();
@@ -2154,7 +2308,7 @@ exports.createPaymentReminder = async (req, res) => {
       reminderId,
       clientId,
       contractId: contractId || null,
-      invoiceNumber,
+      invoiceNumber: invoiceNumber || contract?.contractNumber,
       amountDue,
       currency: currency || "INR",
       dueDate,
@@ -2166,7 +2320,7 @@ exports.createPaymentReminder = async (req, res) => {
 
     // Automatically send the payment reminder email
     try {
-      const emailResult = await clientService.sendPaymentReminderEmail({ client, reminder });
+      const emailResult = await clientService.sendPaymentReminderEmail({ client, reminder, contract });
 
       reminder.reminderStatus = "sent";
       reminder.sentAt = new Date();
@@ -2178,7 +2332,7 @@ exports.createPaymentReminder = async (req, res) => {
 
       await reminder.save();
 
-      await logActivity(clientId, "reminder_sent", `Payment reminder for ₹${amountDue} created and sent`, { reminderId: reminder._id });
+      await logActivity(clientId, "reminder_sent", `Payment reminder for ₹${Number(amountDue).toLocaleString("en-IN")} emailed to ${client.email}${contract ? ` ("${contract.projectName}")` : ""}`, { reminderId: reminder._id, contractId: contract?._id });
 
       return res.status(201).json({
         message: "Payment reminder created and sent successfully",
@@ -2225,19 +2379,24 @@ exports.sendPaymentReminder = async (req, res) => {
       return res.status(404).json({ message: "Client not found" });
     }
 
-    const emailResult = await clientService.sendPaymentReminderEmail({ client, reminder });
+    if (!client.email) {
+      return res.status(400).json({ message: "This client has no email address — add it with Edit client first" });
+    }
+    const contract = reminder.contractId ? await Contract.findById(reminder.contractId) : null;
+    const emailResult = await clientService.sendPaymentReminderEmail({ client, reminder, contract });
 
+    // Count the sends: a reminder whose first email failed was never sent.
+    reminder.reminderCount = reminder.sentAt ? (reminder.reminderCount || 1) + 1 : 1;
     reminder.reminderStatus = "sent";
     reminder.sentAt = new Date();
     reminder.sentTo = client.email;
-    reminder.reminderCount = (reminder.reminderCount || 1) + 1;
 
     const daysToAdd = reminder.reminderType === "final-reminder" ? 7 : 3;
     reminder.nextReminderDate = new Date(Date.now() + daysToAdd * 24 * 60 * 60 * 1000);
 
     await reminder.save();
 
-    await logActivity(client._id, "reminder_sent", `Payment reminder for ₹${reminder.amountDue} resent`, { reminderId: reminder._id });
+    await logActivity(client._id, "reminder_sent", `Payment reminder for ₹${Number(reminder.amountDue).toLocaleString("en-IN")} resent to ${client.email}`, { reminderId: reminder._id });
 
     return res.json({
       message: "Payment reminder sent successfully",

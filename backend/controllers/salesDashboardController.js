@@ -1,9 +1,14 @@
 const Client = require("../models/Client");
 const Contract = require("../models/Contract");
 const Task = require("../models/Task");
+const User = require("../models/User");
+const Meeting = require("../models/Meeting");
+const ClientVisit = require("../models/ClientVisit");
+const mongoose = require("mongoose");
+const { hiddenClientIds } = require("../middleware/clientOwnership");
 const { computeDeliverableStats } = require("../utils/deliverableStats");
 const { SERVICE_CATEGORY_LABELS } = require("../utils/pricingHelpers");
-const { collectedOf } = require("../utils/paymentTaxes");
+const { collectedOf, writtenOffOf } = require("../utils/paymentTaxes");
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const RENEWAL_SOON_DAYS = 30;
@@ -18,6 +23,24 @@ function serviceNames(contract) {
     .join(", ") || "—";
 }
 
+/**
+ * Whose book a dashboard covers. A sales person: their own. A sales manager
+ * (or admin): ?salesPerson=<id> for one person, otherwise the whole sales team.
+ * Returns the Client filter, or { error }.
+ */
+async function salesScope(req) {
+  if (req.user.role === "sales") return { filter: { salesPerson: req.user.id } };
+  const requested = req.query.salesPerson;
+  if (requested) {
+    if (!mongoose.isValidObjectId(requested) || !(await User.exists({ _id: requested, role: "sales" }))) {
+      return { error: "Sales person not found" };
+    }
+    return { filter: { salesPerson: requested } };
+  }
+  const team = await User.distinct("_id", { role: "sales" });
+  return { filter: { salesPerson: { $in: team } }, team: true };
+}
+
 function clientInfo(contract) {
   return {
     contractId: contract._id,
@@ -26,6 +49,8 @@ function clientInfo(contract) {
     companyName: contract.clientId?.companyName || "",
     projectName: contract.projectName,
     contractNumber: contract.contractNumber,
+    // Filled on the whole-team view, so a manager can see whose case it is.
+    salesPersonName: contract.clientId?.salesPerson?.name || undefined,
   };
 }
 
@@ -44,15 +69,16 @@ function clientInfo(contract) {
  */
 exports.getSalesDashboard = async (req, res) => {
   try {
-    const salesPersonId = req.user.id;
+    const scope = await salesScope(req);
+    if (scope.error) return res.status(404).json({ message: scope.error });
     const now = new Date();
     const today = startOfDay(now);
 
-    const clients = await Client.find({ salesPerson: salesPersonId }).select("_id status").lean();
+    const clients = await Client.find(scope.filter).select("_id status").lean();
     const clientIds = clients.map((c) => c._id);
 
     const contracts = await Contract.find({ clientId: { $in: clientIds } })
-      .populate("clientId", "clientName companyName")
+      .populate({ path: "clientId", select: "clientName companyName salesPerson", ...(scope.team ? { populate: { path: "salesPerson", select: "name" } } : {}) })
       .sort({ createdAt: -1 });
 
     // Rejected contracts are never owed, renewed, or delivered.
@@ -84,7 +110,7 @@ exports.getSalesDashboard = async (req, res) => {
         // Balance off what each payment counts; received = money actually collected.
         const counted = (c.payments || []).reduce((sum, p) => sum + (p.amount || 0), 0);
         const received = (c.payments || []).reduce((sum, p) => sum + collectedOf(p), 0);
-        const balance = Math.max(round2((c.projectAmount || 0) - counted), 0);
+        const balance = Math.max(round2((c.projectAmount || 0) - counted - writtenOffOf(c)), 0);
         return { c, received, balance };
       })
       .filter(({ balance }) => balance > 0)
@@ -197,5 +223,118 @@ exports.getSalesDashboard = async (req, res) => {
   } catch (error) {
     console.error("Error building sales dashboard:", error);
     return res.status(500).json({ message: error.message || "Failed to load sales dashboard" });
+  }
+};
+
+/** This month by default; ?from=&to= (dates) for another period. */
+function periodOf(query) {
+  const now = new Date();
+  const from = query.from ? new Date(query.from) : new Date(now.getFullYear(), now.getMonth(), 1);
+  const to = query.to ? new Date(query.to) : new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return null;
+  return { from, to };
+}
+
+/**
+ * GET /clients/sales-team?from&to (sales manager / admin)
+ *
+ * One row per sales person: their book (clients, outstanding, overdue), what
+ * they booked and collected in the period, their client meetings and visits —
+ * plus how many telecaller meetings are still waiting to be assigned.
+ * Balances follow the sales dashboard: contract amount − what each payment
+ * counts; "collected" is money actually received (collectedOf).
+ */
+exports.getSalesTeam = async (req, res) => {
+  try {
+    const period = periodOf(req.query);
+    if (!period) return res.status(400).json({ message: "Invalid period" });
+    const { from, to } = period;
+    const today = startOfDay(new Date());
+
+    const salesUsers = await User.find({ role: "sales" }).select("name email isActive").sort({ name: 1 }).lean();
+    const ids = salesUsers.map((u) => u._id);
+
+    const [clients, meetingRows, visitRows, unassignedMeetings] = await Promise.all([
+      Client.find({ salesPerson: { $in: ids } }).select("_id salesPerson status").lean(),
+      Meeting.aggregate([
+        { $match: { kind: "client", salesPerson: { $in: ids } } },
+        {
+          $group: {
+            _id: "$salesPerson",
+            upcoming: { $sum: { $cond: [{ $and: [{ $eq: ["$status", "scheduled"] }, { $gte: ["$meetingDate", today] }] }, 1, 0] } },
+            pendingUpdate: { $sum: { $cond: [{ $and: [{ $eq: ["$status", "scheduled"] }, { $lt: ["$meetingDate", today] }] }, 1, 0] } },
+            completed: { $sum: { $cond: [{ $and: [{ $eq: ["$status", "completed"] }, { $gte: ["$meetingDate", from] }, { $lte: ["$meetingDate", to] }] }, 1, 0] } },
+            converted: { $sum: { $cond: [{ $and: [{ $eq: ["$outcome", "converted"] }, { $gte: ["$meetingDate", from] }, { $lte: ["$meetingDate", to] }] }, 1, 0] } },
+          },
+        },
+      ]),
+      ClientVisit.aggregate([
+        { $match: { salesPerson: { $in: ids }, "checkIn.at": { $gte: from, $lte: to } } },
+        { $group: { _id: "$salesPerson", n: { $sum: 1 } } },
+      ]),
+      hiddenClientIds(req.user).then((hidden) => Meeting.countDocuments({ kind: "client", salesPerson: null, status: "scheduled", clientId: { $nin: hidden } })),
+    ]);
+
+    const ownerOf = new Map(clients.map((c) => [String(c._id), String(c.salesPerson)]));
+    const contracts = await Contract.find({ clientId: { $in: clients.map((c) => c._id) }, contractStatus: { $ne: "rejected" } })
+      .select("clientId projectAmount payments badDebt nextDueDate createdAt").lean();
+
+    const rows = new Map(salesUsers.map((u) => [String(u._id), {
+      salesPerson: { _id: u._id, name: u.name, email: u.email, isActive: u.isActive !== false },
+      clients: 0, convertedClients: 0, contracts: 0, booked: 0, collected: 0, outstanding: 0, overdue: 0,
+      meetingsUpcoming: 0, meetingsPendingUpdate: 0, meetingsCompleted: 0, meetingsConverted: 0, visits: 0,
+    }]));
+    clients.forEach((c) => {
+      const row = rows.get(String(c.salesPerson));
+      if (!row) return;
+      row.clients += 1;
+      if (c.status === "converted") row.convertedClients += 1;
+    });
+    contracts.forEach((c) => {
+      const row = rows.get(ownerOf.get(String(c.clientId)));
+      if (!row) return;
+      row.contracts += 1;
+      if (c.createdAt >= from && c.createdAt <= to) row.booked += c.projectAmount || 0;
+      const counted = (c.payments || []).reduce((sum, p) => sum + (p.amount || 0), 0);
+      (c.payments || []).forEach((p) => {
+        const paidOn = p.paymentDate && new Date(p.paymentDate);
+        if (paidOn && paidOn >= from && paidOn <= to) row.collected += collectedOf(p);
+      });
+      const balance = Math.max(round2((c.projectAmount || 0) - counted - writtenOffOf(c)), 0);
+      row.outstanding += balance;
+      if (balance > 0 && c.nextDueDate && startOfDay(new Date(c.nextDueDate)) < today) row.overdue += 1;
+    });
+    meetingRows.forEach((m) => {
+      const row = rows.get(String(m._id));
+      if (!row) return;
+      row.meetingsUpcoming = m.upcoming;
+      row.meetingsPendingUpdate = m.pendingUpdate;
+      row.meetingsCompleted = m.completed;
+      row.meetingsConverted = m.converted;
+    });
+    visitRows.forEach((v) => { const row = rows.get(String(v._id)); if (row) row.visits = v.n; });
+
+    const team = [...rows.values()].map((r) => ({ ...r, booked: round2(r.booked), collected: round2(r.collected), outstanding: round2(r.outstanding) }));
+    const sum = (k) => round2(team.reduce((s, r) => s + r[k], 0));
+    return res.json({
+      period: { from, to },
+      summary: {
+        salesPeople: team.filter((r) => r.salesPerson.isActive).length,
+        clients: sum("clients"),
+        booked: sum("booked"),
+        collected: sum("collected"),
+        outstanding: sum("outstanding"),
+        overdue: sum("overdue"),
+        meetingsUpcoming: sum("meetingsUpcoming"),
+        meetingsCompleted: sum("meetingsCompleted"),
+        meetingsConverted: sum("meetingsConverted"),
+        visits: sum("visits"),
+        unassignedMeetings,
+      },
+      team,
+    });
+  } catch (error) {
+    console.error("Error building sales team view:", error);
+    return res.status(500).json({ message: error.message || "Failed to load the sales team" });
   }
 };
