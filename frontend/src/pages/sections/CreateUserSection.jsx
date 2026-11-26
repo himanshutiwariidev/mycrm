@@ -1,6 +1,7 @@
 import React from "react";
 import { Eye, EyeOff, Lock, Mail, Shield, User, UserPlus } from "lucide-react";
 import { FieldIcon, FormField, T, baseInp } from "./shared";
+import UserProfileFields from "./UserProfileFields";
 
 export default function CreateUserSection({
   userForm,
@@ -16,7 +17,7 @@ export default function CreateUserSection({
   const isManager = actingRole === "manager";
 
   return (
-    <div className="fade-up" style={{ maxWidth: 620 }}>
+    <div className="fade-up" style={{ maxWidth: 740 }}>
       <div style={{ marginBottom: 26 }}>
         <h2 style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 20, color: T.textPrimary }}>Add New User</h2>
         <p style={{ fontSize: 13, color: T.textMuted, marginTop: 4 }}>Create a new account and assign a role</p>
@@ -66,6 +67,7 @@ export default function CreateUserSection({
                 </button>
               </div>
             </FormField>
+            <UserProfileFields form={userForm} setForm={setUserForm} />
           </div>
           <button className="pri-btn" type="submit" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", background: "linear-gradient(135deg, #f7931e, #e8590c)", color: "#fff", borderRadius: 11, padding: "13px", fontSize: 14, fontWeight: 700, fontFamily: "'Syne', sans-serif", letterSpacing: ".03em" }}>
             <UserPlus size={16} strokeWidth={2} /> Create User

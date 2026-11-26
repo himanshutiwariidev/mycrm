@@ -144,8 +144,12 @@ if (process.env.NODE_ENV === "production") {
 // the frontend links files through /api/uploads.
 app.use(["/uploads", "/api/uploads"], express.static(path.join(__dirname, "uploads"), {
   setHeaders: (res, filePath) => {
-    // …and the same for deliverable work-proof screenshots (uploads/deliverable-proofs).
-    if (filePath.includes(`${path.sep}visit-photos${path.sep}`) || filePath.includes(`${path.sep}deliverable-proofs${path.sep}`)) {
+    // …and the same for deliverable work-proof screenshots (uploads/deliverable-proofs) and user ID photos (uploads/user-photos).
+    if (
+      filePath.includes(`${path.sep}visit-photos${path.sep}`) ||
+      filePath.includes(`${path.sep}deliverable-proofs${path.sep}`) ||
+      filePath.includes(`${path.sep}user-photos${path.sep}`)
+    ) {
       res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     }

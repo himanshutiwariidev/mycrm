@@ -1,11 +1,12 @@
 const jwt = require("jsonwebtoken");
+const User = require("../models/User");
 
 // Accepts tokens from two sources (highest-security first):
 //   1. HttpOnly cookie "access_token" — set by the server on login.
 //   2. Authorization: Bearer <token> header — backward-compatible with the
 //      existing React frontend that reads tokens from localStorage.
 // Both paths set req.user identically; no behaviour change for existing callers.
-const authMiddleware = (req, res, next) => {
+const authMiddleware = async (req, res, next) => {
   try {
     // Prefer the httpOnly cookie when present
     let token = req.cookies?.access_token;
@@ -23,6 +24,10 @@ const authMiddleware = (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const dbUser = await User.findById(decoded.id).select("isActive").lean();
+    if (!dbUser || dbUser.isActive === false) {
+      return res.status(401).json({ message: "Your account is inactive. Please contact the administrator." });
+    }
     req.user = decoded;
     next();
   } catch {

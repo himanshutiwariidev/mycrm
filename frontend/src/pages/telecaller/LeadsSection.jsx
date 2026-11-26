@@ -1,10 +1,16 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { Search, UserPlus, Phone, PhoneCall, Pencil, Users, BellRing } from "lucide-react";
-import { getLeads } from "../../services/telecallingApi";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Search, UserPlus, Phone, PhoneCall, Pencil, Users, BellRing, Upload, Download, X } from "lucide-react";
+import { getLeads, importLeads } from "../../services/telecallingApi";
 import { CALL_OUTCOMES, LEAD_STATUS } from "../../config/telecalling";
 import { SectionCard, Badge, Btn, Avatar, EmptyState, fmtAgo, fmtWhen, isOverdue } from "./teleUi";
 
 const FILTERS = ["all", "due", "new", "follow-up", "interested", "meeting-scheduled", "converted", "not-interested", "unreachable"];
+
+const SAMPLE_CSV = [
+  "name,phone,company,email,city,source,requirement",
+  "Rahul Sharma,9876543210,Sharma Traders,rahul@sharmatraders.in,Delhi,cold list,Interested in SEO & Google Ads package",
+  "Priya Verma,+91 9811223344,Verma Interiors,priya@vermainteriors.com,Mumbai,website,Needs website redesign and social media marketing",
+].join("\n");
 
 export default function LeadsSection({ initialFilter = "all", onLogCall, onAddLead, onEditLead, refreshKey }) {
   const [filter, setFilter] = useState(initialFilter);
@@ -14,6 +20,9 @@ export default function LeadsSection({ initialFilter = "all", onLogCall, onAddLe
   const [dueCount, setDueCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const importInputRef = useRef(null);
 
   useEffect(() => { setFilter(initialFilter); }, [initialFilter]);
   useEffect(() => {
@@ -43,17 +52,92 @@ export default function LeadsSection({ initialFilter = "all", onLogCall, onAddLe
   const countFor = (f) => (f === "all" ? data.total : f === "due" ? dueCount : data.statusCounts[f] || 0);
   const labelFor = (f) => (f === "all" ? "All leads" : f === "due" ? "Due today" : LEAD_STATUS[f].label);
 
+  const handleImportFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const response = await importLeads(file);
+      setImportResult({ ok: true, ...response.data.summary });
+      await load();
+    } catch (err) {
+      setImportResult({ ok: false, message: err.response?.data?.message || "Import failed" });
+    } finally {
+      setImporting(false);
+      event.target.value = "";
+    }
+  };
+
+  const handleDownloadSample = () => {
+    const blob = new Blob([SAMPLE_CSV], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "telecaller-leads-sample.csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="tc-page">
+      <input ref={importInputRef} type="file" accept=".csv,.xls,.xlsx,.numbers" onChange={handleImportFile} style={{ display: "none" }} />
+
       <div className="tc-head">
         <div>
           <h1>My Leads</h1>
           <p>Your calling list — log every call so nothing slips.</p>
         </div>
         <div className="tc-head-actions">
+          <Btn variant="ghost" Icon={Download} onClick={handleDownloadSample}>Sample CSV</Btn>
+          <Btn variant="secondary" Icon={Upload} onClick={() => importInputRef.current?.click()} disabled={importing}>
+            {importing ? "Importing…" : "Import leads"}
+          </Btn>
           <Btn Icon={UserPlus} onClick={onAddLead}>Add lead</Btn>
         </div>
       </div>
+
+      {importResult && (
+        <div
+          role={importResult.ok ? "status" : "alert"}
+          style={{
+            display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12,
+            marginBottom: 14, padding: "12px 16px", borderRadius: 12, fontSize: 13,
+            background: importResult.ok ? "#f0fdf4" : "#fef2f2",
+            border: `1px solid ${importResult.ok ? "#bbf7d0" : "#fecaca"}`,
+            color: importResult.ok ? "#166534" : "#991b1b",
+          }}
+        >
+          <div>
+            {importResult.ok ? (
+              <>
+                <strong>Import completed:</strong>{" "}
+                {importResult.totalRows} rows · {importResult.leadsCreated} imported · {importResult.duplicatesSkipped} duplicates skipped · {importResult.skippedRows - importResult.duplicatesSkipped} invalid
+                {importResult.errors?.length > 0 && (
+                  <ul style={{ margin: "6px 0 0 18px", padding: 0 }}>
+                    {importResult.errors.slice(0, 5).map((e) => (
+                      <li key={`${e.row}-${e.message}`}>Row {e.row}: {e.message}</li>
+                    ))}
+                    {importResult.errors.length > 5 && <li>+{importResult.errors.length - 5} more rows skipped</li>}
+                  </ul>
+                )}
+              </>
+            ) : (
+              <><strong>Import failed:</strong> {importResult.message}</>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setImportResult(null)}
+            aria-label="Dismiss"
+            style={{ border: "none", background: "none", cursor: "pointer", color: "inherit", padding: 2 }}
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
 
       <SectionCard>
         <div className="tc-toolbar">

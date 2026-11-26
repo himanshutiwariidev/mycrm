@@ -1,14 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Banknote, BadgeIndianRupee, CalendarDays, ChartColumnBig,
+  ArrowDownRight, ArrowRight, ArrowUpRight, Banknote, BadgeIndianRupee, CalendarDays, ChartColumnBig,
   ChartNoAxesColumnIncreasing, CircleAlert, Clock, Database, Handshake, Landmark, Lightbulb, RefreshCw,
-  UserPlus, Users, Wallet, Zap,
+  UserPlus, Users, Wallet,
 } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, LabelList, Pie, PieChart, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { T } from "./shared";
+import API from "../../services/api";
 import DateRangePicker, { computeRangeForPreset } from "../../components/DateRangePicker";
+import MonthFilter from "../../components/MonthFilter";
+import { currentMonthKey, monthLabel } from "../../utils/taskPeriods";
 import DashboardDetails from "./DashboardDetails";
-import { ACTIVITY_META, fmtCompactINR, fmtINR, fmtTimeAgo } from "./dashboardFormat";
+import { fmtCompactINR, fmtINR, fmtShortDate } from "./dashboardFormat";
 import "./DashboardSection.css";
 
 const DASHBOARD_RANGE_STORAGE_KEY = "crm_main_dashboard_date_range";
@@ -318,31 +321,66 @@ function DueSummary({ stats, renewalClients, balanceClients, onOpen }) {
 }
 
 // ── Row 4 ─────────────────────────────────────────────────────────────────
-function ActivityLogCard({ activity, onViewAll }) {
-  const recent = activity.slice(0, 5);
+function ClientMonthlyPaymentsCard() {
+  const [month, setMonth] = useState(currentMonthKey);
+  const [data, setData] = useState({ loadedMonth: null, availableMonths: [], totalCollected: 0, clientCount: 0, clients: [] });
+  const reqIdRef = useRef(0);
+
+  useEffect(() => {
+    const reqId = ++reqIdRef.current;
+    API.get("/clients/monthly-payments", { params: { month } })
+      .then((res) => {
+        if (reqId === reqIdRef.current) {
+          setData({
+            loadedMonth: month,
+            ...(res.data || { availableMonths: [], totalCollected: 0, clientCount: 0, clients: [] }),
+          });
+        }
+      })
+      .catch(() => {
+        if (reqId === reqIdRef.current) {
+          setData((prev) => ({ ...prev, loadedMonth: month, clients: [], totalCollected: 0, clientCount: 0 }));
+        }
+      });
+  }, [month]);
+
+  const loading = data.loadedMonth !== month;
+  const clients = data.clients || [];
+
   return (
-    <div className="sad-card">
-      <div className="sad-card-head" style={{ marginBottom: 2 }}>
-        <CardTitle Icon={Zap} color="#2563eb" bg="#e8efff">Activity Log</CardTitle>
-        <button type="button" className="sad-link" onClick={onViewAll}>View All <ArrowRight size={13} /></button>
+    <div className="sad-card sad-payments-card">
+      <div className="sad-card-head sad-payments-head">
+        <CardTitle Icon={BadgeIndianRupee} color="#16a34a" bg="#dcfce7">Client Payments</CardTitle>
+        <MonthFilter value={month} onChange={setMonth} months={data.availableMonths} />
       </div>
-      {recent.length === 0 ? (
-        <div style={{ padding: "20px 0", textAlign: "center", fontSize: 12.5, color: T.textMuted }}>No activity recorded yet</div>
+      <div className="sad-payments-summary">
+        <span>{plural(data.clientCount || 0, "client")} paid in {monthLabel(month, true)}</span>
+        <span>Total: <strong>{fmtINR(data.totalCollected)}</strong></span>
+      </div>
+      {loading && !clients.length ? (
+        <div className="sad-payments-empty">Loading payments…</div>
+      ) : clients.length === 0 ? (
+        <div className="sad-payments-empty">No client payments recorded in {monthLabel(month, true)}</div>
       ) : (
-        recent.map((entry) => {
-          const meta = ACTIVITY_META[entry.type] || { Icon: Activity, color: T.textMuted };
-          const clientName = entry.clientId?.companyName || entry.clientId?.clientName;
-          const message = clientName && !entry.message?.includes(clientName) ? `${entry.message} – ${clientName}` : entry.message;
-          return (
-            <div key={entry._id} className="sad-activity-row">
-              <span style={{ width: 22, height: 22, borderRadius: 99, flexShrink: 0, background: `${meta.color}1f`, display: "grid", placeItems: "center" }}>
-                <meta.Icon size={12} color={meta.color} strokeWidth={2.3} />
-              </span>
-              <span className="sad-activity-msg" title={message}>{message}</span>
-              <span style={{ fontSize: 11, color: T.textMuted, whiteSpace: "nowrap" }}>{fmtTimeAgo(entry.createdAt)}</span>
-            </div>
-          );
-        })
+        <div className="sad-payments-list">
+          {clients.map((c) => {
+            const name = c.companyName || c.clientName;
+            const metaParts = [
+              plural(c.paymentCount, "payment"),
+              c.methods?.length ? c.methods.join(", ") : null,
+              c.lastPaymentDate ? fmtShortDate(c.lastPaymentDate) : null,
+            ].filter(Boolean);
+            return (
+              <div key={c.clientId} className="sad-payments-row">
+                <div className="sad-payments-client">
+                  <div className="sad-payments-name" title={name}>{name}</div>
+                  <div className="sad-payments-meta" title={metaParts.join(" · ")}>{metaParts.join(" · ")}</div>
+                </div>
+                <span className="sad-payments-amount">{fmtINR(c.totalPaid)}</span>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
@@ -464,7 +502,7 @@ export default function DashboardSection({ dashboardStats, activityLog, fetchDas
         </div>
 
         <div className="sad-row sad-row-bottom">
-          <ActivityLogCard activity={activity} onViewAll={() => openDetails("activity")} />
+          <ClientMonthlyPaymentsCard />
           <QuickStats stats={stats} copy={copy} />
         </div>
       </div>

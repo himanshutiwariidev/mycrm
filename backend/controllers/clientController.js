@@ -2279,6 +2279,88 @@ exports.getDashboardStats = async (req, res) => {
   }
 };
 
+exports.getMonthlyClientPayments = async (req, res) => {
+  try {
+    const now = new Date();
+    const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const monthParam = typeof req.query.month === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(req.query.month)
+      ? req.query.month
+      : currentKey;
+
+    const [yearStr, monthStr] = monthParam.split("-");
+    const year = Number(yearStr);
+    const monthIndex = Number(monthStr) - 1;
+    const monthStart = new Date(year, monthIndex, 1, 0, 0, 0, 0);
+    const monthEnd = new Date(year, monthIndex + 1, 0, 23, 59, 59, 999);
+
+    const contracts = await Contract.find({ "payments.0": { $exists: true } })
+      .select("clientId payments")
+      .populate("clientId", "clientName companyName");
+
+    const availableMonthsSet = new Set([currentKey, monthParam]);
+    const clientMap = new Map();
+
+    contracts.forEach((contract) => {
+      (contract.payments || []).forEach((payment) => {
+        if (!payment.paymentDate) return;
+        const paidOn = new Date(payment.paymentDate);
+        if (Number.isNaN(paidOn.getTime())) return;
+
+        const key = `${paidOn.getFullYear()}-${String(paidOn.getMonth() + 1).padStart(2, "0")}`;
+        availableMonthsSet.add(key);
+
+        if (paidOn >= monthStart && paidOn <= monthEnd) {
+          const amount = collectedOf(payment);
+          const clientObj = contract.clientId;
+          const clientId = String(clientObj?._id || contract.clientId || "unknown");
+          const existing = clientMap.get(clientId) || {
+            clientId,
+            clientName: clientObj?.clientName || "—",
+            companyName: clientObj?.companyName || "",
+            totalPaid: 0,
+            paymentCount: 0,
+            lastPaymentDate: null,
+            methods: new Set(),
+          };
+          existing.totalPaid += amount;
+          existing.paymentCount += 1;
+          if (payment.method) existing.methods.add(payment.method);
+          if (!existing.lastPaymentDate || paidOn > existing.lastPaymentDate) {
+            existing.lastPaymentDate = paidOn;
+          }
+          clientMap.set(clientId, existing);
+        }
+      });
+    });
+
+    const clients = Array.from(clientMap.values())
+      .map((entry) => ({
+        clientId: entry.clientId,
+        clientName: entry.clientName,
+        companyName: entry.companyName,
+        totalPaid: Math.round(entry.totalPaid * 100) / 100,
+        paymentCount: entry.paymentCount,
+        lastPaymentDate: entry.lastPaymentDate,
+        methods: Array.from(entry.methods),
+      }))
+      .sort((a, b) => (b.totalPaid - a.totalPaid) || (new Date(b.lastPaymentDate) - new Date(a.lastPaymentDate)));
+
+    const totalCollected = Math.round(clients.reduce((sum, c) => sum + c.totalPaid, 0) * 100) / 100;
+    const availableMonths = Array.from(availableMonthsSet).sort();
+
+    return res.json({
+      month: monthParam,
+      availableMonths,
+      totalCollected,
+      clientCount: clients.length,
+      clients,
+    });
+  } catch (error) {
+    console.error("Error fetching monthly client payments:", error);
+    return res.status(500).json({ message: error.message || "Failed to fetch monthly client payments" });
+  }
+};
+
 // ============= PAYMENT REMINDER OPERATIONS =============
 
 exports.createPaymentReminder = async (req, res) => {

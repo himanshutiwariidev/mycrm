@@ -1,4 +1,7 @@
 const mongoose = require("mongoose");
+const path = require("path");
+const multer = require("multer");
+const XLSX = require("xlsx");
 const TeleLead = require("../models/TeleLead");
 const CallLog = require("../models/CallLog");
 const Meeting = require("../models/Meeting");
@@ -110,6 +113,138 @@ exports.createLead = async (req, res) => {
     if (error?.code === 11000) return fail(res, 409, "This number is already on your list");
     console.error("createLead:", error);
     return fail(res, 500, "Failed to add lead");
+  }
+};
+
+const LEAD_IMPORT_ALIASES = {
+  name: ["name", "leadname", "fullname", "clientname", "contactname", "person"],
+  phone: ["phone", "phonenumber", "mobile", "mobilenumber", "contact", "contactnumber", "whatsapp", "tel"],
+  company: ["company", "companyname", "business", "businessname", "organization", "org"],
+  email: ["email", "emailid", "emailaddress", "mail"],
+  city: ["city", "location", "town"],
+  requirement: ["requirement", "requirements", "notes", "note", "remarks", "service", "services"],
+  source: ["source", "leadsource"],
+};
+
+const normalizeLeadHeader = (header) => String(header || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const getLeadImportValue = (row, field) => {
+  for (const alias of LEAD_IMPORT_ALIASES[field] || []) {
+    const val = row[alias];
+    if (val !== undefined && val !== null && String(val).trim() !== "") return String(val).trim();
+  }
+  return "";
+};
+
+const normalizeLeadSource = (raw) => {
+  const text = String(raw || "").trim().toLowerCase();
+  if (!text) return "cold list";
+  return LEAD_SOURCES.find((s) => s.toLowerCase() === text) || "other";
+};
+
+exports.importLeadsMiddleware = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = /\.(csv|xls|xlsx|numbers)$/i;
+    if (allowed.test(path.extname(file.originalname))) return cb(null, true);
+    return cb(new Error("Only CSV, XLS, XLSX, or Numbers files are allowed"));
+  },
+}).single("file");
+
+/** POST /api/telecalling/leads/import — bulk import leads from CSV/XLSX into telecaller's list. */
+exports.importLeads = async (req, res) => {
+  try {
+    if (!req.file) return fail(res, 400, "No file uploaded");
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    if (ext === ".numbers") {
+      return fail(res, 400, "Numbers files cannot be parsed on the server. Please export as Excel (.xlsx) or CSV and import again.");
+    }
+
+    const workbook = XLSX.read(req.file.buffer, { type: "buffer", cellDates: true });
+    const sheetName = workbook.SheetNames[0];
+    if (!sheetName) return fail(res, 400, "Import file is empty");
+
+    const matrix = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "", raw: false });
+    const knownHeaders = new Set(Object.values(LEAD_IMPORT_ALIASES).flat());
+    const headerRowIndex = matrix.reduce((bestIndex, cells, index) => {
+      const score = cells.reduce((sum, cell) => sum + (knownHeaders.has(normalizeLeadHeader(cell)) ? 1 : 0), 0);
+      const bestScore = matrix[bestIndex]?.reduce((sum, cell) => sum + (knownHeaders.has(normalizeLeadHeader(cell)) ? 1 : 0), 0) || 0;
+      return score > bestScore ? index : bestIndex;
+    }, 0);
+    const headers = (matrix[headerRowIndex] || []).map(normalizeLeadHeader);
+
+    const rows = matrix
+      .slice(headerRowIndex + 1)
+      .map((raw, index) => {
+        const normalized = {};
+        raw.forEach((value, cellIndex) => {
+          const header = headers[cellIndex];
+          if (header) normalized[header] = value;
+        });
+        normalized.__rowNumber = headerRowIndex + index + 2;
+        return normalized;
+      })
+      .filter((row) => Object.entries(row).some(([k, v]) => !k.startsWith("__") && String(v || "").trim() !== ""));
+
+    if (!rows.length) return fail(res, 400, "Import file has no data rows");
+
+    const existingLeads = await TeleLead.find({ telecaller: req.user.id }).select("phone").lean();
+    const seenPhones = new Set(existingLeads.map((l) => l.phone));
+
+    const summary = {
+      totalRows: rows.length,
+      leadsCreated: 0,
+      duplicatesSkipped: 0,
+      skippedRows: 0,
+      errors: [],
+    };
+
+    const toInsert = [];
+    for (const row of rows) {
+      const rowNumber = row.__rowNumber || 0;
+      const name = str(getLeadImportValue(row, "name"), 120);
+      const rawPhone = getLeadImportValue(row, "phone");
+      const phone = normalizePhone(rawPhone);
+
+      if (!name) {
+        summary.skippedRows += 1;
+        summary.errors.push({ row: rowNumber, message: "Lead name is required" });
+        continue;
+      }
+      if (!phone || phone.replace(/\D/g, "").length < 7) {
+        summary.skippedRows += 1;
+        summary.errors.push({ row: rowNumber, message: "Valid phone number is required" });
+        continue;
+      }
+      if (seenPhones.has(phone)) {
+        summary.duplicatesSkipped += 1;
+        summary.skippedRows += 1;
+        continue;
+      }
+
+      seenPhones.add(phone);
+      toInsert.push({
+        telecaller: req.user.id,
+        name,
+        phone,
+        company: str(getLeadImportValue(row, "company"), 160) || undefined,
+        email: str(getLeadImportValue(row, "email"), 160)?.toLowerCase() || undefined,
+        city: str(getLeadImportValue(row, "city"), 80) || undefined,
+        requirement: str(getLeadImportValue(row, "requirement"), 1000) || undefined,
+        source: normalizeLeadSource(getLeadImportValue(row, "source")),
+      });
+    }
+
+    if (toInsert.length) {
+      await TeleLead.insertMany(toInsert, { ordered: false });
+      summary.leadsCreated = toInsert.length;
+    }
+
+    return res.json({ message: "Import completed", summary });
+  } catch (error) {
+    console.error("importLeads:", error);
+    return fail(res, 500, error.message || "Failed to import leads");
   }
 };
 

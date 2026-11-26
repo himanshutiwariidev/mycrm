@@ -13,6 +13,7 @@ import {
   baseInpNoIcon,
   fmtCurrency,
 } from "./shared";
+import UserProfileFields from "./UserProfileFields";
 
 export default function DashboardModals({
   users,
@@ -75,9 +76,9 @@ export default function DashboardModals({
       )}
 
       {editUser && (
-        <Modal title="Edit User" onClose={() => setEditUser(null)}>
+        <Modal title="Edit User" onClose={() => setEditUser(null)} width={660}>
           <form onSubmit={handleUpdateUser}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14, maxHeight: "68vh", overflowY: "auto", paddingRight: 4 }}>
               <FormField label="Full Name"><div style={{ position: "relative" }}><FieldIcon icon={User} /><input className="inp" style={baseInp} type="text" placeholder="Full name" value={editUserForm.name} onChange={e => setEditUserForm({ ...editUserForm, name: e.target.value })} required /></div></FormField>
               <FormField label="Role">
                 <div style={{ position: "relative" }}>
@@ -109,6 +110,7 @@ export default function DashboardModals({
                   </button>
                 </div>
               </FormField>
+              <UserProfileFields form={editUserForm} setForm={setEditUserForm} existingPhoto={editUser.photo} />
             </div>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button type="button" onClick={() => setEditUser(null)} style={{ padding: "9px 18px", borderRadius: 9, border: `1.5px solid ${T.border}`, background: "#fff", color: T.textSecondary, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>

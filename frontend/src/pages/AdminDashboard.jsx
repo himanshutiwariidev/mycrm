@@ -70,7 +70,7 @@ export default function AdminDashboard() {
     handleCreateUser, handleCreateTask, handleCreateExpense, handleDeleteExpense, handleCreateMeeting, handleDeleteMeeting, handleCreateProject, handleDownloadProjectsCsv,
     openCreateProject, openEditProject, cancelProjectForm,
     openEditTask, handleUpdateTask, handleDeleteTask,
-    openEditUser, handleUpdateUser, handleDeleteUser,
+    openEditUser, handleUpdateUser, handleDeleteUser, handleToggleUserStatus,
     openPaySalary, handlePaySalary, handleDeleteProject, handleLogout,
     done, inProg, pend, completionRate, activeProjects, ongoingProjects,
     projectAssignChartData, projectPlatformChartData, projectDueChartData,
@@ -143,7 +143,7 @@ export default function AdminDashboard() {
           />
         );
       case "users":
-        return <UsersSection users={users} tasks={tasks} setTab={setTab} openEditUser={openEditUser} setDeleteUser={setDeleteUser} />;
+        return <UsersSection users={users} tasks={tasks} setTab={setTab} openEditUser={openEditUser} setDeleteUser={setDeleteUser} onToggleUserStatus={handleToggleUserStatus} />;
       case "salary":
         return <SalarySection users={users} openPaySalary={openPaySalary} />;
       case "expenses":

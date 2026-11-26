@@ -43,8 +43,7 @@ const formatAmount = (value) =>
     maximumFractionDigits: 2,
   }).format(Number(value) || 0);
 
-// PDFKit's standard Helvetica font has no ₹ glyph (renders as a broken superscript),
-// so PDF-rendered amounts use a plain "Rs." prefix instead — the existing contract
+
 // PDF avoids this the same way by labelling currency separately.
 const formatCurrencyForPdf = (value, currency = "INR") =>
   currency && currency !== "INR" ? `${currency} ${formatAmount(value)}` : `Rs. ${formatAmount(value)}`;
@@ -93,9 +92,6 @@ const drawInfoRow = (doc, label, value, x, y, width) => {
 
 const buildInvoiceNumber = (contract) => `INV-${contract.contractNumber || contract._id}`;
 
-// Self-contained invoice generator — deliberately NOT sharing closures with
-// generateContractPdf below (that function's draw* helpers are tuned/fragile from
-// many rounds of visual fixes; duplicating the branding constants here is safer
 // than risking a regression in the contract PDF via a shared refactor).
 const generateInvoicePdf = async ({ client, contract }) => {
   return new Promise((resolve, reject) => {

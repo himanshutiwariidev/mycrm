@@ -9,6 +9,20 @@ const UserSchema= new mongoose.Schema(
         role:{type:String,enum:["admin","user","hr","sales","client","manager","telecaller","salesmanager"],default:"user"},
         clientId:{type:mongoose.Schema.Types.ObjectId,ref:"Client"},
         isActive:{type:Boolean,default:true},
+        photo:{type:String,trim:true},
+        empCode:{type:String,trim:true},
+        phone:{type:String,trim:true},
+        bloodGroup:{type:String,trim:true,uppercase:true},
+        emergencyContact:{type:String,trim:true},
+        address:{type:String,trim:true},
+        pan:{type:String,trim:true,uppercase:true},
+        aadhar:{type:String,trim:true},
+        bankAccount:{type:String,trim:true},
+        doj:{type:Date},
+        salary:{type:Number,min:0},
+        designation:{type:String,trim:true},
+        department:{type:String,trim:true},
+        remarks:{type:String,trim:true},
         // Admin credential-recovery flow (OTP sent to a hardcoded recovery
         // email — see controllers/adminRecoveryController.js). Only ever
         // populated on the single "admin" role user; select:false keeps

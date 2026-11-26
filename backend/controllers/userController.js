@@ -1,8 +1,50 @@
 const User = require("../models/User");
+const path = require("path");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const asyncHandler = require("../utils/asyncHandler");
+const { createImageUpload, removeFiles } = require("../utils/imageUploads");
 const { createLoginAttendance, logoutAttendance } = require("../services/attendanceService");
+
+const userPhotoUpload = createImageUpload({
+  dir: path.join(__dirname, "../uploads/user-photos"),
+  field: "photo",
+  maxFiles: 1,
+  noun: "photo",
+});
+
+const PROFILE_FIELDS = [
+  "empCode",
+  "phone",
+  "bloodGroup",
+  "emergencyContact",
+  "address",
+  "pan",
+  "aadhar",
+  "bankAccount",
+  "doj",
+  "salary",
+  "designation",
+  "department",
+  "remarks",
+];
+
+function pickProfileFields(body = {}) {
+  const out = {};
+  for (const key of PROFILE_FIELDS) {
+    if (body[key] === undefined) continue;
+    if (key === "salary") {
+      out.salary = body.salary === "" || body.salary === null ? undefined : Number(body.salary);
+    } else if (key === "doj") {
+      out.doj = body.doj ? new Date(body.doj) : undefined;
+    } else if (key === "pan") {
+      out.pan = typeof body.pan === "string" ? body.pan.trim().toUpperCase() : body.pan;
+    } else {
+      out[key] = typeof body[key] === "string" ? body[key].trim() : body[key];
+    }
+  }
+  return out;
+}
 
 // ── Cookie options ──────────────────────────────────────────────────────────
 // httpOnly prevents JS access; secure restricts to HTTPS in production;
@@ -45,10 +87,20 @@ exports.createUser = asyncHandler(async (req, res) => {
   }
 
   const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
+  const profileFields = pickProfileFields(req.body);
 
-  await User.create({ name, email: normalizedEmail, password: hashedPassword, role: resolvedRole });
+  const created = await User.create({
+    name,
+    email: normalizedEmail,
+    password: hashedPassword,
+    role: resolvedRole,
+    ...profileFields,
+  });
 
-  return res.status(201).json({ message: "User created successfully" });
+  const safeUser = created.toObject();
+  delete safeUser.password;
+
+  return res.status(201).json({ message: "User created successfully", user: safeUser });
 });
 
 // ── GET ALL USERS ───────────────────────────────────────────────────────────
@@ -83,13 +135,15 @@ exports.deleteUser = asyncHandler(async (req, res) => {
     }
   }
 
-  await User.findByIdAndDelete(req.params.id);
+  const deleted = await User.findByIdAndDelete(req.params.id);
+  if (deleted?.photo) userPhotoUpload.removeFile(deleted.photo);
   return res.json({ message: "User deleted successfully" });
 });
 
 // ── UPDATE USER ─────────────────────────────────────────────────────────────
 exports.updateUser = asyncHandler(async (req, res) => {
   const updatePayload = { ...req.body };
+  delete updatePayload.photo; // handled by POST /:id/photo
 
   if (req.user.role === "manager") {
     const target = await User.findById(req.params.id).select("role");
@@ -113,6 +167,19 @@ exports.updateUser = asyncHandler(async (req, res) => {
     updatePayload.password = await bcrypt.hash(updatePayload.password, BCRYPT_ROUNDS);
   }
 
+  if (updatePayload.salary !== undefined) {
+    updatePayload.salary = updatePayload.salary === "" || updatePayload.salary === null ? null : Number(updatePayload.salary);
+  }
+  if (updatePayload.doj !== undefined) {
+    updatePayload.doj = updatePayload.doj ? new Date(updatePayload.doj) : null;
+  }
+  if (typeof updatePayload.pan === "string") {
+    updatePayload.pan = updatePayload.pan.trim().toUpperCase();
+  }
+  if (typeof updatePayload.bloodGroup === "string") {
+    updatePayload.bloodGroup = updatePayload.bloodGroup.trim().toUpperCase();
+  }
+
   const user = await User.findByIdAndUpdate(req.params.id, updatePayload, {
     new: true,
     runValidators: true,
@@ -123,6 +190,43 @@ exports.updateUser = asyncHandler(async (req, res) => {
   }
 
   return res.json({ message: "User updated successfully" });
+});
+
+// ── UPLOAD USER PHOTO ───────────────────────────────────────────────────────
+exports.uploadUserPhotoMiddleware = userPhotoUpload.receive;
+
+exports.uploadUserPhoto = asyncHandler(async (req, res) => {
+  const file = req.files?.[0] || req.file;
+  if (!file) {
+    return res.status(400).json({ message: "No photo file uploaded" });
+  }
+
+  const existing = await User.findById(req.params.id).select("role photo");
+  if (!existing) {
+    removeFiles([file]);
+    return res.status(404).json({ message: "User not found" });
+  }
+  if (req.user.role === "manager" && existing.role !== "user") {
+    removeFiles([file]);
+    return res.status(403).json({ message: "Managers can only manage accounts with the 'user' role" });
+  }
+
+  let normalized;
+  try {
+    normalized = await userPhotoUpload.normalize(file);
+  } catch (err) {
+    removeFiles([file]);
+    return res.status(err.statusCode || 400).json({ message: err.message || "Invalid image file" });
+  }
+
+  if (existing.photo && existing.photo !== normalized.filename) {
+    userPhotoUpload.removeFile(existing.photo);
+  }
+
+  existing.photo = normalized.filename;
+  await existing.save();
+
+  return res.json({ message: "Photo uploaded successfully", photo: normalized.filename });
 });
 
 // ── LOGIN ────────────────────────────────────────────────────────────────────
@@ -147,6 +251,10 @@ exports.loginUser = asyncHandler(async (req, res) => {
   if (!user || !isMatch) {
     // Generic message — never reveal whether the email exists in the system
     return res.status(401).json({ message: "Invalid credentials" });
+  }
+
+  if (user.isActive === false) {
+    return res.status(403).json({ message: "Your account is inactive. Please contact the administrator." });
   }
 
   const token = jwt.sign(

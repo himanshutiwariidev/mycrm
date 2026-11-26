@@ -20,6 +20,7 @@ const workProgressViewAccess = requireRole("admin", "salesmanager", "sales", "us
 // Dashboard Stats (must come before "/:id"). Company-wide figures — admin
 // only; a sales person gets their own scoped view from /sales-dashboard.
 router.get("/dashboard-stats", authMiddleware, requireRole("admin"), clientController.getDashboardStats);
+router.get("/monthly-payments", authMiddleware, requireRole("admin"), clientController.getMonthlyClientPayments);
 router.get("/activity/all", authMiddleware, requireRole("admin"), clientController.getAllActivity);
 // Sales person: their own book. Sales manager / admin: ?salesPerson=<id>, or the whole team.
 router.get("/sales-dashboard", authMiddleware, requireRole("sales", "salesmanager", "admin"), salesDashboardController.getSalesDashboard);

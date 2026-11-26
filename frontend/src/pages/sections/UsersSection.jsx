@@ -1,24 +1,16 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  Briefcase, Pencil, Shield, Trash2, UserPlus, Users, Search, Filter,
-  LayoutGrid, List, ChevronDown, ChevronLeft, ChevronRight, MoreVertical,
+  BadgeCheck, Briefcase, Building2, CreditCard, Droplet, Globe, Mail, MoreVertical, Pencil, Phone,
+  Power, Search, Filter, LayoutGrid, List, ChevronDown, ChevronLeft, ChevronRight,
+  Trash2, UserPlus, Users, FileText,
 } from "lucide-react";
-import { IconBtn, STATUS, T } from "./shared";
-
-const ROLE_ACCENT = {
-  admin: { color: "#f7931e", bg: "#fff4e6", border: "#fed7aa" },
-  manager: { color: "#7c3aed", bg: "#ede9fe", border: "#ddd6fe" },
-  hr: { color: "#0d9488", bg: "#ccfbf1", border: "#99f6e4" },
-  sales: { color: "#16a34a", bg: "#dcfce7", border: "#bbf7d0" },
-  salesmanager: { color: "#15803d", bg: "#d1fae5", border: "#86efac" },
-  telecaller: { color: "#0891b2", bg: "#cffafe", border: "#a5f3fc" },
-  user: { color: "#d97706", bg: "#fffbeb", border: "#fde68a" },
-  client: { color: "#db2777", bg: "#fce7f3", border: "#fbcfe8" },
-};
+import cybertrickLogo from "../../assets/cybertrick.png";
+import { Modal, T } from "./shared";
+import { uploadedFileUrl } from "../../utils/uploads";
+import "./UsersSection.css";
 
 const ROLE_OPTIONS = [
   { value: "all", label: "All Roles" },
-  { value: "admin", label: "Admin" },
   { value: "manager", label: "Manager" },
   { value: "hr", label: "HR" },
   { value: "sales", label: "Sales" },
@@ -32,7 +24,9 @@ const roleLabel = (role) => ROLE_OPTIONS.find((o) => o.value === role)?.label ||
 
 const PAGE_SIZE = 6;
 
-const fmtJoined = (d) => (d ? new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—");
+const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—");
+const fmtSalary = (v) => (v !== undefined && v !== null && v !== "" ? `₹${Number(v).toLocaleString("en-IN")}` : "—");
+const getInitials = (name) => (name ? name.trim().split(/\s+/).map((n) => n[0]).join("").toUpperCase().slice(0, 2) : "??");
 
 function FilterDropdown({ icon: Icon, value, onChange, options }) {
   return (
@@ -55,27 +49,115 @@ function FilterDropdown({ icon: Icon, value, onChange, options }) {
   );
 }
 
-export default function UsersSection({ users, tasks, setTab, openEditUser, setDeleteUser }) {
+function PassportPhoto({ user, className = "cm-id-photo", width, height, radius, darkFrame = false }) {
+  const src = user.photo ? uploadedFileUrl("user-photos", user.photo) : "";
+  const customStyle = width ? { width, height, borderRadius: radius } : undefined;
+  return (
+    <div
+      className={className}
+      style={{
+        ...customStyle,
+        ...(darkFrame ? { background: "rgba(255,255,255,0.14)", border: "2px solid rgba(255,255,255,0.35)" } : null),
+      }}
+    >
+      {src ? (
+        <img src={src} alt={user.name} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+      ) : (
+        <span style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: width ? Math.round(width * 0.32) : 28, color: darkFrame ? "#fff" : "#1e3a8a" }}>
+          {getInitials(user.name)}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function KVRow({ label, value, mono = false }) {
+  const empty = !value || value === "—";
+  return (
+    <div className="emp-kv-row">
+      <span className="emp-kv-label">{label}</span>
+      <span className={`emp-kv-val${empty ? " is-empty" : ""}`} style={mono && !empty ? { fontVariantNumeric: "tabular-nums", letterSpacing: "0.02em" } : undefined}>
+        {value || "Not provided"}
+      </span>
+    </div>
+  );
+}
+
+function UserCardMenu({ user, isOpen, onToggle, onClose, onEdit, onToggleStatus, onDelete }) {
+  const isInactive = user.isActive === false;
+  return (
+    <div style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        className="cm-id-menu-btn"
+        aria-label={`Actions for ${user.name}`}
+        aria-expanded={isOpen}
+        onClick={onToggle}
+      >
+        <MoreVertical size={15} strokeWidth={2} />
+      </button>
+      {isOpen && (
+        <div className="cm-id-dropdown" role="menu">
+          <button type="button" role="menuitem" className="cm-id-dropdown-item" onClick={() => { onClose(); onEdit(user); }}>
+            <Pencil size={13} strokeWidth={2} color="#f7931e" /> Edit Details
+          </button>
+          {onToggleStatus && (
+            <button type="button" role="menuitem" className="cm-id-dropdown-item" onClick={() => { onClose(); onToggleStatus(user); }}>
+              <Power size={13} strokeWidth={2} color={isInactive ? "#16a34a" : "#d97706"} />
+              {isInactive ? "Mark Active" : "Mark Inactive"}
+            </button>
+          )}
+          <button type="button" role="menuitem" className="cm-id-dropdown-item is-danger" onClick={() => { onClose(); onDelete(user); }}>
+            <Trash2 size={13} strokeWidth={2} /> Delete User
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function UsersSection({ users, setTab, openEditUser, setDeleteUser, onToggleUserStatus }) {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [view, setView] = useState("grid");
   const [page, setPage] = useState(1);
-  // A manager's edit/delete permission is limited to plain "user" accounts
-  // (enforced server-side too) — hiding the buttons for everyone else here
-  // avoids offering an action that would just come back as a 403.
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [openMenuId, setOpenMenuId] = useState(null);
+
+  useEffect(() => {
+    if (!openMenuId) return undefined;
+    const close = () => setOpenMenuId(null);
+    const onKey = (e) => { if (e.key === "Escape") setOpenMenuId(null); };
+    document.addEventListener("click", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("click", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [openMenuId]);
+
   const actingRole = localStorage.getItem("role");
   const canManageUser = (user) => actingRole !== "manager" || user.role === "user";
 
   const resetAnd = (setter) => (val) => { setter(val); setPage(1); };
 
+  const visibleUsers = useMemo(() => users.filter((u) => u.role !== "admin"), [users]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return users.filter((u) => {
-      if (q && !(u.name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q))) return false;
+    return visibleUsers.filter((u) => {
+      if (q && !(
+        u.name?.toLowerCase().includes(q) ||
+        u.email?.toLowerCase().includes(q) ||
+        u.empCode?.toLowerCase().includes(q) ||
+        u.phone?.toLowerCase().includes(q) ||
+        u.designation?.toLowerCase().includes(q) ||
+        u.department?.toLowerCase().includes(q)
+      )) return false;
       if (roleFilter !== "all" && u.role !== roleFilter) return false;
       return true;
     });
-  }, [users, search, roleFilter]);
+  }, [visibleUsers, search, roleFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -88,7 +170,7 @@ export default function UsersSection({ users, tasks, setTab, openEditUser, setDe
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 14 }}>
         <div>
           <h2 style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 19, color: T.textPrimary }}>All Users</h2>
-          <p style={{ fontSize: 12.5, color: T.textMuted, marginTop: 3 }}>{users.length} registered member{users.length !== 1 ? "s" : ""}</p>
+          <p style={{ fontSize: 12.5, color: T.textMuted, marginTop: 3 }}>{visibleUsers.length} registered member{visibleUsers.length !== 1 ? "s" : ""} · Click any ID card to view full details</p>
         </div>
         <button className="pri-btn" onClick={() => setTab("createUser")} style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 18px", background: "linear-gradient(135deg, #f7931e, #e8590c)", color: "#fff", borderRadius: 10, fontSize: 13, fontWeight: 600 }}>
           <UserPlus size={15} strokeWidth={2} /> New User
@@ -101,7 +183,7 @@ export default function UsersSection({ users, tasks, setTab, openEditUser, setDe
           <Search size={15} strokeWidth={2} color={T.textMuted} style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
           <input
             className="inp"
-            placeholder="Search users by name or email..."
+            placeholder="Search by name, email, mobile, designation, department..."
             value={search}
             onChange={(e) => resetAnd(setSearch)(e.target.value)}
             style={{ width: "100%", boxSizing: "border-box", padding: "10px 14px 10px 38px", background: T.inputBg, border: `1.5px solid ${T.inputBorder}`, borderRadius: 10, color: T.textPrimary, fontSize: 13.5, outline: "none", fontFamily: "inherit" }}
@@ -111,7 +193,7 @@ export default function UsersSection({ users, tasks, setTab, openEditUser, setDe
         <div style={{ display: "flex", border: `1.5px solid ${T.inputBorder}`, borderRadius: 10, overflow: "hidden", flexShrink: 0 }}>
           <button
             onClick={() => setView("grid")}
-            title="Grid view"
+            title="ID Card view"
             style={{ display: "grid", placeItems: "center", width: 38, height: 38, border: "none", cursor: "pointer", background: view === "grid" ? "#fff4e6" : "#fff", color: view === "grid" ? "#f7931e" : T.textMuted }}
           >
             <LayoutGrid size={16} strokeWidth={2} />
@@ -132,124 +214,174 @@ export default function UsersSection({ users, tasks, setTab, openEditUser, setDe
           <p style={{ fontFamily: "'Syne', sans-serif", fontSize: 17, color: T.textSecondary }}>No users match your filters</p>
         </div>
       ) : view === "grid" ? (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(290px, 1fr))", gap: 14 }}>
-          {pageUsers.map((user, i) => {
-            const accent = ROLE_ACCENT[user.role] || ROLE_ACCENT.user;
-            const initials = user.name ? user.name.trim().split(/\s+/).map(n => n[0]).join("").toUpperCase().slice(0, 2) : "??";
-            const userTasks = tasks.filter(t => t.assignedTo?._id === user._id || t.assignedTo === user._id);
-            const tasksDone = userTasks.filter(t => t.status === "completed").length;
-            const pct = userTasks.length ? Math.round((tasksDone / userTasks.length) * 100) : 0;
-            const showTaskProgress = user.role === "user";
+        <div className="emp-grid">
+          {pageUsers.map((user, i) => (
+            <div
+              key={user._id}
+              role="button"
+              tabIndex={0}
+              onClick={() => setSelectedUser(user)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedUser(user); } }}
+              className={`cm-id-card card-in${user.isActive === false ? " is-inactive" : ""}`}
+              style={{ animationDelay: `${i * 35}ms` }}
+            >
+              {/* Top-left decorative two-tone ribbon */}
+              <svg className="cm-id-ribbon" viewBox="0 0 140 108" aria-hidden="true">
+                <defs>
+                  <linearGradient id={`cmRibbonPurple-${user._id}`} x1="0" y1="1" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#5b21b6" />
+                    <stop offset="55%" stopColor="#9333ea" />
+                    <stop offset="100%" stopColor="#d946ef" />
+                  </linearGradient>
+                  <linearGradient id={`cmRibbonBlue-${user._id}`} x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stopColor="#051c5c" />
+                    <stop offset="100%" stopColor="#0e48c7" />
+                  </linearGradient>
+                </defs>
+                <path d="M0,0 L130,0 C82,22 34,54 0,104 Z" fill={`url(#cmRibbonPurple-${user._id})`} />
+                <path d="M0,0 L94,0 C58,20 26,48 0,88 Z" fill={`url(#cmRibbonBlue-${user._id})`} />
+              </svg>
 
-            return (
-              <div key={user._id} className="card card-in" style={{ background: T.card, border: `1.5px solid ${T.border}`, borderRadius: 16, padding: "22px", animationDelay: `${i * 40}ms`, boxShadow: "0 1px 3px rgba(0,0,0,.04)", position: "relative" }}>
-                <div style={{ position: "absolute", top: 14, right: 14, display: "flex", gap: 6 }}>
-                  <button title="More" style={{ width: 30, height: 30, borderRadius: 7, border: "none", cursor: "pointer", display: "grid", placeItems: "center", background: "transparent", color: T.textMuted }}>
-                    <MoreVertical size={15} strokeWidth={2} />
-                  </button>
-                  {canManageUser(user) && (
-                    <>
-                      <IconBtn icon={Pencil} color="#f7931e" bg="#fff4e6" hoverBg="#fed7aa" onClick={() => openEditUser(user)} title="Edit user" />
-                      <IconBtn icon={Trash2} color={T.red} bg={T.redBg} hoverBg={T.redBorder} onClick={() => setDeleteUser(user)} title="Delete user" />
-                    </>
-                  )}
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 13, marginBottom: 18, paddingRight: 104 }}>
-                  <div style={{ width: 48, height: 48, borderRadius: "50%", flexShrink: 0, background: accent.bg, display: "grid", placeItems: "center", fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 16, color: accent.color, border: `1.5px solid ${accent.border}` }}>
-                    {initials}
+              {/* Subtle right watermark */}
+              <img src={cybertrickLogo} alt="" aria-hidden="true" className="cm-id-watermark" />
+
+              {/* Lanyard slot + 3-dot action menu */}
+              <div className="cm-id-top-bar">
+                <div className="cm-id-slot" />
+                {canManageUser(user) && (
+                  <div className="cm-id-actions">
+                    <UserCardMenu
+                      user={user}
+                      isOpen={openMenuId === user._id}
+                      onToggle={() => setOpenMenuId((prev) => (prev === user._id ? null : user._id))}
+                      onClose={() => setOpenMenuId(null)}
+                      onEdit={openEditUser}
+                      onToggleStatus={onToggleUserStatus}
+                      onDelete={setDeleteUser}
+                    />
                   </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 600, fontSize: 14.5, color: T.textPrimary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user.name}</div>
-                    <div style={{ fontSize: 12, color: T.textMuted, marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user.email}</div>
-                  </div>
-                </div>
-                <span style={{ fontSize: 10, fontWeight: 700, padding: "4px 10px", borderRadius: 6, letterSpacing: ".07em", textTransform: "uppercase", color: accent.color, background: accent.bg, border: `1px solid ${accent.border}`, display: "inline-block", marginBottom: 16 }}>
-                  {roleLabel(user.role).toUpperCase()}
+                )}
+              </div>
+
+              {/* Company Logo */}
+              <div className="cm-id-logo-wrap">
+                <img src={cybertrickLogo} alt="Cybertricks Media Pvt Ltd" className="cm-id-logo" />
+              </div>
+
+              {/* Centered Passport Photo */}
+              <div className="cm-id-photo-wrap">
+                <PassportPhoto user={user} />
+              </div>
+
+              {/* Name & Designation Pill */}
+              <div className="cm-id-name" title={user.name}>
+                <span className="cm-id-name-text">{user.name}</span>
+                {user.isActive === false && <span className="cm-id-inactive-dot" title="Inactive" aria-label="Inactive" />}
+              </div>
+              <div className="cm-id-pill-wrap">
+                <span className="cm-id-pill" title={user.designation || roleLabel(user.role)}>
+                  {user.designation || roleLabel(user.role)}
                 </span>
+              </div>
 
-                {showTaskProgress && (
-                  <div style={{ borderTop: `1px solid ${T.borderLight}`, paddingTop: 15, marginBottom: 15 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 9 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: T.textMuted }}>
-                        <Briefcase size={12} strokeWidth={1.8} />
-                        <span><span style={{ color: T.textSecondary, fontWeight: 600 }}>{userTasks.length}</span> task{userTasks.length !== 1 ? "s" : ""} assigned</span>
-                      </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: T.green }}>{pct}% done</span>
-                    </div>
-                    <div style={{ height: 5, background: "#f1f5f9", borderRadius: 99, overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: `${pct}%`, borderRadius: 99, background: "linear-gradient(90deg, #f7931e, #16a34a)", transition: "width .6s cubic-bezier(.22,1,.36,1)" }} />
-                    </div>
-                    {userTasks.length > 0 && (
-                      <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
-                        {Object.entries(STATUS).map(([key, { label, color, bg, border, Icon: SIcon }]) => {
-                          const count = userTasks.filter(t => (t.status || "pending") === key).length;
-                          if (!count) return null;
-                          return (
-                            <span key={key} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, fontWeight: 600, padding: "4px 9px", borderRadius: 6, color, background: bg, border: `1px solid ${border}` }}>
-                              <SIcon size={10} strokeWidth={2} />{count} {label}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-                {user.role === "admin" && (
-                  <div style={{ borderTop: `1px solid ${T.borderLight}`, paddingTop: 15, marginBottom: 15, display: "flex", alignItems: "center", gap: 8 }}>
-                    <Shield size={13} strokeWidth={1.8} color="#f7931e" />
-                    <span style={{ fontSize: 12, color: T.textMuted }}>Full system access — no task assignments</span>
-                  </div>
-                )}
-                {!showTaskProgress && user.role !== "admin" && (
-                  <div style={{ borderTop: `1px solid ${T.borderLight}`, paddingTop: 15, marginBottom: 15, display: "flex", alignItems: "center", gap: 8 }}>
-                    <Briefcase size={13} strokeWidth={1.8} color={T.textMuted} />
-                    <span style={{ fontSize: 12, color: T.textMuted }}>{user.role === "client" ? "Client account — no task tracking" : "Internal role — no task tracking"}</span>
-                  </div>
-                )}
+              <div className="cm-id-divider" />
 
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: `1px solid ${T.borderLight}`, paddingTop: 14 }}>
-                  <div>
-                    <div style={{ fontSize: 10.5, color: T.textMuted, textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 600, marginBottom: 5 }}>Status</div>
-                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 99, color: T.green, background: T.greenBg }}>Active</span>
+              {/* Key ID Details */}
+              <div className="cm-id-details">
+                <div className="cm-id-row-2">
+                  <div className="cm-id-item">
+                    <span className="cm-id-circle"><BadgeCheck size={14} strokeWidth={2.1} /></span>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="cm-id-label">Emp Code</div>
+                      <div className="cm-id-value">{user.empCode || "—"}</div>
+                    </div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 10.5, color: T.textMuted, textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 600, marginBottom: 5 }}>Joined</div>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: T.textPrimary }}>{fmtJoined(user.createdAt)}</span>
+                  <div className="cm-id-item">
+                    <span className="cm-id-circle"><Building2 size={14} strokeWidth={2.1} /></span>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="cm-id-label">Department</div>
+                      <div className="cm-id-value" title={user.department || roleLabel(user.role)}>
+                        {user.department || roleLabel(user.role)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="cm-id-item">
+                  <span className="cm-id-circle"><Mail size={14} strokeWidth={2.1} /></span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="cm-id-label">Email ID</div>
+                    <div className="cm-id-value" title={user.email}>{user.email}</div>
+                  </div>
+                </div>
+
+                <div className="cm-id-row-2">
+                  <div className="cm-id-item">
+                    <span className="cm-id-circle"><Phone size={14} strokeWidth={2.1} /></span>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="cm-id-label">Mobile No.</div>
+                      <div className="cm-id-value" title={user.phone || ""}>{user.phone || "—"}</div>
+                    </div>
+                  </div>
+                  <div className="cm-id-item">
+                    <span className="cm-id-circle"><Droplet size={14} strokeWidth={2.1} /></span>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="cm-id-label">Blood Group</div>
+                      <div className="cm-id-value">{user.bloodGroup || "—"}</div>
+                    </div>
                   </div>
                 </div>
               </div>
-            );
-          })}
+
+              {/* Bottom Brand Footer */}
+              <div className="cm-id-footer">
+                <Globe size={14} strokeWidth={2} />
+                <span style={{ opacity: 0.45 }}>|</span>
+                <span>www.cybertricksmedia.com</span>
+              </div>
+            </div>
+          ))}
         </div>
       ) : (
-        <div style={{ background: "#fff", border: `1px solid ${T.border}`, borderRadius: 16, overflow: "hidden" }}>
-          {pageUsers.map((user, i) => {
-            const accent = ROLE_ACCENT[user.role] || ROLE_ACCENT.user;
-            const initials = user.name ? user.name.trim().split(/\s+/).map(n => n[0]).join("").toUpperCase().slice(0, 2) : "??";
-            return (
-              <div key={user._id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 18px", borderBottom: i < pageUsers.length - 1 ? `1px solid ${T.borderLight}` : "none" }}>
-                <div style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, background: accent.bg, display: "grid", placeItems: "center", fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 13, color: accent.color, border: `1.5px solid ${accent.border}` }}>
-                  {initials}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13.5, color: T.textPrimary }}>{user.name}</div>
-                  <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 2 }}>{user.email}</div>
-                </div>
-                <span style={{ fontSize: 10, fontWeight: 700, padding: "4px 10px", borderRadius: 6, letterSpacing: ".06em", textTransform: "uppercase", color: accent.color, background: accent.bg, border: `1px solid ${accent.border}`, flexShrink: 0 }}>
-                  {roleLabel(user.role).toUpperCase()}
-                </span>
-                <span style={{ fontSize: 12, color: T.textMuted, flexShrink: 0, minWidth: 100, textAlign: "right" }}>{fmtJoined(user.createdAt)}</span>
-                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                  {canManageUser(user) && (
-                    <>
-                      <IconBtn icon={Pencil} color="#f7931e" bg="#fff4e6" hoverBg="#fed7aa" onClick={() => openEditUser(user)} title="Edit user" />
-                      <IconBtn icon={Trash2} color={T.red} bg={T.redBg} hoverBg={T.redBorder} onClick={() => setDeleteUser(user)} title="Delete user" />
-                    </>
-                  )}
+        <div style={{ background: "#fff", border: `1px solid ${T.border}`, borderRadius: 16 }}>
+          {pageUsers.map((user, i) => (
+            <div
+              key={user._id}
+              className="emp-list-row"
+              onClick={() => setSelectedUser(user)}
+              style={{ borderBottom: i < pageUsers.length - 1 ? `1px solid ${T.borderLight}` : "none" }}
+            >
+              <PassportPhoto user={user} width={40} height={46} radius={8} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 13.5, color: T.textPrimary }}>{user.name}</div>
+                <div style={{ fontSize: 11.5, color: T.textMuted, marginTop: 2 }}>
+                  {[user.designation, user.department, user.email].filter(Boolean).join(" · ")}
                 </div>
               </div>
-            );
-          })}
+              {user.isActive === false && (
+                <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 9px", borderRadius: 99, background: "#fee2e2", color: "#dc2626", border: "1px solid #fecaca", flexShrink: 0 }}>
+                  Inactive
+                </span>
+              )}
+              <span style={{ fontSize: 10, fontWeight: 700, padding: "4px 10px", borderRadius: 99, letterSpacing: ".05em", textTransform: "uppercase", color: "#0b3c9d", background: "#eff6ff", border: "1px solid #bfdbfe", flexShrink: 0 }}>
+                {roleLabel(user.role)}
+              </span>
+              <span style={{ fontSize: 12, color: T.textMuted, flexShrink: 0, minWidth: 100, textAlign: "right" }}>{fmtDate(user.doj || user.createdAt)}</span>
+              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                {canManageUser(user) && (
+                  <UserCardMenu
+                    user={user}
+                    isOpen={openMenuId === user._id}
+                    onToggle={() => setOpenMenuId((prev) => (prev === user._id ? null : user._id))}
+                    onClose={() => setOpenMenuId(null)}
+                    onEdit={openEditUser}
+                    onToggleStatus={onToggleUserStatus}
+                    onDelete={setDeleteUser}
+                  />
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -260,7 +392,7 @@ export default function UsersSection({ users, tasks, setTab, openEditUser, setDe
           </span>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={safePage === 1}
               style={{ width: 34, height: 34, borderRadius: 9, border: `1.5px solid ${T.inputBorder}`, background: "#fff", color: safePage === 1 ? T.borderLight : T.textSecondary, cursor: safePage === 1 ? "not-allowed" : "pointer", display: "grid", placeItems: "center" }}
             >
@@ -282,7 +414,7 @@ export default function UsersSection({ users, tasks, setTab, openEditUser, setDe
               </button>
             ))}
             <button
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={safePage === totalPages}
               style={{ width: 34, height: 34, borderRadius: 9, border: `1.5px solid ${T.inputBorder}`, background: "#fff", color: safePage === totalPages ? T.borderLight : T.textSecondary, cursor: safePage === totalPages ? "not-allowed" : "pointer", display: "grid", placeItems: "center" }}
             >
@@ -290,6 +422,98 @@ export default function UsersSection({ users, tasks, setTab, openEditUser, setDe
             </button>
           </div>
         </div>
+      )}
+
+      {/* Full Employee ID & Details Modal */}
+      {selectedUser && (
+        <Modal title="Employee Profile" onClose={() => setSelectedUser(null)} width={700}>
+          <div>
+            <div className="emp-modal-hero">
+              <PassportPhoto user={selectedUser} width={78} height={96} radius={12} darkFrame />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                  {selectedUser.empCode && (
+                    <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: ".08em", color: "#cbd5e1" }}>{selectedUser.empCode}</span>
+                  )}
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".07em", textTransform: "uppercase", padding: "2px 9px", borderRadius: 99, background: "rgba(255,255,255,0.16)", color: "#fff" }}>
+                    {roleLabel(selectedUser.role)}
+                  </span>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: 99, background: selectedUser.isActive === false ? "rgba(220,38,38,0.28)" : "rgba(22,163,74,0.28)", color: selectedUser.isActive === false ? "#fca5a5" : "#86efac" }}>
+                    {selectedUser.isActive === false ? "Inactive" : "Active"}
+                  </span>
+                </div>
+                <h3 style={{ margin: 0, fontFamily: "'Syne', sans-serif", fontSize: 21, fontWeight: 700, color: "#fff" }}>{selectedUser.name}</h3>
+                <div style={{ fontSize: 13, color: "#e2e8f0", marginTop: 3 }}>
+                  {[selectedUser.designation, selectedUser.department].filter(Boolean).join(" · ") || `${roleLabel(selectedUser.role)} Account`}
+                </div>
+              </div>
+            </div>
+
+            <div className="emp-modal-sections">
+              <div className="emp-section-box">
+                <div className="emp-section-head"><Phone size={12} /> Contact &amp; Address</div>
+                <div className="emp-kv-list">
+                  <KVRow label="Email" value={selectedUser.email} />
+                  <KVRow label="Mobile No" value={selectedUser.phone} mono />
+                  <KVRow label="Blood Group" value={selectedUser.bloodGroup} />
+                  <KVRow label="Emergency Contact" value={selectedUser.emergencyContact} mono />
+                  <KVRow label="Address" value={selectedUser.address} />
+                </div>
+              </div>
+
+              <div className="emp-section-box">
+                <div className="emp-section-head"><Briefcase size={12} /> Employment &amp; Payroll</div>
+                <div className="emp-kv-list">
+                  <KVRow label="Emp Code" value={selectedUser.empCode} mono />
+                  <KVRow label="Designation" value={selectedUser.designation} />
+                  <KVRow label="Department" value={selectedUser.department} />
+                  <KVRow label="Date of Joining" value={fmtDate(selectedUser.doj)} />
+                  <KVRow label="Salary" value={fmtSalary(selectedUser.salary)} mono />
+                </div>
+              </div>
+
+              <div className="emp-section-box">
+                <div className="emp-section-head"><CreditCard size={12} /> KYC &amp; Banking</div>
+                <div className="emp-kv-list">
+                  <KVRow label="PAN" value={selectedUser.pan} mono />
+                  <KVRow label="Aadhar" value={selectedUser.aadhar} mono />
+                  <KVRow label="Bank Account" value={selectedUser.bankAccount} mono />
+                </div>
+              </div>
+
+              <div className="emp-section-box">
+                <div className="emp-section-head"><FileText size={12} /> Remarks</div>
+                <div style={{ padding: "12px 14px", fontSize: 12.5, lineHeight: 1.5, color: selectedUser.remarks ? T.textPrimary : T.textMuted }}>
+                  {selectedUser.remarks || "No remarks added"}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
+              <button
+                type="button"
+                onClick={() => setSelectedUser(null)}
+                style={{ padding: "9px 18px", borderRadius: 9, border: `1.5px solid ${T.border}`, background: "#fff", color: T.textSecondary, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+              >
+                Close
+              </button>
+              {canManageUser(selectedUser) && (
+                <button
+                  type="button"
+                  className="pri-btn"
+                  onClick={() => {
+                    const target = selectedUser;
+                    setSelectedUser(null);
+                    openEditUser(target);
+                  }}
+                  style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 20px", background: "linear-gradient(135deg, #f7931e, #e8590c)", color: "#fff", borderRadius: 9, fontSize: 13, fontWeight: 700, fontFamily: "'Syne', sans-serif" }}
+                >
+                  <Pencil size={14} strokeWidth={2} /> Edit Details
+                </button>
+              )}
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

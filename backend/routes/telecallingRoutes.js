@@ -11,6 +11,7 @@ router.use(authMiddleware);
 // (admin and the sales manager can read every telecaller's leads/calls, for the
 // Telecalling section — read-only for the sales manager)
 router.get("/leads", requireRole("telecaller", "admin", "salesmanager"), c.listLeads);
+router.post("/leads/import", requireRole("telecaller"), c.importLeadsMiddleware, c.importLeads);
 router.post("/leads", requireRole("telecaller"), c.createLead);
 router.put("/leads/:id", requireRole("telecaller", "admin"), c.updateLead);
 router.post("/leads/:id/calls", requireRole("telecaller"), c.logCall);

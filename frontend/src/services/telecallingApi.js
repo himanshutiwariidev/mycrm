@@ -3,6 +3,13 @@ import API from "./api";
 // Telecaller
 export const getLeads = (params) => API.get("/telecalling/leads", { params });
 export const createLead = (payload) => API.post("/telecalling/leads", payload);
+export const importLeads = (file) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  return API.post("/telecalling/leads/import", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+};
 export const updateLead = (id, payload) => API.put(`/telecalling/leads/${id}`, payload);
 export const logCall = (leadId, payload) => API.post(`/telecalling/leads/${leadId}/calls`, payload);
 export const getCalls = (params) => API.get("/telecalling/calls", { params });

@@ -346,26 +346,87 @@
 }
 
 /* ── Bottom row ─────────────────────────────────────────────────────────── */
-.sad-activity-row {
+.sad-payments-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sad-payments-head {
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.sad-payments-summary {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 3px 0;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #64748b;
+  padding-bottom: 6px;
   border-bottom: 1px solid #f0f1f6;
 }
 
-.sad-activity-row:last-child {
+.sad-payments-summary strong {
+  color: #0f172a;
+}
+
+.sad-payments-list {
+  flex: 1;
+  min-height: 0;
+  max-height: 155px;
+  overflow-y: auto;
+}
+
+.sad-payments-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 2px;
+  border-bottom: 1px solid #f0f1f6;
+}
+
+.sad-payments-row:last-child {
   border-bottom: none;
 }
 
-.sad-activity-msg {
-  flex: 1;
+.sad-payments-client {
   min-width: 0;
+  flex: 1;
+}
+
+.sad-payments-name {
   font-size: 12.5px;
+  font-weight: 600;
   color: #0f172a;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sad-payments-meta {
+  font-size: 11px;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sad-payments-amount {
+  font-size: 13px;
+  font-weight: 700;
+  color: #16a34a;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sad-payments-empty {
+  padding: 22px 8px;
+  text-align: center;
+  font-size: 12.5px;
+  color: #94a3b8;
 }
 
 .sad-quick {
@@ -456,10 +517,6 @@
     flex-direction: column;
     height: auto;
     gap: 14px;
-  }
-
-  .sad-activity-msg {
-    white-space: normal;
   }
 
   .sad-quick-grid {

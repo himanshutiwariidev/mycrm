@@ -7,6 +7,8 @@ const {
   getUsersByRole,
   deleteUser,
   updateUser,
+  uploadUserPhotoMiddleware,
+  uploadUserPhoto,
   logoutUser,
 } = require("../controllers/userController");
 
@@ -57,6 +59,14 @@ router.put(
   requireRole("admin", "hr", "manager"),
   updateUserValidator,
   updateUser
+);
+
+router.post(
+  "/:id/photo",
+  authMiddleware,
+  requireRole("admin", "hr", "manager"),
+  uploadUserPhotoMiddleware,
+  uploadUserPhoto
 );
 
 module.exports = router;

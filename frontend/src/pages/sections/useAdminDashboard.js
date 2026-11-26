@@ -5,6 +5,27 @@ import {
   Headset, LayoutDashboard, MapPin, Plus, Receipt, UserPlus, Users,
 } from "lucide-react";
 import API from "../../services/api";
+
+const USER_EMPTY_FORM = {
+  name: "",
+  email: "",
+  password: "",
+  role: "user",
+  empCode: "",
+  phone: "",
+  bloodGroup: "",
+  emergencyContact: "",
+  address: "",
+  pan: "",
+  aadhar: "",
+  bankAccount: "",
+  doj: "",
+  salary: "",
+  designation: "",
+  department: "",
+  remarks: "",
+  photoFile: null,
+};
 import {
   PROJECT_CHART_COLORS,
   PROJECT_EMPTY_FORM,
@@ -51,7 +72,7 @@ export default function useAdminDashboard() {
   const [toast, setToast] = useState(null);
   const [showPw, setShowPw] = useState(false);
 
-  const [userForm, setUserForm] = useState({ name: "", email: "", password: "", role: "user" });
+  const [userForm, setUserForm] = useState(USER_EMPTY_FORM);
   const [taskForm, setTaskForm] = useState({ title: "", description: "", assignedTo: "", priority: "medium", dueDate: "" });
   const [expenseForm, setExpenseForm] = useState({ title: "", category: "Other", amount: "", expenseDate: new Date().toISOString().slice(0, 10), paymentMethod: "Cash", notes: "" });
   const [meetingForm, setMeetingForm] = useState({ title: "", meetingDate: "", location: "", attendees: "", description: "" });
@@ -220,9 +241,15 @@ export default function useAdminDashboard() {
   const handleCreateUser = async (e) => {
     e.preventDefault();
     try {
-      await API.post("/users", userForm);
+      const { photoFile, ...payload } = userForm;
+      const { data } = await API.post("/users", payload);
+      if (photoFile && data?.user?._id) {
+        const fd = new FormData();
+        fd.append("photo", photoFile);
+        await API.post(`/users/${data.user._id}/photo`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      }
       showToast("User created successfully");
-      setUserForm({ name: "", email: "", password: "", role: "user" });
+      setUserForm(USER_EMPTY_FORM);
       fetchUsers();
     } catch (error) {
       showToast(error?.response?.data?.message || "Failed to create user", false);
@@ -459,7 +486,26 @@ export default function useAdminDashboard() {
 
   const openEditUser = (user) => {
     setEditUser(user);
-    setEditUserForm({ name: user.name || "", email: user.email || "", role: user.role || "user", password: "" });
+    setEditUserForm({
+      name: user.name || "",
+      email: user.email || "",
+      role: user.role || "user",
+      password: "",
+      empCode: user.empCode || "",
+      phone: user.phone || "",
+      bloodGroup: user.bloodGroup || "",
+      emergencyContact: user.emergencyContact || "",
+      address: user.address || "",
+      pan: user.pan || "",
+      aadhar: user.aadhar || "",
+      bankAccount: user.bankAccount || "",
+      doj: user.doj ? new Date(user.doj).toISOString().slice(0, 10) : "",
+      salary: user.salary ?? "",
+      designation: user.designation || "",
+      department: user.department || "",
+      remarks: user.remarks || "",
+      photoFile: null,
+    });
     setShowEditPw(false);
   };
 
@@ -475,10 +521,34 @@ export default function useAdminDashboard() {
     if (email.toLowerCase() !== (editUser.email || "").toLowerCase()) payload.email = email;
     if (editUserForm.role !== editUser.role) payload.role = editUserForm.role;
     if (editUserForm.password) payload.password = editUserForm.password;
-    if (!Object.keys(payload).length) { setEditUser(null); showToast("No changes to save"); return; }
+
+    const strFields = ["empCode", "phone", "bloodGroup", "emergencyContact", "address", "pan", "aadhar", "bankAccount", "designation", "department", "remarks"];
+    for (const key of strFields) {
+      const next = (editUserForm[key] || "").trim();
+      const prev = (editUser[key] || "").trim();
+      if (next !== prev) payload[key] = next;
+    }
+
+    const prevDoj = editUser.doj ? new Date(editUser.doj).toISOString().slice(0, 10) : "";
+    if ((editUserForm.doj || "") !== prevDoj) payload.doj = editUserForm.doj || null;
+
+    const prevSalary = editUser.salary ?? "";
+    if (String(editUserForm.salary ?? "") !== String(prevSalary)) {
+      payload.salary = editUserForm.salary === "" ? null : Number(editUserForm.salary);
+    }
+
+    const hasPhoto = Boolean(editUserForm.photoFile);
+    if (!Object.keys(payload).length && !hasPhoto) { setEditUser(null); showToast("No changes to save"); return; }
     try {
-      await API.put(`/users/${editUser._id}`, payload);
-      showToast(Object.keys(payload).length === 1 && payload.password ? `Password updated for ${editUser.name}` : "User updated successfully");
+      if (Object.keys(payload).length) {
+        await API.put(`/users/${editUser._id}`, payload);
+      }
+      if (hasPhoto) {
+        const fd = new FormData();
+        fd.append("photo", editUserForm.photoFile);
+        await API.post(`/users/${editUser._id}/photo`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      }
+      showToast(Object.keys(payload).length === 1 && payload.password && !hasPhoto ? `Password updated for ${editUser.name}` : "User updated successfully");
       setEditUser(null);
       fetchUsers();
     } catch (err) {
@@ -490,6 +560,17 @@ export default function useAdminDashboard() {
   const handleDeleteUser = async () => {
     try { await API.delete(`/users/${deleteUser._id}`); showToast("User deleted"); setDeleteUser(null); fetchUsers(); }
     catch { showToast("Failed to delete user", false); }
+  };
+
+  const handleToggleUserStatus = async (user) => {
+    const nextActive = user.isActive === false;
+    try {
+      await API.put(`/users/${user._id}`, { isActive: nextActive });
+      showToast(`${user.name} marked ${nextActive ? "active" : "inactive"}`);
+      fetchUsers();
+    } catch (err) {
+      showToast(err?.response?.data?.message || "Failed to update user status", false);
+    }
   };
 
   const handleDeleteProject = async () => {
@@ -729,7 +810,7 @@ export default function useAdminDashboard() {
     handleCreateUser, handleCreateTask, handleCreateExpense, handleDeleteExpense, handleCreateMeeting, handleDeleteMeeting, handleCreateProject, handleDownloadProjectsCsv,
     openCreateProject, openEditProject, cancelProjectForm,
     openEditTask, handleUpdateTask, handleDeleteTask,
-    openEditUser, handleUpdateUser, handleDeleteUser,
+    openEditUser, handleUpdateUser, handleDeleteUser, handleToggleUserStatus,
     openPaySalary, handlePaySalary, handleDeleteProject, handleLogout,
     done, inProg, pend, completionRate, activeProjects, ongoingProjects,
     projectDueStats, projectAssignChartData, projectPlatformChartData, projectDueChartData,
