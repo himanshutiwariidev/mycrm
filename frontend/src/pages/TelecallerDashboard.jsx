@@ -47,12 +47,12 @@ export default function TelecallerDashboard() {
 
   return (
     <div style={{ minHeight: "100vh", background: "#f5f6fa" }}>
-      <div style={{ position: "sticky", top: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 24px", background: "rgba(255,255,255,0.92)", backdropFilter: "blur(10px)", borderBottom: "1px solid #e8eaf0" }}>
+      <div className="m-tele-header" style={{ position: "sticky", top: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "12px 24px", background: "rgba(255,255,255,0.92)", backdropFilter: "blur(10px)", borderBottom: "1px solid #e8eaf0" }}>
         <img src={logo} alt="Bharat Bizmart" style={{ height: 30, width: "auto", display: "block" }} />
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <Avatar name={userName} size={34} />
-            <div style={{ lineHeight: 1.2 }}>
+            <div className="m-hide" style={{ lineHeight: 1.2 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{userName || "Telecaller"}</div>
               <div style={{ fontSize: 11.5, color: "#94a3b8" }}>Telecaller</div>
             </div>

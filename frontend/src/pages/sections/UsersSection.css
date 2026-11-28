@@ -2,32 +2,90 @@
 
 .emp-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(275px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, 274px);
+  gap: 14px;
+}
+
+@media (max-width: 620px) {
+  .emp-grid {
+    grid-template-columns: minmax(0, 274px);
+    justify-content: center;
+  }
 }
 
 .cm-id-card {
+  position: relative;
+  perspective: 1200px;
+  cursor: pointer;
+}
+
+.cm-id-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.cm-id-card.is-flipped .cm-id-inner {
+  transform: rotateY(180deg);
+}
+
+.cm-id-face {
   position: relative;
   background: linear-gradient(180deg, #ffffff 0%, #f8faff 100%);
   border: 1px solid #dce5f2;
   border-radius: 20px;
   overflow: hidden;
-  cursor: pointer;
   display: flex;
   flex-direction: column;
+  height: 100%;
+  backface-visibility: hidden;
   box-shadow: 0 10px 26px -12px rgba(15, 23, 42, 0.22), 0 2px 6px rgba(15, 23, 42, 0.05);
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
-.cm-id-card:hover {
-  transform: translateY(-3px);
+.cm-id-card:hover .cm-id-face {
   border-color: #b8cae8;
   box-shadow: 0 16px 34px -14px rgba(11, 49, 132, 0.28), 0 4px 10px rgba(15, 23, 42, 0.06);
+}
+
+.cm-id-card.is-flipped .cm-id-front {
+  pointer-events: none;
+}
+
+.cm-id-card:not(.is-flipped) .cm-id-back {
+  pointer-events: none;
+}
+
+.cm-id-back {
+  position: absolute;
+  inset: 0;
+  transform: rotateY(180deg);
+  background: #0a2558;
+}
+
+.cm-id-back .cm-id-actions {
+  z-index: 30;
+}
+
+.cm-id-back-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #fff;
+}
+
+.cm-id-back-img svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .cm-id-card:focus-visible {
   outline: 2px solid #0b3c9d;
   outline-offset: 2px;
+  border-radius: 20px;
 }
 
 .cm-id-ribbon {
@@ -192,7 +250,7 @@
   width: 110px;
   height: 124px;
   border-radius: 14px;
-  border: 1.5px solid #1e3a8a;
+  border: 1.5px solid #0d2b55;
   background: #eef2ff;
   overflow: hidden;
   display: grid;
@@ -259,7 +317,7 @@
   max-width: 100%;
   padding: 5px 18px;
   border-radius: 999px;
-  background: linear-gradient(180deg, #0b3c9d 0%, #07266b 100%);
+  background: linear-gradient(180deg, #0d2b55 0%, #0a2348 100%);
   color: #ffffff;
   font-size: 11.5px;
   font-weight: 600;
@@ -294,6 +352,39 @@
   gap: 8px;
 }
 
+/* Emp Code · Department · Blood Group in three equal columns */
+.cm-id-trio {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.cm-id-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 0 4px;
+  text-align: center;
+}
+
+.cm-id-stat + .cm-id-stat {
+  border-left: 1px solid #e2e8f0;
+}
+
+.cm-id-stat .cm-id-circle {
+  margin-bottom: 2px;
+}
+
+.cm-id-stat .cm-id-value {
+  max-width: 100%;
+}
+
+.cm-id-email {
+  padding-top: 9px;
+  border-top: 1px solid #e2e8f0;
+}
+
 .cm-id-item {
   display: flex;
   align-items: center;
@@ -305,7 +396,7 @@
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: #0a2e7a;
+  background: #0d2b55;
   color: #ffffff;
   display: grid;
   place-items: center;
@@ -322,7 +413,7 @@
 .cm-id-value {
   font-size: 11.5px;
   font-weight: 700;
-  color: #0b2459;
+  color: #0d2b55;
   line-height: 1.25;
   white-space: nowrap;
   overflow: hidden;
@@ -332,7 +423,9 @@
 .cm-id-footer {
   position: relative;
   z-index: 2;
-  background: linear-gradient(90deg, #072870 0%, #0c44ad 100%);
+  /* Solid navy with a thin orange edge on top — like the back side's footer. */
+  background: #0d2b55;
+  box-shadow: inset 0 3px 0 #f7931e;
   color: #ffffff;
   padding: 10px 16px;
   display: flex;
@@ -342,6 +435,12 @@
   font-size: 11.5px;
   font-weight: 500;
   border-top-left-radius: 18px;
+  overflow: hidden;
+}
+
+.cm-id-footer > * {
+  position: relative;
+  z-index: 1;
 }
 
 .emp-list-row {

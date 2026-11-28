@@ -1,5 +1,5 @@
-import React from "react";
-import { CheckCircle2, AlertCircle, LogOut, Shield, X } from "lucide-react";
+import React, { useState } from "react";
+import { CheckCircle2, AlertCircle, LogOut, Shield, X, Menu } from "lucide-react";
 import logo from "../assets/logo.png";
 import DashboardSection from "./sections/DashboardSection";
 import TasksSection from "./sections/TasksSection";
@@ -81,6 +81,9 @@ export default function AdminDashboard() {
     leaves, leaveActionId, handleLeaveDecision,
     attDashboard, attDashboardLoading, attDashboardError, attDashboardDate, setAttDashboardDate,
   } = useAdminDashboard();
+
+  // Phones only: the sidebar opens as a drawer (styles/mobile.css). No effect on desktop.
+  const [navOpen, setNavOpen] = useState(false);
 
   const renderSection = () => {
     switch (tab) {
@@ -241,12 +244,13 @@ export default function AdminDashboard() {
       <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Inter', sans-serif", color: T.textSecondary }}>
 
         {/* ── SIDEBAR ─────────────────────────────────────────────────────── */}
-        <aside style={{ position: "fixed", left: 0, top: 0, bottom: 0, width: 238, background: SB.bg, borderRight: `1px solid ${SB.border}`, display: "flex", flexDirection: "column", zIndex: 100, boxShadow: "2px 0 16px rgba(0,0,0,.18)" }}>
+        {navOpen && <div className="m-overlay" onClick={() => setNavOpen(false)} />}
+        <aside className={`m-sidebar${navOpen ? " is-open" : ""}`} style={{ position: "fixed", left: 0, top: 0, bottom: 0, width: 238, background: SB.bg, borderRight: `1px solid ${SB.border}`, display: "flex", flexDirection: "column", zIndex: 100, boxShadow: "2px 0 16px rgba(0,0,0,.18)" }}>
           <div style={{ padding: "24px 22px 22px", borderBottom: `1px solid ${SB.border}` }}>
             <img src={logo} alt="Bharat Bizmart" style={{ height: 34, width: "auto", display: "block" }} />
            {/*  <div style={{ fontSize: 10, color: SB.muted, letterSpacing: ".1em", marginTop: 9, textTransform: "uppercase", fontWeight: 600 }}>Control Center</div> */}
           </div>
-          <nav className="sidebar-nav" style={{ flex: "1 1 0%", minHeight: 0, overflowY: "auto", padding: "18px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
+          <nav className="sidebar-nav" onClick={() => setNavOpen(false)} style={{ flex: "1 1 0%", minHeight: 0, overflowY: "auto", padding: "18px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
             {["overview", "manage"].map(section => (
               <div key={section}>
                 <div style={{ fontSize: 10, color: SB.muted, letterSpacing: ".14em", textTransform: "uppercase", fontWeight: 700, padding: section === "manage" ? "18px 12px 8px" : "4px 12px 8px" }}>{section}</div>
@@ -282,9 +286,10 @@ export default function AdminDashboard() {
         </aside>
 
         {/* ── CONTENT ─────────────────────────────────────────────────────── */}
-        <div style={{ marginLeft: 238, minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-          <header style={{ position: "sticky", top: 0, zIndex: 50, height: 64, padding: "0 36px", display: "flex", alignItems: "center", justifyContent: "space-between", background: T.header, borderBottom: `1px solid ${T.border}`, backdropFilter: "blur(16px)", boxShadow: "0 1px 0 0 #e8eaf0" }}>
-            <div>
+        <div className="m-content" style={{ marginLeft: 238, minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+          <header className="m-topbar" style={{ position: "sticky", top: 0, zIndex: 50, height: 64, padding: "0 36px", display: "flex", alignItems: "center", justifyContent: "space-between", background: T.header, borderBottom: `1px solid ${T.border}`, backdropFilter: "blur(16px)", boxShadow: "0 1px 0 0 #e8eaf0" }}>
+            <button type="button" className="m-menu-btn" aria-label="Open menu" onClick={() => setNavOpen(true)}><Menu size={20} /></button>
+            <div className="m-topbar-title">
               <h1 style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 17, color: T.textPrimary, lineHeight: 1 }}>{currentLabel}</h1>
               <p style={{ fontSize: 11.5, color: T.textMuted, marginTop: 3 }}>{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>
             </div>
@@ -303,7 +308,7 @@ export default function AdminDashboard() {
               which assumes this 16px top/bottom padding); Clients uses the same
               compact spacing so the two pages match. Other sections keep the
               roomier default. */}
-          <main style={{ padding: tab === "dashboard" ? "16px 28px" : tab === "clients" ? "16px 28px 40px" : "30px 36px 64px", flex: 1 }}>
+          <main className="m-main" style={{ padding: tab === "dashboard" ? "16px 28px" : tab === "clients" ? "16px 28px 40px" : "30px 36px 64px", flex: 1 }}>
             {renderSection()}
           </main>
         </div>

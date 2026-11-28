@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  BadgeCheck, Briefcase, Building2, CreditCard, Droplet, Globe, Mail, MoreVertical, Pencil, Phone,
-  Power, Search, Filter, LayoutGrid, List, ChevronDown, ChevronLeft, ChevronRight,
+  BadgeCheck, Briefcase, Building2, CreditCard, Download, Droplet, ExternalLink, Globe, Mail, MoreVertical, Pencil, Phone,
+  Power, RotateCw, Search, Filter, LayoutGrid, List, ChevronDown, ChevronLeft, ChevronRight,
   Trash2, UserPlus, Users, FileText,
 } from "lucide-react";
 import cybertrickLogo from "../../assets/cybertrick.png";
+import { idCardBackSvg } from "../../utils/idCardBackSvg";
 import { Modal, T } from "./shared";
 import { uploadedFileUrl } from "../../utils/uploads";
+import { downloadUserIdCard } from "../../utils/idCardDownload";
 import "./UsersSection.css";
 
 const ROLE_OPTIONS = [
@@ -22,7 +24,7 @@ const ROLE_OPTIONS = [
 
 const roleLabel = (role) => ROLE_OPTIONS.find((o) => o.value === role)?.label || role || "";
 
-const PAGE_SIZE = 6;
+const PAGE_SIZE = 8;
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—");
 const fmtSalary = (v) => (v !== undefined && v !== null && v !== "" ? `₹${Number(v).toLocaleString("en-IN")}` : "—");
@@ -63,7 +65,7 @@ function PassportPhoto({ user, className = "cm-id-photo", width, height, radius,
       {src ? (
         <img src={src} alt={user.name} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
       ) : (
-        <span style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: width ? Math.round(width * 0.32) : 28, color: darkFrame ? "#fff" : "#1e3a8a" }}>
+        <span style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: width ? Math.round(width * 0.32) : 28, color: darkFrame ? "#fff" : "#0d2b55" }}>
           {getInitials(user.name)}
         </span>
       )}
@@ -83,7 +85,7 @@ function KVRow({ label, value, mono = false }) {
   );
 }
 
-function UserCardMenu({ user, isOpen, onToggle, onClose, onEdit, onToggleStatus, onDelete }) {
+function UserCardMenu({ user, isOpen, onToggle, onClose, onEdit, onToggleStatus, onDownload, onDelete }) {
   const isInactive = user.isActive === false;
   return (
     <div style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
@@ -98,6 +100,9 @@ function UserCardMenu({ user, isOpen, onToggle, onClose, onEdit, onToggleStatus,
       </button>
       {isOpen && (
         <div className="cm-id-dropdown" role="menu">
+          <button type="button" role="menuitem" className="cm-id-dropdown-item" onClick={() => { onClose(); onDownload(user); }}>
+            <Download size={13} strokeWidth={2} color="#2563eb" /> Download ID Card
+          </button>
           <button type="button" role="menuitem" className="cm-id-dropdown-item" onClick={() => { onClose(); onEdit(user); }}>
             <Pencil size={13} strokeWidth={2} color="#f7931e" /> Edit Details
           </button>
@@ -123,6 +128,22 @@ export default function UsersSection({ users, setTab, openEditUser, setDeleteUse
   const [page, setPage] = useState(1);
   const [selectedUser, setSelectedUser] = useState(null);
   const [openMenuId, setOpenMenuId] = useState(null);
+  const [flippedIds, setFlippedIds] = useState({});
+  const [downloadTarget, setDownloadTarget] = useState(null);
+  const [downloadingFormat, setDownloadingFormat] = useState(null);
+
+  const toggleFlip = (id) => setFlippedIds((prev) => ({ ...prev, [id]: !prev[id] }));
+  const handleDownload = (user) => setDownloadTarget(user);
+  const runDownload = async (format) => {
+    if (!downloadTarget || downloadingFormat) return;
+    setDownloadingFormat(format);
+    try {
+      await downloadUserIdCard(downloadTarget, roleLabel(downloadTarget.role), format);
+      setDownloadTarget(null);
+    } finally {
+      setDownloadingFormat(null);
+    }
+  };
 
   useEffect(() => {
     if (!openMenuId) return undefined;
@@ -141,7 +162,10 @@ export default function UsersSection({ users, setTab, openEditUser, setDeleteUse
 
   const resetAnd = (setter) => (val) => { setter(val); setPage(1); };
 
-  const visibleUsers = useMemo(() => users.filter((u) => u.role !== "admin"), [users]);
+  const visibleUsers = useMemo(
+    () => users.filter((u) => !["admin", "superadmin"].includes(String(u.role || "").toLowerCase())),
+    [users]
+  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -215,132 +239,142 @@ export default function UsersSection({ users, setTab, openEditUser, setDeleteUse
         </div>
       ) : view === "grid" ? (
         <div className="emp-grid">
-          {pageUsers.map((user, i) => (
-            <div
-              key={user._id}
-              role="button"
-              tabIndex={0}
-              onClick={() => setSelectedUser(user)}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedUser(user); } }}
-              className={`cm-id-card card-in${user.isActive === false ? " is-inactive" : ""}`}
-              style={{ animationDelay: `${i * 35}ms` }}
-            >
-              {/* Top-left decorative two-tone ribbon */}
-              <svg className="cm-id-ribbon" viewBox="0 0 140 108" aria-hidden="true">
-                <defs>
-                  <linearGradient id={`cmRibbonPurple-${user._id}`} x1="0" y1="1" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#5b21b6" />
-                    <stop offset="55%" stopColor="#9333ea" />
-                    <stop offset="100%" stopColor="#d946ef" />
-                  </linearGradient>
-                  <linearGradient id={`cmRibbonBlue-${user._id}`} x1="0" y1="0" x2="1" y2="1">
-                    <stop offset="0%" stopColor="#051c5c" />
-                    <stop offset="100%" stopColor="#0e48c7" />
-                  </linearGradient>
-                </defs>
-                <path d="M0,0 L130,0 C82,22 34,54 0,104 Z" fill={`url(#cmRibbonPurple-${user._id})`} />
-                <path d="M0,0 L94,0 C58,20 26,48 0,88 Z" fill={`url(#cmRibbonBlue-${user._id})`} />
-              </svg>
+          {pageUsers.map((user, i) => {
+            const isFlipped = Boolean(flippedIds[user._id]);
+            return (
+              <div
+                key={user._id}
+                role="button"
+                tabIndex={0}
+                onClick={() => setSelectedUser(user)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedUser(user); } }}
+                className={`cm-id-card card-in${user.isActive === false ? " is-inactive" : ""}${isFlipped ? " is-flipped" : ""}`}
+                style={{ animationDelay: `${i * 35}ms` }}
+              >
+                <div className="cm-id-inner">
+                  {/* Front Side */}
+                  <div className="cm-id-face cm-id-front">
+                    <svg className="cm-id-ribbon" viewBox="0 0 140 108" aria-hidden="true">
+                      <defs>
+                        <linearGradient id={`cmRibbonOrange-${user._id}`} x1="0" y1="1" x2="1" y2="0">
+                          <stop offset="0%" stopColor="#e8590c" />
+                          <stop offset="55%" stopColor="#f7931e" />
+                          <stop offset="100%" stopColor="#fbb040" />
+                        </linearGradient>
+                        <linearGradient id={`cmRibbonBlue-${user._id}`} x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0%" stopColor="#0a2348" />
+                          <stop offset="100%" stopColor="#0d2b55" />
+                        </linearGradient>
+                      </defs>
+                      <path d="M0,0 L130,0 C82,22 34,54 0,104 Z" fill={`url(#cmRibbonOrange-${user._id})`} />
+                      <path d="M0,0 L94,0 C58,20 26,48 0,88 Z" fill={`url(#cmRibbonBlue-${user._id})`} />
+                    </svg>
 
-              {/* Subtle right watermark */}
-              <img src={cybertrickLogo} alt="" aria-hidden="true" className="cm-id-watermark" />
+                    <img src={cybertrickLogo} alt="" aria-hidden="true" className="cm-id-watermark" />
 
-              {/* Lanyard slot + 3-dot action menu */}
-              <div className="cm-id-top-bar">
-                <div className="cm-id-slot" />
-                {canManageUser(user) && (
-                  <div className="cm-id-actions">
-                    <UserCardMenu
-                      user={user}
-                      isOpen={openMenuId === user._id}
-                      onToggle={() => setOpenMenuId((prev) => (prev === user._id ? null : user._id))}
-                      onClose={() => setOpenMenuId(null)}
-                      onEdit={openEditUser}
-                      onToggleStatus={onToggleUserStatus}
-                      onDelete={setDeleteUser}
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Company Logo */}
-              <div className="cm-id-logo-wrap">
-                <img src={cybertrickLogo} alt="Cybertricks Media Pvt Ltd" className="cm-id-logo" />
-              </div>
-
-              {/* Centered Passport Photo */}
-              <div className="cm-id-photo-wrap">
-                <PassportPhoto user={user} />
-              </div>
-
-              {/* Name & Designation Pill */}
-              <div className="cm-id-name" title={user.name}>
-                <span className="cm-id-name-text">{user.name}</span>
-                {user.isActive === false && <span className="cm-id-inactive-dot" title="Inactive" aria-label="Inactive" />}
-              </div>
-              <div className="cm-id-pill-wrap">
-                <span className="cm-id-pill" title={user.designation || roleLabel(user.role)}>
-                  {user.designation || roleLabel(user.role)}
-                </span>
-              </div>
-
-              <div className="cm-id-divider" />
-
-              {/* Key ID Details */}
-              <div className="cm-id-details">
-                <div className="cm-id-row-2">
-                  <div className="cm-id-item">
-                    <span className="cm-id-circle"><BadgeCheck size={14} strokeWidth={2.1} /></span>
-                    <div style={{ minWidth: 0 }}>
-                      <div className="cm-id-label">Emp Code</div>
-                      <div className="cm-id-value">{user.empCode || "—"}</div>
-                    </div>
-                  </div>
-                  <div className="cm-id-item">
-                    <span className="cm-id-circle"><Building2 size={14} strokeWidth={2.1} /></span>
-                    <div style={{ minWidth: 0 }}>
-                      <div className="cm-id-label">Department</div>
-                      <div className="cm-id-value" title={user.department || roleLabel(user.role)}>
-                        {user.department || roleLabel(user.role)}
+                    <div className="cm-id-top-bar">
+                      <div className="cm-id-slot" />
+                      <div className="cm-id-actions" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          className="cm-id-menu-btn"
+                          title="Show backside"
+                          aria-label={`Flip ${user.name} ID card`}
+                          onClick={() => toggleFlip(user._id)}
+                        >
+                          <RotateCw size={14} strokeWidth={2} />
+                        </button>
+                        {canManageUser(user) && (
+                          <UserCardMenu
+                            user={user}
+                            isOpen={openMenuId === user._id}
+                            onToggle={() => setOpenMenuId((prev) => (prev === user._id ? null : user._id))}
+                            onClose={() => setOpenMenuId(null)}
+                            onDownload={handleDownload}
+                            onEdit={openEditUser}
+                            onToggleStatus={onToggleUserStatus}
+                            onDelete={setDeleteUser}
+                          />
+                        )}
                       </div>
                     </div>
-                  </div>
-                </div>
 
-                <div className="cm-id-item">
-                  <span className="cm-id-circle"><Mail size={14} strokeWidth={2.1} /></span>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="cm-id-label">Email ID</div>
-                    <div className="cm-id-value" title={user.email}>{user.email}</div>
-                  </div>
-                </div>
+                    <div className="cm-id-logo-wrap">
+                      <img src={cybertrickLogo} alt="Cybertricks Media Pvt Ltd" className="cm-id-logo" />
+                    </div>
 
-                <div className="cm-id-row-2">
-                  <div className="cm-id-item">
-                    <span className="cm-id-circle"><Phone size={14} strokeWidth={2.1} /></span>
-                    <div style={{ minWidth: 0 }}>
-                      <div className="cm-id-label">Mobile No.</div>
-                      <div className="cm-id-value" title={user.phone || ""}>{user.phone || "—"}</div>
+                    <div className="cm-id-photo-wrap">
+                      <PassportPhoto user={user} />
+                    </div>
+
+                    <div className="cm-id-name" title={user.name}>
+                      <span className="cm-id-name-text">{user.name}</span>
+                      {user.isActive === false && <span className="cm-id-inactive-dot" title="Inactive" aria-label="Inactive" />}
+                    </div>
+                    <div className="cm-id-pill-wrap">
+                      <span className="cm-id-pill" title={user.designation || roleLabel(user.role)}>
+                        {user.designation || roleLabel(user.role)}
+                      </span>
+                    </div>
+
+                    <div className="cm-id-divider" />
+
+                    <div className="cm-id-details">
+                      {/* Three short facts side by side, then the email on its own line. */}
+                      <div className="cm-id-trio">
+                        <div className="cm-id-stat">
+                          <span className="cm-id-circle"><BadgeCheck size={13} strokeWidth={2.1} /></span>
+                          <div className="cm-id-label">Emp Code</div>
+                          <div className="cm-id-value" title={user.empCode || ""}>{user.empCode || "—"}</div>
+                        </div>
+                        <div className="cm-id-stat">
+                          <span className="cm-id-circle"><Building2 size={13} strokeWidth={2.1} /></span>
+                          <div className="cm-id-label">Department</div>
+                          <div className="cm-id-value" title={user.department || roleLabel(user.role)}>{user.department || roleLabel(user.role)}</div>
+                        </div>
+                        <div className="cm-id-stat">
+                          <span className="cm-id-circle"><Droplet size={13} strokeWidth={2.1} /></span>
+                          <div className="cm-id-label">Blood Group</div>
+                          <div className="cm-id-value">{user.bloodGroup || "—"}</div>
+                        </div>
+                      </div>
+
+                      <div className="cm-id-item cm-id-email">
+                        <span className="cm-id-circle"><Mail size={14} strokeWidth={2.1} /></span>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div className="cm-id-label">Email ID</div>
+                          <div className="cm-id-value" title={user.email}>{user.email}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="cm-id-footer">
+                      <Globe size={14} strokeWidth={2} />
+                      <span style={{ opacity: 0.45 }}>|</span>
+                      <span>www.cybertricksmedia.com</span>
                     </div>
                   </div>
-                  <div className="cm-id-item">
-                    <span className="cm-id-circle"><Droplet size={14} strokeWidth={2.1} /></span>
-                    <div style={{ minWidth: 0 }}>
-                      <div className="cm-id-label">Blood Group</div>
-                      <div className="cm-id-value">{user.bloodGroup || "—"}</div>
+
+                  {/* Back Side */}
+                  <div className="cm-id-face cm-id-back">
+                    <div className="cm-id-actions" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        className="cm-id-menu-btn"
+                        title="Show front"
+                        aria-label={`Flip ${user.name} ID card to front`}
+                        onClick={() => toggleFlip(user._id)}
+                      >
+                        <RotateCw size={14} strokeWidth={2} />
+                      </button>
                     </div>
+                    {/* Drawn in code (utils/idCardBackSvg.js) — no image file. */}
+                    <div className="cm-id-back-img" role="img" aria-label="Bharat BizMart ID card back" dangerouslySetInnerHTML={{ __html: idCardBackSvg(user) }} />
                   </div>
                 </div>
               </div>
-
-              {/* Bottom Brand Footer */}
-              <div className="cm-id-footer">
-                <Globe size={14} strokeWidth={2} />
-                <span style={{ opacity: 0.45 }}>|</span>
-                <span>www.cybertricksmedia.com</span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <div style={{ background: "#fff", border: `1px solid ${T.border}`, borderRadius: 16 }}>
@@ -374,6 +408,7 @@ export default function UsersSection({ users, setTab, openEditUser, setDeleteUse
                     isOpen={openMenuId === user._id}
                     onToggle={() => setOpenMenuId((prev) => (prev === user._id ? null : user._id))}
                     onClose={() => setOpenMenuId(null)}
+                    onDownload={handleDownload}
                     onEdit={openEditUser}
                     onToggleStatus={onToggleUserStatus}
                     onDelete={setDeleteUser}
@@ -487,9 +522,52 @@ export default function UsersSection({ users, setTab, openEditUser, setDeleteUse
                   {selectedUser.remarks || "No remarks added"}
                 </div>
               </div>
+
+              <div className="emp-section-box" style={{ gridColumn: "1 / -1" }}>
+                <div className="emp-section-head"><FileText size={12} /> Uploaded Documents (Record)</div>
+                <div className="emp-kv-list">
+                  <div className="emp-kv-row">
+                    <span className="emp-kv-label">Aadhar Card</span>
+                    <span className="emp-kv-val">
+                      {selectedUser.aadharDoc?.filename ? (
+                        <a href={uploadedFileUrl("user-docs", selectedUser.aadharDoc.filename)} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "#2563eb", textDecoration: "none" }}>
+                          <ExternalLink size={12} /> {selectedUser.aadharDoc.originalName || "View Aadhar"}
+                        </a>
+                      ) : <span style={{ color: "#94a3b8", fontWeight: 400 }}>Not uploaded</span>}
+                    </span>
+                  </div>
+                  <div className="emp-kv-row">
+                    <span className="emp-kv-label">PAN Card</span>
+                    <span className="emp-kv-val">
+                      {selectedUser.panDoc?.filename ? (
+                        <a href={uploadedFileUrl("user-docs", selectedUser.panDoc.filename)} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "#2563eb", textDecoration: "none" }}>
+                          <ExternalLink size={12} /> {selectedUser.panDoc.originalName || "View PAN"}
+                        </a>
+                      ) : <span style={{ color: "#94a3b8", fontWeight: 400 }}>Not uploaded</span>}
+                    </span>
+                  </div>
+                  <div className="emp-kv-row">
+                    <span className="emp-kv-label">Other Documents</span>
+                    <span className="emp-kv-val" style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 6 }}>
+                      {selectedUser.otherDocs?.length ? selectedUser.otherDocs.map((doc) => (
+                        <a key={doc._id || doc.filename} href={uploadedFileUrl("user-docs", doc.filename)} target="_blank" rel="noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "#2563eb", background: "#eff6ff", padding: "2px 8px", borderRadius: 99, textDecoration: "none", fontSize: 11.5 }}>
+                          <ExternalLink size={11} /> {doc.originalName || "Document"}
+                        </a>
+                      )) : <span style={{ color: "#94a3b8", fontWeight: 400 }}>None</span>}
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={() => handleDownload(selectedUser)}
+                style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 18px", borderRadius: 9, border: "1.5px solid #bfdbfe", background: "#eff6ff", color: "#1d4ed8", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+              >
+                <Download size={14} strokeWidth={2} /> Download ID Card
+              </button>
               <button
                 type="button"
                 onClick={() => setSelectedUser(null)}
@@ -512,6 +590,43 @@ export default function UsersSection({ users, setTab, openEditUser, setDeleteUse
                 </button>
               )}
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Download Format Picker Modal (PDF / PNG / JPEG) */}
+      {downloadTarget && (
+        <Modal title="Download ID Card" onClose={() => !downloadingFormat && setDownloadTarget(null)} width={420}>
+          <div style={{ fontSize: 13, color: T.textSecondary, marginBottom: 14 }}>
+            Choose format for <strong style={{ color: T.textPrimary }}>{downloadTarget.name}</strong>&apos;s ID Card (HD Front &amp; Back):
+          </div>
+          <div style={{ display: "grid", gap: 10 }}>
+            {[
+              { id: "pdf", label: "PDF Document (.pdf)", desc: "Print-ready high-resolution PDF", color: "#dc2626", bg: "#fef2f2", border: "#fecaca" },
+              { id: "png", label: "PNG Image (.png)", desc: "Lossless HD image with sharp text", color: "#2563eb", bg: "#eff6ff", border: "#bfdbfe" },
+              { id: "jpeg", label: "JPEG Image (.jpg)", desc: "High-quality compressed photo format", color: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0" },
+            ].map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                disabled={Boolean(downloadingFormat)}
+                onClick={() => runDownload(opt.id)}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+                  padding: "12px 14px", borderRadius: 12, border: `1.5px solid ${opt.border}`,
+                  background: opt.bg, cursor: downloadingFormat ? "wait" : "pointer",
+                  textAlign: "left", fontFamily: "inherit", transition: "transform 0.12s ease",
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: T.textPrimary }}>{opt.label}</div>
+                  <div style={{ fontSize: 11.5, color: T.textSecondary, marginTop: 2 }}>{opt.desc}</div>
+                </div>
+                <span style={{ fontSize: 12, fontWeight: 700, color: opt.color, whiteSpace: "nowrap" }}>
+                  {downloadingFormat === opt.id ? "Saving…" : "Download →"}
+                </span>
+              </button>
+            ))}
           </div>
         </Modal>
       )}

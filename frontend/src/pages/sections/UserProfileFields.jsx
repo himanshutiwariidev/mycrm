@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo } from "react";
 import {
   BadgeCheck, BadgeIndianRupee, Building2, Calendar, Camera, CreditCard, Droplet, FileText,
-  Landmark, MapPin, Phone, PhoneCall, Briefcase,
+  Landmark, MapPin, Phone, PhoneCall, Briefcase, Upload, ExternalLink,
 } from "lucide-react";
 import { FieldIcon, FormField, T, baseInp, baseInpNoIcon } from "./shared";
 import { uploadedFileUrl } from "../../utils/uploads";
@@ -148,6 +148,119 @@ export default function UserProfileFields({ form, setForm, existingPhoto }) {
       <FormField label="Remarks" span2>
         <textarea className="inp" style={{ ...baseInpNoIcon, minHeight: 68, resize: "vertical" }} placeholder="Any additional notes or remarks..." value={form.remarks || ""} onChange={(e) => setForm({ ...form, remarks: e.target.value })} />
       </FormField>
+
+      {/* Documents Upload (Aadhar, PAN, Other Documents) */}
+      <div style={{ gridColumn: "1 / -1", padding: "14px", borderRadius: 12, background: T.inputBg, border: `1px solid ${T.borderLight}`, display: "grid", gap: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: T.textPrimary, textTransform: "uppercase", letterSpacing: ".05em" }}>
+          Upload KYC &amp; Documents (Saved in Employee Record)
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div style={{ background: "#fff", border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 12px" }}>
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: T.textSecondary, marginBottom: 6 }}>Aadhar Card (PDF / Image)</div>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 7, border: `1px solid ${T.border}`, background: T.inputBg, fontSize: 12, fontWeight: 600, color: T.textPrimary, cursor: "pointer" }}>
+              <Upload size={12} /> {form.aadharDocFile ? "Change File" : "Choose Aadhar"}
+              <input
+                type="file"
+                accept=".pdf,image/*"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  setForm((prev) => ({ ...prev, aadharDocFile: file }));
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            {form.aadharDocFile ? (
+              <div style={{ fontSize: 11.5, color: "#16a34a", marginTop: 6, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                Selected: {form.aadharDocFile.name}
+              </div>
+            ) : form.existingAadharDoc?.filename ? (
+              <a
+                href={uploadedFileUrl("user-docs", form.existingAadharDoc.filename)}
+                target="_blank"
+                rel="noreferrer"
+                style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, color: "#2563eb", marginTop: 6, fontWeight: 600, textDecoration: "none" }}
+              >
+                <ExternalLink size={11} /> {form.existingAadharDoc.originalName || "View uploaded Aadhar"}
+              </a>
+            ) : null}
+          </div>
+
+          <div style={{ background: "#fff", border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 12px" }}>
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: T.textSecondary, marginBottom: 6 }}>PAN Card (PDF / Image)</div>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 7, border: `1px solid ${T.border}`, background: T.inputBg, fontSize: 12, fontWeight: 600, color: T.textPrimary, cursor: "pointer" }}>
+              <Upload size={12} /> {form.panDocFile ? "Change File" : "Choose PAN"}
+              <input
+                type="file"
+                accept=".pdf,image/*"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  setForm((prev) => ({ ...prev, panDocFile: file }));
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            {form.panDocFile ? (
+              <div style={{ fontSize: 11.5, color: "#16a34a", marginTop: 6, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                Selected: {form.panDocFile.name}
+              </div>
+            ) : form.existingPanDoc?.filename ? (
+              <a
+                href={uploadedFileUrl("user-docs", form.existingPanDoc.filename)}
+                target="_blank"
+                rel="noreferrer"
+                style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, color: "#2563eb", marginTop: 6, fontWeight: 600, textDecoration: "none" }}
+              >
+                <ExternalLink size={11} /> {form.existingPanDoc.originalName || "View uploaded PAN"}
+              </a>
+            ) : null}
+          </div>
+        </div>
+
+        <div style={{ background: "#fff", border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 12px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: T.textSecondary }}>Other Documents (Offer Letter, Resume, Certificates, etc.)</div>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 7, border: `1px solid ${T.border}`, background: T.inputBg, fontSize: 12, fontWeight: 600, color: T.textPrimary, cursor: "pointer" }}>
+              <Upload size={12} /> Add Documents
+              <input
+                type="file"
+                multiple
+                accept=".pdf,.doc,.docx,.txt,image/*"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []);
+                  if (files.length) {
+                    setForm((prev) => ({ ...prev, otherDocFiles: [...(prev.otherDocFiles || []), ...files] }));
+                  }
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+          {form.otherDocFiles?.length > 0 && (
+            <div style={{ fontSize: 11.5, color: "#16a34a", marginTop: 6, fontWeight: 600 }}>
+              {form.otherDocFiles.length} file(s) ready to upload: {form.otherDocFiles.map((f) => f.name).join(", ")}
+            </div>
+          )}
+          {form.existingOtherDocs?.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+              {form.existingOtherDocs.map((doc) => (
+                <a
+                  key={doc._id || doc.filename}
+                  href={uploadedFileUrl("user-docs", doc.filename)}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, color: "#2563eb", background: "#eff6ff", padding: "3px 9px", borderRadius: 99, textDecoration: "none", fontWeight: 600 }}
+                >
+                  <ExternalLink size={11} /> {doc.originalName || "Document"}
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </>
   );
 }

@@ -2,6 +2,7 @@ import React from 'react'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
+import './styles/mobile.css'
 import App from './App.jsx'
 
 // Scrolling the mouse wheel while a number input happens to be focused

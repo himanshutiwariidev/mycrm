@@ -1,7 +1,10 @@
 const User = require("../models/User");
+const crypto = require("crypto");
+const fs = require("fs");
 const path = require("path");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const multer = require("multer");
 const asyncHandler = require("../utils/asyncHandler");
 const { createImageUpload, removeFiles } = require("../utils/imageUploads");
 const { createLoginAttendance, logoutAttendance } = require("../services/attendanceService");
@@ -12,6 +15,40 @@ const userPhotoUpload = createImageUpload({
   maxFiles: 1,
   noun: "photo",
 });
+
+const USER_DOCS_DIR = path.join(__dirname, "../uploads/user-docs");
+const DOC_EXT = /\.(pdf|jpe?g|png|webp|gif|doc|docx|txt)$/i;
+
+const userDocsUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      fs.mkdir(USER_DOCS_DIR, { recursive: true }, (err) => cb(err, USER_DOCS_DIR));
+    },
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname || "").toLowerCase();
+      const safeExt = DOC_EXT.test(ext) ? ext : "";
+      cb(null, `${crypto.randomBytes(16).toString("hex")}${safeExt}`);
+    },
+  }),
+  limits: { fileSize: 15 * 1024 * 1024, files: 12 },
+  fileFilter: (_req, file, cb) => {
+    if (DOC_EXT.test(file.originalname || "") || /^image\/|^application\/pdf$/.test(file.mimetype || "")) {
+      return cb(null, true);
+    }
+    const err = new Error("Only PDF, image, or document files (DOC/DOCX/TXT) are allowed");
+    err.status = 400;
+    return cb(err);
+  },
+}).fields([
+  { name: "aadharDoc", maxCount: 1 },
+  { name: "panDoc", maxCount: 1 },
+  { name: "otherDocs", maxCount: 10 },
+]);
+
+function removeUserDocFile(filename) {
+  if (!filename || filename.includes("/") || filename.includes("\\")) return;
+  fs.promises.unlink(path.join(USER_DOCS_DIR, filename)).catch(() => {});
+}
 
 const PROFILE_FIELDS = [
   "empCode",
@@ -137,6 +174,9 @@ exports.deleteUser = asyncHandler(async (req, res) => {
 
   const deleted = await User.findByIdAndDelete(req.params.id);
   if (deleted?.photo) userPhotoUpload.removeFile(deleted.photo);
+  if (deleted?.aadharDoc?.filename) removeUserDocFile(deleted.aadharDoc.filename);
+  if (deleted?.panDoc?.filename) removeUserDocFile(deleted.panDoc.filename);
+  (deleted?.otherDocs || []).forEach((d) => removeUserDocFile(d.filename));
   return res.json({ message: "User deleted successfully" });
 });
 
@@ -227,6 +267,88 @@ exports.uploadUserPhoto = asyncHandler(async (req, res) => {
   await existing.save();
 
   return res.json({ message: "Photo uploaded successfully", photo: normalized.filename });
+});
+
+// ── UPLOAD / DELETE USER DOCUMENTS ──────────────────────────────────────────
+exports.uploadUserDocumentsMiddleware = (req, res, next) => {
+  userDocsUpload(req, res, (err) => {
+    if (!err) return next();
+    return res.status(err.status || 400).json({ message: err.message || "Document upload failed" });
+  });
+};
+
+exports.uploadUserDocuments = asyncHandler(async (req, res) => {
+  const filesMap = req.files || {};
+  const aadharFile = filesMap.aadharDoc?.[0];
+  const panFile = filesMap.panDoc?.[0];
+  const otherFiles = filesMap.otherDocs || [];
+
+  const cleanupIncoming = () => {
+    [aadharFile, panFile, ...otherFiles].filter(Boolean).forEach((f) => removeUserDocFile(f.filename));
+  };
+
+  if (!aadharFile && !panFile && !otherFiles.length) {
+    return res.status(400).json({ message: "No documents uploaded" });
+  }
+
+  const user = await User.findById(req.params.id);
+  if (!user) {
+    cleanupIncoming();
+    return res.status(404).json({ message: "User not found" });
+  }
+  if (req.user.role === "manager" && user.role !== "user") {
+    cleanupIncoming();
+    return res.status(403).json({ message: "Managers can only manage accounts with the 'user' role" });
+  }
+
+  if (aadharFile) {
+    if (user.aadharDoc?.filename) removeUserDocFile(user.aadharDoc.filename);
+    user.aadharDoc = { filename: aadharFile.filename, originalName: aadharFile.originalname, uploadedAt: new Date() };
+  }
+  if (panFile) {
+    if (user.panDoc?.filename) removeUserDocFile(user.panDoc.filename);
+    user.panDoc = { filename: panFile.filename, originalName: panFile.originalname, uploadedAt: new Date() };
+  }
+  if (otherFiles.length) {
+    otherFiles.forEach((f) => {
+      user.otherDocs.push({ filename: f.filename, originalName: f.originalname, uploadedAt: new Date() });
+    });
+  }
+
+  await user.save();
+  const safeUser = user.toObject();
+  delete safeUser.password;
+  return res.json({ message: "Documents uploaded successfully", user: safeUser });
+});
+
+exports.deleteUserDocument = asyncHandler(async (req, res) => {
+  const { docType, docId } = req.body || {};
+  const user = await User.findById(req.params.id);
+  if (!user) return res.status(404).json({ message: "User not found" });
+  if (req.user.role === "manager" && user.role !== "user") {
+    return res.status(403).json({ message: "Managers can only manage accounts with the 'user' role" });
+  }
+
+  if (docType === "aadharDoc" && user.aadharDoc?.filename) {
+    removeUserDocFile(user.aadharDoc.filename);
+    user.aadharDoc = undefined;
+  } else if (docType === "panDoc" && user.panDoc?.filename) {
+    removeUserDocFile(user.panDoc.filename);
+    user.panDoc = undefined;
+  } else if (docType === "otherDocs" && docId) {
+    const idx = (user.otherDocs || []).findIndex((d) => String(d._id) === String(docId));
+    if (idx >= 0) {
+      removeUserDocFile(user.otherDocs[idx].filename);
+      user.otherDocs.splice(idx, 1);
+    }
+  } else {
+    return res.status(400).json({ message: "Invalid document reference" });
+  }
+
+  await user.save();
+  const safeUser = user.toObject();
+  delete safeUser.password;
+  return res.json({ message: "Document removed", user: safeUser });
 });
 
 // ── LOGIN ────────────────────────────────────────────────────────────────────

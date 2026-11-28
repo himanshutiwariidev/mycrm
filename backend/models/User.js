@@ -23,6 +23,21 @@ const UserSchema= new mongoose.Schema(
         designation:{type:String,trim:true},
         department:{type:String,trim:true},
         remarks:{type:String,trim:true},
+        aadharDoc:{
+            filename:{type:String,trim:true},
+            originalName:{type:String,trim:true},
+            uploadedAt:{type:Date},
+        },
+        panDoc:{
+            filename:{type:String,trim:true},
+            originalName:{type:String,trim:true},
+            uploadedAt:{type:Date},
+        },
+        otherDocs:[{
+            filename:{type:String,trim:true,required:true},
+            originalName:{type:String,trim:true},
+            uploadedAt:{type:Date,default:Date.now},
+        }],
         // Admin credential-recovery flow (OTP sent to a hardcoded recovery
         // email — see controllers/adminRecoveryController.js). Only ever
         // populated on the single "admin" role user; select:false keeps

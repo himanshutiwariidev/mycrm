@@ -6,7 +6,7 @@ import {
   Clock, TrendingUp, Calendar, User, Shield, X,
   AlertCircle, CheckCheck, ListTodo, ChevronDown,
   CalendarDays, XCircle, Hourglass, FileText, Send,
-  Briefcase, CalendarClock, FileBarChart2,
+  Briefcase, CalendarClock, FileBarChart2, Menu,
 } from "lucide-react";
 import logo from "../assets/logo.png";
 import { getAllClients, getWorkProgress } from "../services/clientApi";
@@ -243,6 +243,8 @@ export default function UserDashboard() {
     return ["dashboard", "tasks", "clients", "leave", "salary"].includes(requested) ? requested : "dashboard";
   });
   const [toast, setToast]   = useState(null);
+  // Phones only: the sidebar opens as a drawer (styles/mobile.css). No effect on desktop.
+  const [navOpen, setNavOpen] = useState(false);
   const [updating, setUpdating] = useState(null); // taskId being updated
   const [updatingDeliverable, setUpdatingDeliverable] = useState(null); // deliverableId being updated
   // Proof of work (screenshots / live links) on the deliverables of my tasks.
@@ -450,7 +452,8 @@ await API.patch(
       <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'Inter', sans-serif", color: T.textSecondary }}>
 
         {/* ── SIDEBAR ─────────────────────────────────────────────────────── */}
-        <aside style={{
+        {navOpen && <div className="m-overlay" onClick={() => setNavOpen(false)} />}
+        <aside className={`m-sidebar${navOpen ? " is-open" : ""}`} style={{
           position: "fixed", left: 0, top: 0, bottom: 0, width: 238,
           background: SB.bg, borderRight: `1px solid ${SB.border}`,
           display: "flex", flexDirection: "column", zIndex: 100,
@@ -463,7 +466,7 @@ await API.patch(
           </div>
 
           {/* nav */}
-          <nav className="sidebar-nav" style={{ flex: "1 1 0%", minHeight: 0, overflowY: "auto", padding: "18px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
+          <nav className="sidebar-nav" onClick={() => setNavOpen(false)} style={{ flex: "1 1 0%", minHeight: 0, overflowY: "auto", padding: "18px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
             <div style={{ fontSize: 10, color: SB.muted, letterSpacing: ".14em", textTransform: "uppercase", fontWeight: 700, padding: "4px 12px 10px" }}>
               NAVIGATION
             </div>
@@ -521,11 +524,12 @@ await API.patch(
         </aside>
 
         {/* ── CONTENT ─────────────────────────────────────────────────────── */}
-        <div style={{ marginLeft: 238, minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+        <div className="m-content" style={{ marginLeft: 238, minHeight: "100vh", display: "flex", flexDirection: "column" }}>
 
           {/* topbar */}
-          <header style={{ position: "sticky", top: 0, zIndex: 50, height: 64, padding: "0 36px", display: "flex", alignItems: "center", justifyContent: "space-between", background: T.header, borderBottom: `1px solid ${T.border}`, backdropFilter: "blur(16px)", boxShadow: "0 1px 0 0 #e8eaf0" }}>
-            <div>
+          <header className="m-topbar" style={{ position: "sticky", top: 0, zIndex: 50, height: 64, padding: "0 36px", display: "flex", alignItems: "center", justifyContent: "space-between", background: T.header, borderBottom: `1px solid ${T.border}`, backdropFilter: "blur(16px)", boxShadow: "0 1px 0 0 #e8eaf0" }}>
+            <button type="button" className="m-menu-btn" aria-label="Open menu" onClick={() => setNavOpen(true)}><Menu size={20} /></button>
+            <div className="m-topbar-title">
               <h1 style={{ fontFamily: "'Syne', sans-serif", fontWeight: 700, fontSize: 17, color: T.textPrimary, lineHeight: 1 }}>{currentLabel}</h1>
               <p style={{ fontSize: 11.5, color: T.textMuted, marginTop: 3 }}>
                 {new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
@@ -544,7 +548,7 @@ await API.patch(
             </div>
           </header>
 
-          <main style={{ padding: "30px 36px 64px", flex: 1 }}>
+          <main className="m-main" style={{ padding: "30px 36px 64px", flex: 1 }}>
 
             {/* ══ DASHBOARD ══════════════════════════════════════════════════ */}
             {tab === "dashboard" && (

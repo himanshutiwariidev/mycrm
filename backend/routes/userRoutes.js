@@ -9,6 +9,9 @@ const {
   updateUser,
   uploadUserPhotoMiddleware,
   uploadUserPhoto,
+  uploadUserDocumentsMiddleware,
+  uploadUserDocuments,
+  deleteUserDocument,
   logoutUser,
 } = require("../controllers/userController");
 
@@ -67,6 +70,21 @@ router.post(
   requireRole("admin", "hr", "manager"),
   uploadUserPhotoMiddleware,
   uploadUserPhoto
+);
+
+router.post(
+  "/:id/documents",
+  authMiddleware,
+  requireRole("admin", "hr", "manager"),
+  uploadUserDocumentsMiddleware,
+  uploadUserDocuments
+);
+
+router.delete(
+  "/:id/documents",
+  authMiddleware,
+  requireRole("admin", "hr", "manager"),
+  deleteUserDocument
 );
 
 module.exports = router;

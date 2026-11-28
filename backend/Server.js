@@ -148,7 +148,8 @@ app.use(["/uploads", "/api/uploads"], express.static(path.join(__dirname, "uploa
     if (
       filePath.includes(`${path.sep}visit-photos${path.sep}`) ||
       filePath.includes(`${path.sep}deliverable-proofs${path.sep}`) ||
-      filePath.includes(`${path.sep}user-photos${path.sep}`)
+      filePath.includes(`${path.sep}user-photos${path.sep}`) ||
+      filePath.includes(`${path.sep}user-docs${path.sep}`)
     ) {
       res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");

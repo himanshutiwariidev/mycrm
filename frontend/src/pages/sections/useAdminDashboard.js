@@ -25,6 +25,9 @@ const USER_EMPTY_FORM = {
   department: "",
   remarks: "",
   photoFile: null,
+  aadharDocFile: null,
+  panDocFile: null,
+  otherDocFiles: [],
 };
 import {
   PROJECT_CHART_COLORS,
@@ -238,16 +241,28 @@ export default function useAdminDashboard() {
   const attActiveNow = attRows.filter(r => r.status === "Active").length;
   const selectedDayTotal = fmtMin(attSummary.todayOverallMinutes || 0);
 
+  const uploadUserDocsIfAny = async (userId, form) => {
+    const { aadharDocFile, panDocFile, otherDocFiles } = form;
+    if (!aadharDocFile && !panDocFile && !(otherDocFiles && otherDocFiles.length)) return;
+    const fd = new FormData();
+    if (aadharDocFile) fd.append("aadharDoc", aadharDocFile);
+    if (panDocFile) fd.append("panDoc", panDocFile);
+    (otherDocFiles || []).forEach((f) => fd.append("otherDocs", f));
+    await API.post(`/users/${userId}/documents`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+  };
+
   const handleCreateUser = async (e) => {
     e.preventDefault();
     try {
-      const { photoFile, ...payload } = userForm;
+      const { photoFile, aadharDocFile: _a, panDocFile: _p, otherDocFiles: _o, ...payload } = userForm;
       const { data } = await API.post("/users", payload);
-      if (photoFile && data?.user?._id) {
+      const createdId = data?.user?._id;
+      if (photoFile && createdId) {
         const fd = new FormData();
         fd.append("photo", photoFile);
-        await API.post(`/users/${data.user._id}/photo`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+        await API.post(`/users/${createdId}/photo`, fd, { headers: { "Content-Type": "multipart/form-data" } });
       }
+      if (createdId) await uploadUserDocsIfAny(createdId, userForm);
       showToast("User created successfully");
       setUserForm(USER_EMPTY_FORM);
       fetchUsers();
@@ -505,6 +520,12 @@ export default function useAdminDashboard() {
       department: user.department || "",
       remarks: user.remarks || "",
       photoFile: null,
+      aadharDocFile: null,
+      panDocFile: null,
+      otherDocFiles: [],
+      existingAadharDoc: user.aadharDoc || null,
+      existingPanDoc: user.panDoc || null,
+      existingOtherDocs: user.otherDocs || [],
     });
     setShowEditPw(false);
   };
@@ -538,7 +559,8 @@ export default function useAdminDashboard() {
     }
 
     const hasPhoto = Boolean(editUserForm.photoFile);
-    if (!Object.keys(payload).length && !hasPhoto) { setEditUser(null); showToast("No changes to save"); return; }
+    const hasDocs = Boolean(editUserForm.aadharDocFile || editUserForm.panDocFile || editUserForm.otherDocFiles?.length);
+    if (!Object.keys(payload).length && !hasPhoto && !hasDocs) { setEditUser(null); showToast("No changes to save"); return; }
     try {
       if (Object.keys(payload).length) {
         await API.put(`/users/${editUser._id}`, payload);
@@ -548,7 +570,10 @@ export default function useAdminDashboard() {
         fd.append("photo", editUserForm.photoFile);
         await API.post(`/users/${editUser._id}/photo`, fd, { headers: { "Content-Type": "multipart/form-data" } });
       }
-      showToast(Object.keys(payload).length === 1 && payload.password && !hasPhoto ? `Password updated for ${editUser.name}` : "User updated successfully");
+      if (hasDocs) {
+        await uploadUserDocsIfAny(editUser._id, editUserForm);
+      }
+      showToast(Object.keys(payload).length === 1 && payload.password && !hasPhoto && !hasDocs ? `Password updated for ${editUser.name}` : "User updated successfully");
       setEditUser(null);
       fetchUsers();
     } catch (err) {
